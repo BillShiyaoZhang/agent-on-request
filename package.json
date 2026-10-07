@@ -1,0 +1,13 @@
+{
+  "name": "agent-on-request",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A controlled two-agent research event demo with explicit sharing boundaries.",
+  "engines": { "node": ">=26" },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "bob": "node src/bob-server.mjs",
+    "test": "node --test"
+  }
+}
