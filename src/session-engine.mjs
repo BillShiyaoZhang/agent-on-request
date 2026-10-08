@@ -2,11 +2,21 @@ import { randomUUID, randomBytes, timingSafeEqual, createHash } from 'node:crypt
 import { clone, hashValue, validateConfig, diffConfig } from './config.mjs';
 import { AppError, requireThat } from './errors.mjs';
 import { ALICE_CALENDAR, REPLAY_STEPS, SCENARIO_VERSION } from './scenario.mjs';
+import { resolveConditions, conditionBobConfig } from './condition-service.mjs';
+import { buildAgentStates, buildTraceSnapshot } from './agent-observability.mjs';
 
 const tokenHash = token => createHash('sha256').update(String(token)).digest();
 const now = () => new Date().toISOString();
 const INITIAL = new Set(['free', 'busy', 'full', 'none']);
 const ADDITIONAL = new Set(['keep', 'narrow', 'week']);
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+function policyDays(window) {
+  if (window.includes(',')) return window.split(',').map(day => day.trim());
+  const bounds = window.split(/[–-]/).map(day => day.trim());
+  if (bounds.length === 1) return bounds;
+  const first = DAYS.indexOf(bounds[0]), last = DAYS.indexOf(bounds[1]);
+  return first >= 0 && last >= first ? DAYS.slice(first, last + 1) : bounds;
+}
 const PUBLIC_WAIT = { admin: 'Bob’s owner needs to decide whether to share this exact content.', peer_offline: 'Bob has not confirmed receipt. Restore the connection, then explicitly retry the same operation.', model_timeout: 'Agent planning did not finish. Received snapshots remain; researcher intervention is needed.', configuration_changed: 'Bob’s configuration changed in this round. Recheck the policy before resuming.', researcher: 'The researcher paused this round.' };
 
 export class SessionEngine {
@@ -75,22 +85,30 @@ export class SessionEngine {
     session.messages.push({ from, text, kind, at: now() });
     if (session.messages.length > 100) session.messages.shift();
   }
-  async event(session, kind, data = {}) { await this.research.append(session, { kind, ...data }); }
+  async event(session, kind, data = {}) { await this.research.append(session, { kind, ...data }, buildTraceSnapshot(session)); }
+  async checkpoint(session, kind) { await this.research.checkpoint?.(session, kind, buildTraceSnapshot(session)); }
   view(session) {
     const status = this.runtime.status();
-    return clone({
+    return structuredClone({
       session: { id: session.id, epoch: session.epoch, version: session.version, stage: session.stage, mode: session.mode, modelRevision: session.models?.revision ?? null, researchConsent: session.researchConsent, consentVersion: session.consentVersion, startedAt: session.startedAt, ended: session.ended, paused: session.paused },
-      alice: { calendar: ALICE_CALENDAR, stopped: session.stopped },
+      alice: { calendar: session.aliceCalendar ?? ALICE_CALENDAR, stopped: session.stopped },
       bob: { name: 'Bob', configRevision: session.configRevision, templateRevision: session.templateRevision, online: status.bob.online },
       choices: session.choices, receipts: session.receipts, messages: session.messages,
       pendingApprovals: session.approvals.filter(item => item.status === 'pending').map(item => ({ id: item.id, owner: 'Bob', summary: item.summary, status: item.status })),
       waiting: session.waiting, task: session.task, runtime: { alice: status.alice, bob: status.bob }, replay: session.replay,
-      answers: session.answers, models: session.models ?? null
+      answers: session.answers, models: session.models ?? null,
+      initialConditions: session.conditions, conditionsHash: session.conditionsHash, agentStates: buildAgentStates(session)
     });
   }
-  async create({ mode = 'controlled', researchConsent = false, previousSessionId, previousToken } = {}) {
+  async create({ mode = 'controlled', researchConsent = false, previousSessionId, previousToken, initialConditions, expectedConditionsHash } = {}) {
     requireThat(['controlled', 'live', 'replay'].includes(mode), 'MODE', 'Choose a valid run mode.');
     requireThat(typeof researchConsent === 'boolean', 'CONSENT', 'Research consent must be an explicit boolean.');
+    const ownerTemplate = clone(this.profiles.template);
+    const templateRevision = this.profiles.templateRevision;
+    const conditions = resolveConditions(initialConditions, ownerTemplate);
+    const conditionsHash = hashValue(conditions);
+    requireThat(expectedConditionsHash === undefined || expectedConditionsHash === conditionsHash, 'STALE_CONDITIONS', 'Initial conditions changed. Review the configuration preview again.', 409);
+    const bobConfig = conditionBobConfig(conditions, ownerTemplate);
     requireThat(mode !== 'live' || this.runtime.status().live.available, 'LIVE_UNAVAILABLE', 'A model provider is not configured.', 409);
     for (const [id, ref] of this.cleanupPending) {
       try { await this.runtime.clear(ref); this.cleanupPending.delete(id); }
@@ -106,16 +124,17 @@ export class SessionEngine {
     const token = randomBytes(32).toString('base64url');
     const session = {
       id: randomUUID(), epoch: ++this.epoch, tokenHash: tokenHash(token), version: 1,
-      mode, researchConsent: mode === 'replay' ? false : researchConsent, consentVersion: 'research-v1', scenarioVersion: SCENARIO_VERSION,
+      mode, researchConsent: mode === 'replay' ? false : researchConsent, consentVersion: 'research-v2', scenarioVersion: SCENARIO_VERSION,
       startedAt: now(), ended: false, paused: false, stopped: false, stage: mode === 'replay' ? 'replay' : 'initial',
-      config: clone(this.profiles.template), configRevision: this.profiles.templateRevision, templateRevision: this.profiles.templateRevision,
+      config: bobConfig, configRevision: hashValue(bobConfig) === hashValue(ownerTemplate) ? templateRevision : await this.profiles.nextRevision(bobConfig), templateRevision,
+      conditions, conditionsHash, aliceCalendar: clone(conditions.agents.Alice.data.calendar), aliceUses: 0,
       choices: { initial: null, additional: null }, receipts: { aliceToBob: [], bobToAlice: [] }, messages: [], waiting: null,
       task: { outcome: null, meeting: null }, approvals: [], grants: [], policyUses: 0, answers: {}, queue: Promise.resolve(), requests: new Map(),
       inflightRequests: new Map(), interruptGeneration: 0,
       pendingDelivery: null, continuation: null, savedStage: null, preparedMeeting: null, requestSequence: 0,
       replay: mode === 'replay' ? { source: 'synthetic-reference-v1', index: 0, total: REPLAY_STEPS.length, steps: REPLAY_STEPS } : null
     };
-    const initialized = await this.runtime.initialize({ sessionId: session.id, epoch: session.epoch, mode, aliceData: clone(ALICE_CALENDAR), bobConfig: session.config, configRevision: session.configRevision });
+    const initialized = await this.runtime.initialize({ sessionId: session.id, epoch: session.epoch, mode, aliceData: session.aliceCalendar, aliceProfile: conditions.agents.Alice, bobProfile: conditions.agents.Bob, bobConfig: session.config, configRevision: session.configRevision });
     session.models = initialized?.models ?? this.runtime.modelInfo?.({ sessionId: session.id, epoch: session.epoch }) ?? null;
     this.sessions.set(session.id, session);
     try {
@@ -125,6 +144,7 @@ export class SessionEngine {
     catch (error) { this.sessions.delete(session.id); await this.runtime.clear({ sessionId: session.id, epoch: session.epoch }); throw error; }
     this.message(session, 'system', mode === 'replay' ? 'This is a synthetic reference replay. It produces no actual messages or research records.' : 'Alice and Bob are ready. All calendar data is fictional. Choose a sharing scope first.');
     if (mode === 'live') { session.continuation = 'intro'; await this.continuePlan(session); }
+    await this.checkpoint(session, 'ready');
     return { token, state: this.view(session) };
   }
   async expire(session) {
@@ -203,9 +223,15 @@ export class SessionEngine {
     try { return await result; }
     finally { if (session.configApply === applying) session.configApply = null; }
   }
-  async projection(session, stage, choice) {
+  async projection(session, stage, choice, { forSend = false } = {}) {
     requireThat((stage === 'initial' ? INITIAL : stage === 'additional' ? ADDITIONAL : new Set()).has(choice), 'CHOICE', 'Choose a valid sharing scope.');
     if (choice === 'none' || choice === 'keep') return { rows: [], fields: [], window: 'none' };
+    const profile = session.conditions?.agents.Alice;
+    if (profile && forSend) {
+      requireThat(profile.skills.includes('send_scoped_snapshot'), 'TOOL_DISABLED', 'Alice snapshot sending skill is disabled. Choose no sharing or change next-round conditions.', 403);
+      requireThat(session.aliceUses < profile.authorization.maxUses, 'ALICE_AUTH_LIMIT', 'Alice initial sharing budget is exhausted. Keeping the current boundary remains available.', 403);
+      requireThat(Date.now() < Date.parse(session.startedAt) + profile.authorization.expiryMinutes * 60_000, 'ALICE_AUTH_EXPIRED', 'Alice initial authorization has expired. Keeping the current boundary remains available.', 403);
+    }
     return this.runtime.projectAlice({ sessionId: session.id, epoch: session.epoch, stage, choice });
   }
   async preview(session, { stage, choice }) {
@@ -265,6 +291,7 @@ export class SessionEngine {
           session.task = { outcome: meeting ? 'arranged' : 'ended', meeting };
         }
         const cleared = await this.clearContexts(session);
+        await this.checkpoint(session, 'ended');
         await this.research.finish(session, session.task.outcome, cleared ? [] : ['cleanup_uncertain']);
         this.message(session, 'system', cleared ? 'This round ended. Both agents’ temporary contexts have been cleared.' : 'This round ended and further actions stopped. Bob’s remote cleanup is unconfirmed; restore the connection before starting a new round.', cleared ? 'status' : 'technical');
       } else if (type === 'stop_sharing') {
@@ -295,7 +322,7 @@ export class SessionEngine {
         requireThat(!session.paused && session.mode !== 'replay' && !session.stopped, 'PAUSED', 'New sharing cannot be submitted at this point.', 409);
         const stage = type === 'share_initial' ? 'initial' : type === 'respond_additional' ? 'additional' : null;
         requireThat(stage && session.stage === stage, 'STALE_STAGE', 'The current step has changed.', 409);
-        const payload = await this.projection(session, stage, input.choice);
+        const payload = await this.projection(session, stage, input.choice, { forSend: true });
         requireThat(!session.ended && !session.paused && !session.stopped, 'INTERRUPTED', 'Sharing was interrupted before transmission.', 409);
         requireThat(input.previewHash === hashValue(payload), 'PREVIEW_CHANGED', 'The proposed payload differs from the preview. Confirm it again.', 409);
         session.choices[stage] = input.choice;
@@ -305,12 +332,14 @@ export class SessionEngine {
           this.message(session, 'Alice', 'The participant kept their sharing boundary. This is a valid outcome.');
           await this.complete(session, input.choice === 'none' ? 'declined' : 'boundary_kept');
         } else {
-          session.pendingDelivery = { direction: 'bob', operationId: `${session.id}:alice:${++session.requestSequence}`, ...payload, payloadHash: input.previewHash, next: stage };
+          session.aliceUses++;
+          session.pendingDelivery = { direction: 'bob', operationId: `${session.id}:alice:${++session.requestSequence}`, ...payload, payloadHash: input.previewHash, next: stage, expiresAt: Date.parse(session.startedAt) + session.conditions.agents.Alice.authorization.expiryMinutes * 60_000 };
           await this.continueDelivery(session);
         }
       }
       if (!accepted) session.version++;
       session.requests.set(input.requestId, { digest });
+      await this.checkpoint(session, 'action_completed');
       return { state: this.view(session) };
     });
     if (accepted) accepted.promise = result;
@@ -340,7 +369,10 @@ export class SessionEngine {
       requireThat(operation.direction !== 'bob' || !session.stopped, 'SHARING_STOPPED', 'Alice stopped future sharing. This operation cannot be transmitted.', 409);
       const request = { sessionId: session.id, epoch: session.epoch, ...operation };
       let result;
-      if (operation.direction === 'alice' && (operation.expiresAt <= Date.now() || operation.policyRevision !== session.configRevision)) {
+      if (operation.direction === 'bob' && operation.expiresAt <= Date.now()) {
+        result = await this.runtime.verifyReceipt(request);
+        requireThat(result, 'ALICE_AUTH_EXPIRED', 'Alice authorization expired before delivery. No expired transfer was sent.', 403);
+      } else if (operation.direction === 'alice' && (operation.expiresAt <= Date.now() || operation.policyRevision !== session.configRevision)) {
         result = await this.runtime.verifyReceipt(request);
         if (!result) {
           if (!this.planningCurrent(session, generation)) return;
@@ -419,7 +451,7 @@ export class SessionEngine {
   allowedByPolicy(session, proposal) {
     const policy = session.config.permissions;
     const day = proposal.values.day;
-    const windowDays = policy.window === 'Mon–Sun' || policy.window === 'Mon-Sun' ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] : policy.window.split(/[–,-]/).map(x => x.trim());
+    const windowDays = policyDays(policy.window);
     return policy.confirmation === 'bounded' && policy.recipients.includes('Alice') && policy.resources.includes(proposal.resource) && proposal.fields.every(field => policy.fields.includes(field)) && (!day || windowDays.includes(day)) && session.policyUses < policy.maxUses && Date.now() < Date.parse(session.startedAt) + policy.expiryMinutes * 60_000;
   }
   async proposeBob(session, proposal) {
@@ -429,6 +461,7 @@ export class SessionEngine {
     if (this.allowedByPolicy(session, proposal) || grant) {
       if (grant) {
         grant.remaining--;
+        grant.uses = (grant.uses ?? 0) + 1;
         proposal = { ...proposal, fields: clone(grant.fields), values: Object.fromEntries(grant.fields.map(field => [field, proposal.values[field]])), expiresAt: grant.expiresAt, next: proposal.resource === 'availability' && !['day', 'time', 'status'].every(field => grant.fields.includes(field)) ? 'boundary' : proposal.next };
       } else { session.policyUses++; proposal.expiresAt = Date.parse(session.startedAt) + session.config.permissions.expiryMinutes * 60_000; }
       await this.sendBob(session, proposal);
@@ -479,12 +512,13 @@ export class SessionEngine {
         requireThat(Number.isInteger(maxUses) && maxUses >= 1 && maxUses <= 100 && Number.isFinite(expiryMinutes) && expiryMinutes > 0 && expiryMinutes <= 60, 'GRANT_LIMIT', 'A grant needs a 1–100 use limit and an expiry of at most 60 minutes.');
         const values = Object.fromEntries(fields.map(field => [field, approval.values[field]]));
         const proposal = { fields, values, resource: approval.resource, purpose: approval.purpose, expiresAt: Date.now() + expiryMinutes * 60_000, next: approval.resource === 'availability' && !['day', 'time', 'status'].every(field => fields.includes(field)) ? 'boundary' : approval.next };
-        if (input.decision === 'allow_round') session.grants.push({ resource: proposal.resource, purpose: proposal.purpose, fields: clone(fields), payloadHash: hashValue({ fields, values }), remaining: maxUses - 1, expiresAt: Date.now() + expiryMinutes * 60_000 });
+        if (input.decision === 'allow_round') session.grants.push({ resource: proposal.resource, purpose: proposal.purpose, fields: clone(fields), payloadHash: hashValue({ fields, values }), maxUses, uses: 1, remaining: maxUses - 1, expiresAt: Date.now() + expiryMinutes * 60_000 });
         approval.status = 'allowed'; session.waiting = null;
         await this.sendBob(session, proposal, approval.actionId);
       }
       await this.event(session, 'admin_intervention', { choice: input.decision, actor: 'admin', policyRevision: approval.policyRevision, adminWaitMs: Date.now() - approval.requestedAt, fields: input.fields ?? approval.fields, action: 'owner_approval' });
       session.version++;
+      await this.checkpoint(session, 'approval_decided');
       return { state: this.view(session) };
     });
   }
@@ -534,6 +568,7 @@ export class SessionEngine {
       }
       await this.event(session, 'admin_intervention', { action, actor: 'admin' });
       if (!cancelled) session.version++;
+      await this.checkpoint(session, 'intervention_completed');
       return { state: this.view(session) };
     });
   }

@@ -8,7 +8,10 @@ import { ResearchStore } from './research-store.mjs';
 import { ProfileStore } from './profile-store.mjs';
 import { SessionEngine } from './session-engine.mjs';
 import { AppError, requireThat } from './errors.mjs';
-import { validateConfig } from './config.mjs';
+import { validateConfig, hashValue } from './config.mjs';
+import { conditionCatalog, conditionSchema, resolveConditions, conditionBobConfig } from './condition-service.mjs';
+import { buildAgentStates } from './agent-observability.mjs';
+import { ConditionStore } from './condition-store.mjs';
 import { ModelStore, DEFAULT_MODEL_CONFIG } from './model-store.mjs';
 import { probeModel } from './model-provider.mjs';
 
@@ -47,7 +50,8 @@ export async function createDemoServer(options = {}) {
     apiKey: legacyProvider ? options.modelApiKey ?? '' : options.minimaxApiKey ?? process.env.MINIMAX_TOKEN_PLAN_KEY ?? '' });
   const profiles = options.profiles ?? new ProfileStore({ directory, persist: options.persist !== false });
   const research = options.research ?? new ResearchStore({ directory: path.join(directory, 'research'), persist: options.persist !== false });
-  const initialized = await Promise.allSettled([models.init(), profiles.init(), research.init()]);
+  const conditionsStore = options.conditionsStore ?? new ConditionStore({ directory, persist: options.persist !== false });
+  const initialized = await Promise.allSettled([models.init(), profiles.init(), research.init(), conditionsStore.init()]);
   const failure = initialized.find(result => result.status === 'rejected');
   if (failure) { await runtime.close(); throw failure.reason; }
   try { await runtime.configureModels?.(models.snapshot()); await runtime.start(); }
@@ -96,11 +100,27 @@ export async function createDemoServer(options = {}) {
           { id: 'controlled', label: 'Controlled', available: true, description: 'Offline rule-based planning with real process communication and receipt confirmation.' },
           { id: 'live', label: 'Live', available: status.live.available, description: 'Configured model planning; the session controller still enforces permissions.' },
           { id: 'replay', label: 'Replay', available: true, description: 'A synthetic reference trace; no messages or research records.' }
-        ], live: status.live, consentVersion: 'research-v1', runtime: status });
+        ], live: status.live, consentVersion: 'research-v2', runtime: status });
+      }
+      if (route === '/api/conditions/catalog' && req.method === 'GET') return json(res, { ...conditionCatalog(profiles.template), templateRevision: profiles.templateRevision });
+      if (route === '/api/conditions/schema' && req.method === 'GET') return json(res, conditionSchema(profiles.template));
+      if (route === '/api/conditions/resolve' && req.method === 'POST') {
+        const conditions = resolveConditions(await body(req), profiles.template);
+        const defaults = resolveConditions(undefined, profiles.template);
+        const config = conditionBobConfig(conditions, profiles.template);
+        return json(res, { conditions, hash: hashValue(conditions), templateRevision: profiles.templateRevision,
+          requiresResearcher: hashValue(conditions.agents.Bob) !== hashValue(defaults.agents.Bob),
+          agentStates: buildAgentStates({ conditions, config, aliceCalendar: conditions.agents.Alice.data.calendar, receipts: { aliceToBob: [], bobToAlice: [] }, approvals: [], grants: [], policyUses: 0, aliceUses: 0, startedAt: new Date().toISOString() }) });
       }
       if (route === '/api/sessions' && req.method === 'POST') {
         limit(creations, req.socket.remoteAddress, 100, 60_000, 'CREATE_LIMIT');
-        return json(res, await engine.create(await body(req)), 201);
+        const input = await body(req);
+        const conditions = resolveConditions(input.initialConditions, profiles.template);
+        if (hashValue(conditions.agents.Bob) !== hashValue(resolveConditions(undefined, profiles.template).agents.Bob)) {
+          const token = req.headers['x-researcher-token'] ?? bearer(req);
+          requireThat(typeof token === 'string' && adminTokens.get(token) > Date.now(), 'BOB_CONDITIONS_AUTH', 'Sign in as researcher to initialize Bob with different knowledge, data, skills or authorization.', 401);
+        }
+        return json(res, await engine.create(input), 201);
       }
       if (route === '/api/admin/login' && req.method === 'POST') {
         limit(loginAttempts, req.socket.remoteAddress, 10, 60_000, 'LOGIN_LIMIT');
@@ -115,6 +135,13 @@ export async function createDemoServer(options = {}) {
         const token = requireAdmin(req);
         if (route === '/api/admin/logout' && req.method === 'POST') { adminTokens.delete(token); return json(res, { ok: true }); }
         if (route === '/api/admin/sessions' && req.method === 'GET') return json(res, engine.list());
+        if (route === '/api/admin/conditions' && req.method === 'GET') return json(res, { bundles: conditionsStore.list() });
+        if (route === '/api/admin/conditions' && req.method === 'POST') return json(res, { bundle: await conditionsStore.save(await body(req), profiles.template), bundles: conditionsStore.list() });
+        const conditionMatch = /^\/api\/admin\/conditions\/([a-f0-9-]{36})$/.exec(route);
+        if (conditionMatch && req.method === 'DELETE') {
+          await conditionsStore.delete(conditionMatch[1], Number(url.searchParams.get('expectedRevision')));
+          return json(res, { bundles: conditionsStore.list() });
+        }
         if (route === '/api/admin/models' && req.method === 'GET') return json(res, models.view());
         if (route === '/api/admin/models/validate' && req.method === 'POST') return json(res, models.validate((await body(req)).config));
         if (route === '/api/admin/models/apply' && req.method === 'POST') {
@@ -190,7 +217,7 @@ export async function createDemoServer(options = {}) {
   }, 60_000);
   cleanup.unref();
   return {
-    server, engine, runtime, research, profiles, models, adminPin,
+    server, engine, runtime, research, profiles, models, conditionsStore, adminPin,
     async listen() { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); }); return server.address(); },
     async close() { closing = true; clearInterval(cleanup); for (const probe of probes) probe.abort('service_closing'); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await engine.close(); }
   };

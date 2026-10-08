@@ -168,7 +168,7 @@ test('reset clears two contexts, invalidates credentials and defaults new consen
   assert.deepEqual(await readdir(directory), []);
 });
 
-test('research records only consented metadata including post-task answers; replay is separate', async t => {
+test('v2 research records consented synthetic state and post-task answers; replay is separate', async t => {
   const { engine, research } = await fixture(t);
   const { id, approval } = await reachApproval(engine, true);
   await engine.decide(approval.id, decision(approval)); const session = engine.get(id);
@@ -176,7 +176,11 @@ test('research records only consented metadata including post-task answers; repl
   await engine.action(session, { action: 'end', requestId: randomUUID(), expectedVersion: session.version });
   const runs = research.list().runs; assert.equal(runs.length, 1); assert.equal(runs[0].status, 'arranged');
   assert.equal(runs[0].events.filter(event => event.kind === 'prediction').length, 2);
-  assert.equal(JSON.stringify(runs).includes('Project review'), false);
+  assert.equal(runs[0].consentVersion, 'research-v2');
+  assert.equal(JSON.stringify(runs[0].events).includes('Project review'), false);
+  assert.equal(runs[0].initialConditions.agents.Alice.data.calendar.some(row => row.title === 'Project review'), true);
+  assert.ok(runs[0].trace.length > 10);
+  assert.equal(runs[0].trace.at(-1).snapshot.ended, true);
   const replay = await engine.create({ mode: 'replay', researchConsent: true });
   assert.equal(replay.state.session.researchConsent, false); assert.equal(research.list().runs.length, 1);
 });

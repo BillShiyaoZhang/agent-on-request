@@ -138,7 +138,7 @@ test('load strictly filters model metadata and atomically scrubs closed records 
   assert.equal(clean.status, 'arranged', 'scrubbing is not a new participant outcome');
   assert.equal(clean.endedAt, undefined, 'scrubbing does not fabricate an end timestamp');
   assertNoSecrets(await readFile(path.join(directory, 'runs.json'), 'utf8'));
-  assert.equal((await stat(path.join(directory, 'runs.json'))).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.equal((await stat(path.join(directory, 'runs.json'))).mode & 0o777, 0o600);
 });
 
 test('older and malformed model conditions remain missing rather than acquiring the current global model', async t => {

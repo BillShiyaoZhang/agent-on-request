@@ -142,8 +142,10 @@ test('consented records whitelist event metadata, retain technical codes, reload
   assert.deepEqual(first.runs[0].quality, ['admin_intervention', 'assisted']);
   const disk = await readFile(path.join(directory, 'runs.json'), 'utf8');
   for (const forbidden of ['raw-calendar', 'raw-dialogue', 'real-person', '192.0.2.1', 'raw-brief', 'raw-unknown', 'Person Name', 'fictional-session']) assert.equal(disk.includes(forbidden), false, forbidden);
-  assert.equal((await stat(directory)).mode & 0o777, 0o700);
-  assert.equal((await stat(path.join(directory, 'runs.json'))).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(directory)).mode & 0o777, 0o700);
+    assert.equal((await stat(path.join(directory, 'runs.json'))).mode & 0o777, 0o600);
+  }
   assert.deepEqual(await readdir(directory), ['runs.json']);
   const restored = new ResearchStore({ directory });
   await restored.init();
@@ -262,8 +264,9 @@ test('in-memory mode never writes and symlinked research stores are rejected', a
   const target = path.join(directory, 'existing.json');
   await writeFile(target, '{"schemaVersion":1,"runs":[]}');
   const symlinkDirectory = path.join(directory, 'linked-dir');
-  await symlink(directory, symlinkDirectory);
+  await symlink(directory, symlinkDirectory, process.platform === 'win32' ? 'junction' : 'dir');
   await assert.rejects(new ResearchStore({ directory: symlinkDirectory }).init(), /real directory/);
-  await symlink(target, path.join(directory, 'runs.json'));
+  try { await symlink(target, path.join(directory, 'runs.json')); }
+  catch (error) { if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(error.code)) { t.diagnostic('File-symlink check requires Windows symlink privilege; directory link rejection passed.'); return; } throw error; }
   await assert.rejects(new ResearchStore({ directory }).init());
 });

@@ -24,7 +24,7 @@ const provider = createServer(async (request, response) => {
 });
 await new Promise(resolve => provider.listen(0, '127.0.0.1', resolve));
 const baseUrl = 'http://127.0.0.1:' + provider.address().port + '/v1';
-const browser = await playwright.chromium.launch({ headless: true });
+const browser = await playwright.chromium.launch({ headless: true, ...(process.env.DEMO_BROWSER_EXECUTABLE ? { executablePath: process.env.DEMO_BROWSER_EXECUTABLE } : {}) });
 const page = await browser.newPage({ viewport: { width: 1024, height: 900 } }); page.setDefaultTimeout(12000);
 const errors = []; page.on('pageerror', error => errors.push(error.message)); page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
 const modelPosts = [];

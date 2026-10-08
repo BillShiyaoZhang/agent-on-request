@@ -24,7 +24,8 @@ test('both real worker launches deny network, writes, child/worker/addon/inspect
   assert.notEqual(a.cwd, b.cwd);
   assert.notEqual(a.cwd, process.cwd());
   for (const [client, other] of [[a, b], [b, a]]) {
-    assert.equal((await stat(client.cwd)).mode & 0o777, 0o700);
+    if (process.platform !== 'win32') assert.equal((await stat(client.cwd)).mode & 0o777, 0o700);
+    else assert.equal((await stat(client.cwd)).isDirectory(), true);
     const result = await client.call('probe', { outsideFile, otherCwd: other.cwd });
     assert.equal(result.cwd, client.cwd);
     assert.equal(result.readOwnCode, true);

@@ -26,7 +26,7 @@ if (!url) {
 }
 const artifacts = resolve(process.env.DEMO_ARTIFACTS || 'artifacts');
 await mkdir(artifacts, { recursive: true });
-const browser = await playwright.chromium.launch({ headless: true });
+const browser = await playwright.chromium.launch({ headless: true, ...(process.env.DEMO_BROWSER_EXECUTABLE ? { executablePath: process.env.DEMO_BROWSER_EXECUTABLE } : {}) });
 const page = await browser.newPage({ viewport: { width: 1024, height: 900 } });
 page.setDefaultTimeout(12000);
 const errors = [], expectedNetworkErrors = [], checked = [];

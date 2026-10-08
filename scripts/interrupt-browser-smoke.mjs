@@ -22,7 +22,7 @@ const provider = createServer(async (request, response) => {
 await new Promise(resolve => provider.listen(0, '127.0.0.1', resolve));
 const app = await createDemoServer({ host: '127.0.0.1', port: 0, persist: false, adminPin: pin, modelBaseUrl: 'http://127.0.0.1:' + provider.address().port + '/v1', modelName: 'local-held-model', modelApiKey: '' });
 const address = await app.listen();
-const browser = await playwright.chromium.launch({ headless: true });
+const browser = await playwright.chromium.launch({ headless: true, ...(process.env.DEMO_BROWSER_EXECUTABLE ? { executablePath: process.env.DEMO_BROWSER_EXECUTABLE } : {}) });
 const page = await browser.newPage({ viewport: { width: 1024, height: 900 } }); page.setDefaultTimeout(10000);
 const errors = []; page.on('pageerror', error => errors.push(error.message));
 const action = name => page.locator('[data-participant-action="' + name + '"]').first();

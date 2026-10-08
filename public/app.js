@@ -1,16 +1,19 @@
 import { mountBobConfig } from './bob-config.js';
 import { mountModelConfig } from './model-config.js';
+import { mountAgentStates } from './agent-state.js';
+import { createInitialConditions } from './initial-conditions.js';
 
 const $ = id => document.getElementById(id);
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-const textValue = value => typeof value === 'string' ? value : JSON.stringify(value ?? null);
+const textValue = value => Array.isArray(value) ? value.map(textValue).join(', ') : value && typeof value === 'object' ? Object.entries(value).map(([key, item]) => key + ': ' + textValue(item)).join(' · ') : String(value ?? 'None');
 const sessionKey = 'agent-on-request.session';
 const pendingKey = 'agent-on-request.pending';
-let meta, current, participantToken, adminToken, adminState, selectedSessionId, activeView = 'participant', configController, modelController;
+let meta, current, participantToken, adminToken, adminState, selectedSessionId, activeView = 'participant', configController, modelController, conditionsController;
 let adminSessions = [], research = null, dialogContext = null, dialogOpener = null, requestBusy = false, interruptBusy = false, requestSequence = 0, interruptSequence = 0, pollBusy = false, planningNewRound = false;
 let pending = readStorage(pendingKey);
 const local = { mode: 'controlled', consent: false, initial: null, additional: null, preview: null, previewStage: null, previewChoice: null, prediction: null, revocation: null, predictionSubmitted: false, revocationSubmitted: false };
 const researchFilters = { mode: 'all', status: 'all', quality: 'all' };
+let selectedResearchRunId, researchStep = 0;
 
 function readStorage(key) { try { return JSON.parse(sessionStorage.getItem(key)); } catch { return null; } }
 function writeStorage(key, value) { try { value === null ? sessionStorage.removeItem(key) : sessionStorage.setItem(key, JSON.stringify(value)); } catch { /* In-memory operation remains available when session storage is blocked. */ } }
@@ -35,11 +38,12 @@ function notify(message, kind = '') { $('global-notice').textContent = message; 
 class ApiError extends Error {
   constructor(message, status = 0, code = 'NETWORK', details) { super(message); this.status = status; this.code = code; this.details = details; }
 }
-async function api(path, { method = 'GET', body, admin = path.startsWith('/api/admin/'), token, auth = true } = {}) {
+async function api(path, { method = 'GET', body, admin = path.startsWith('/api/admin/'), token, auth = true, researcher = false } = {}) {
   const bearer = token ?? (admin ? adminToken : participantToken);
   const headers = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (auth && bearer) headers.Authorization = 'Bearer ' + bearer;
+  if (researcher && adminToken) headers['X-Researcher-Token'] = adminToken;
   let response;
   try { response = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store' }); }
   catch { throw new ApiError('The connection was interrupted. The outcome of a submitted action may be unknown.'); }
@@ -57,6 +61,7 @@ function clearAdmin() {
   $('admin-logout').hidden = true; $('admin-open').textContent = 'Researcher sign in';
   configController?.clear();
   modelController?.clear();
+  conditionsController?.authorizationChanged();
   if (activeView !== 'participant') setView('participant');
 }
 function setView(view) {
@@ -104,7 +109,21 @@ function renderStart() {
   const modes = meta?.modes || [];
   const selected = modes.find(mode => mode.id === local.mode);
   const ready = meta && selected?.available && meta.runtime?.alice?.online !== false && meta.runtime?.bob?.online !== false;
-  $('participant-view').innerHTML = '<section class="panel"><p class="eyebrow">A short, fictional collaboration</p><h1>What may your agent share?</h1><p class="lead">You control Alice. Help her arrange a 30-minute discussion with Bob, then compare what you approved with what Bob actually received. Sharing less, declining and ending the demo are complete outcomes.</p><div class="identity-grid"><div class="identity"><strong>Your agent · Alice</strong><small>Your chosen fields and time window</small></div><div class="identity"><strong>Other agent · Bob</strong><small>Separate identity, calendar and permissions</small></div></div><div class="split-layout"><fieldset><legend>Run mode</legend><div class="choices">' + modes.map(mode => '<label class="choice' + (!mode.available ? ' dimmed' : '') + '"><input type="radio" name="start-mode" value="' + escapeHtml(mode.id) + '" ' + (local.mode === mode.id ? 'checked ' : '') + (!mode.available ? 'disabled ' : '') + '><span><strong>' + escapeHtml(mode.label) + '</strong><small>' + escapeHtml(mode.description) + (!mode.available ? ' · unavailable' : '') + '</small></span></label>').join('') + '</div></fieldset><div><h3>Research recording is your choice</h3><label class="check"><input id="start-consent" type="checkbox" ' + (local.consent ? 'checked ' : '') + (local.mode === 'replay' ? 'disabled ' : '') + '><span>Allow my choices and understanding answers to be recorded for this research demo.<small>No name or account is requested. Sharing permission is a separate decision. Without consent, no research record is written. Session state remains in memory until replacement, reset or expiry.</small></span></label><div class="notice">' + escapeHtml(modeDisclosure(local.mode)) + '</div><small>Consent version: ' + escapeHtml(meta?.consentVersion || 'Loading') + '</small></div></div><div class="toolbar section-actions"><button class="button primary" data-participant-action="start" ' + (!ready || requestBusy ? 'disabled' : '') + '>' + (requestBusy ? 'Starting isolated agents…' : 'Start the demo') + '</button><span class="muted">' + (!ready ? 'Waiting for an available mode and both agents.' : 'About 3–5 minutes · no personal calendar access') + '</span></div></section>';
+  $('participant-view').innerHTML = '<section class="panel"><p class="eyebrow">A short, fictional collaboration</p><h1>What may your agent share?</h1><p class="lead">You control Alice. Help her arrange a 30-minute discussion with Bob, then compare what you approved with what Bob actually received. Sharing less, declining and ending the demo are complete outcomes.</p><div class="identity-grid"><div class="identity"><strong>Your agent · Alice</strong><small>Your chosen fields and time window</small></div><div class="identity"><strong>Other agent · Bob</strong><small>Separate identity, calendar and permissions</small></div></div><div class="split-layout"><fieldset><legend>Run mode</legend><div class="choices">' + modes.map(mode => '<label class="choice' + (!mode.available ? ' dimmed' : '') + '"><input type="radio" name="start-mode" value="' + escapeHtml(mode.id) + '" ' + (local.mode === mode.id ? 'checked ' : '') + (!mode.available ? 'disabled ' : '') + '><span><strong>' + escapeHtml(mode.label) + '</strong><small>' + escapeHtml(mode.description) + (!mode.available ? ' · unavailable' : '') + '</small></span></label>').join('') + '</div></fieldset><div><h3>Research recording is your choice</h3><label class="check"><input id="start-consent" type="checkbox" ' + (local.consent ? 'checked ' : '') + (local.mode === 'replay' ? 'disabled ' : '') + '><span>Allow my initial conditions, choices, and step-by-step agent states to be recorded for this research demo.<small>Researchers can review the fictional KG, data, skills, authorization, changes and understanding answers. Model secrets and raw provider conversations are excluded. No name or account is requested. Sharing permission is a separate decision. Without consent, no research record is written. Session state remains in memory until replacement, reset or expiry.</small></span></label><div class="notice">' + escapeHtml(modeDisclosure(local.mode)) + '</div><small>Consent version: ' + escapeHtml(meta?.consentVersion || 'Loading') + '</small></div></div><div class="toolbar section-actions"><button class="button primary" data-participant-action="start" ' + (!ready || requestBusy ? 'disabled' : '') + '>' + (requestBusy ? 'Starting isolated agents…' : 'Start the demo') + '</button><span class="muted">' + (!ready ? 'Waiting for an available mode and both agents.' : 'About 3–5 minutes · no personal calendar access') + '</span></div></section>';
+  const actions = $('participant-view').querySelector('.section-actions');
+  const holder = document.createElement('div'); holder.id = 'initial-conditions-builder';
+  $('participant-view').append(holder);
+  conditionsController?.attach(holder);
+  const actionPanel = document.createElement('section'); actionPanel.className = 'panel start-round-panel';
+  actionPanel.append(actions); $('participant-view').insertBefore(actionPanel, holder);
+  updateStartControls();
+}
+function updateStartControls() {
+  const button = $('participant-view').querySelector('[data-participant-action="start"]'); if (!button) return;
+  const modeReady = meta?.modes?.find(mode => mode.id === local.mode)?.available && meta.runtime?.alice?.online !== false && meta.runtime?.bob?.online !== false;
+  button.disabled = !modeReady || requestBusy || !conditionsController?.ready();
+  const note = button.parentElement.querySelector('.muted');
+  if (note) note.textContent = !modeReady ? 'Waiting for an available mode and both agents.' : conditionsController?.ready() ? 'Ready · creates the exact reviewed initial states.' : 'Resolve and validate your initial conditions; Bob changes need researcher sign-in.';
 }
 function choicesHtml(stage) {
   const initial = stage === 'initial';
@@ -118,16 +137,34 @@ function choicesHtml(stage) {
     ['narrow', 'Thursday free times only', 'Add only free intervals on Thursday.'],
     ['week', 'Full weekly calendar', 'Share event titles, notes and time intervals for the full week.']
   ];
+  const profile = current.initialConditions?.agents?.Alice;
+  const permission = current.agentStates?.Alice?.authorization;
+  const profileSkills = profile?.skills || ['read_synthetic_calendar', 'preview_scoped_calendar', 'send_scoped_snapshot'];
+  const enabledSkills = ['read_synthetic_calendar', 'preview_scoped_calendar'].every(id => profileSkills.includes(id));
+  const allowedFields = profile?.authorization?.fields || ['day', 'time', 'status', 'title', 'note'];
+  const allowedDays = profile?.authorization?.windows || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const requestedDays = initial ? ['Tue', 'Wed'] : ['Thu'];
+  const choiceEnabled = value => ['none', 'keep'].includes(value) || enabledSkills && allowedFields.length && (value === 'week' ? allowedDays.length : requestedDays.some(day => allowedDays.includes(day)));
+  if (profile) {
+    for (const choice of choices) {
+      if (['none', 'keep'].includes(choice[0])) continue;
+      if (['full', 'week'].includes(choice[0]) && !['title', 'note'].every(field => allowedFields.includes(field))) choice[1] = choice[0] === 'full' ? 'Calendar information within your ceiling' : 'Weekly information within your ceiling';
+      choice[2] += ' Initial ceiling: ' + (allowedFields.join(', ') || 'no fields') + ' · allowed days ' + (allowedDays.join(', ') || 'none') + '.';
+      if (!choiceEnabled(choice[0])) choice[2] += ' Unavailable with the current skills or authorization.';
+    }
+  }
   const selected = local[stage];
+  const sendDisabledReason = !profileSkills.includes('send_scoped_snapshot') ? 'Alice’s initial skills allow inspection and preview, but sending is disabled.' : ['expired', 'exhausted', 'disabled'].includes(permission?.status) ? 'Alice’s authorization is ' + permission.status + '. You may inspect this preview, decline sharing, or keep the current boundary.' : '';
+  const cannotConfirmSend = !['none', 'keep'].includes(selected) && Boolean(sendDisabledReason);
   const preview = local.previewStage === stage && local.previewChoice === selected ? local.preview : null;
   const stale = preview && preview.sessionVersion !== current.session.version;
   const blocked = requestBusy || interruptBusy || Boolean(pending) || current.session.paused || current.alice.stopped;
-  return '<section class="panel"><fieldset ' + (blocked ? 'disabled' : '') + '><legend>' + (initial ? 'What may Alice send to Bob?' : 'Bob is requesting a wider time window') + '</legend><p class="muted" style="margin-bottom:13px">' + (initial ? 'Choose a field set for Tuesday–Wednesday. Nothing is selected by default.' : 'Review the new request independently. A wider scope is optional.') + '</p><div class="choices">' + choices.map(([value, title, detail]) => '<label class="choice"><input type="radio" name="' + stage + '-choice" value="' + value + '" ' + (selected === value ? 'checked' : '') + '><span><strong>' + title + '</strong><small>' + detail + '</small></span></label>').join('') + '</div></fieldset><div class="toolbar section-actions"><button class="button" data-participant-action="preview" data-stage="' + stage + '" ' + (!selected || blocked ? 'disabled' : '') + '>Preview exact information</button><span class="muted">Previewing does not authorize or send.</span></div>' + (preview ? '<div class="preview-box"><div class="panel-heading"><h3>Exact snapshot · recipient Bob</h3><span class="tag">Not yet sent</span></div><dl class="definition-list"><dt>Fields</dt><dd>' + escapeHtml(preview.fields?.join(', ') || 'None') + '</dd><dt>Time window</dt><dd>' + escapeHtml(textValue(preview.window)) + '</dd></dl>' + tableRows(preview.rows) + '<details><summary>Inspect exact payload and fingerprint</summary><pre>' + escapeHtml(JSON.stringify({ fields: preview.fields, window: preview.window, rows: preview.rows }, null, 2)) + '</pre><code>' + escapeHtml(preview.payloadHash) + '</code></details>' + (stale ? '<div class="notice warning">The session changed. Preview again before confirming; this snapshot will not be sent.</div>' : '') + '<div class="toolbar section-actions"><button class="button primary" data-participant-action="confirm" data-stage="' + stage + '" ' + (blocked || stale ? 'disabled' : '') + '>' + (initial && selected === 'none' ? 'Confirm no sharing' : !initial && selected === 'keep' ? 'Confirm current boundary' : 'Confirm and send this snapshot') + '</button></div></div>' : '') + '</section>';
+  return '<section class="panel"><fieldset ' + (blocked ? 'disabled' : '') + '><legend>' + (initial ? 'What may Alice send to Bob?' : 'Bob is requesting a wider time window') + '</legend><p class="muted" style="margin-bottom:13px">' + (initial ? 'Choose a field set for Tuesday–Wednesday. Nothing is selected by default.' : 'Review the new request independently. A wider scope is optional.') + '</p><div class="choices">' + choices.map(([value, title, detail]) => '<label class="choice"><input type="radio" name="' + stage + '-choice" value="' + value + '" ' + (selected === value ? 'checked' : '') + (!choiceEnabled(value) ? ' disabled' : '') + '><span><strong>' + title + '</strong><small>' + detail + '</small></span></label>').join('') + '</div></fieldset><div class="toolbar section-actions"><button class="button" data-participant-action="preview" data-stage="' + stage + '" ' + (!selected || blocked ? 'disabled' : '') + '>Preview exact information</button><span class="muted">Previewing does not authorize or send.</span></div>' + (preview ? '<div class="preview-box"><div class="panel-heading"><h3>Exact snapshot · recipient Bob</h3><span class="tag">Not yet sent</span></div><dl class="definition-list"><dt>Fields</dt><dd>' + escapeHtml(preview.fields?.join(', ') || 'None') + '</dd><dt>Time window</dt><dd>' + escapeHtml(textValue(preview.window)) + '</dd></dl>' + tableRows(preview.rows) + '<details><summary>Inspect exact payload and fingerprint</summary><pre>' + escapeHtml(JSON.stringify({ fields: preview.fields, window: preview.window, rows: preview.rows }, null, 2)) + '</pre><code>' + escapeHtml(preview.payloadHash) + '</code></details>' + (stale ? '<div class="notice warning">The session changed. Preview again before confirming; this snapshot will not be sent.</div>' : '') + (cannotConfirmSend ? '<div class="notice">' + escapeHtml(sendDisabledReason) + '</div>' : '') + '<div class="toolbar section-actions"><button class="button primary" data-participant-action="confirm" data-stage="' + stage + '" ' + (blocked || stale || cannotConfirmSend ? 'disabled' : '') + '>' + (initial && selected === 'none' ? 'Confirm no sharing' : !initial && selected === 'keep' ? 'Confirm current boundary' : 'Confirm and send this snapshot') + '</button></div></div>' : '') + '</section>';
 }
 function receiptsHtml() {
   const incoming = current.receipts?.aliceToBob || [], outgoing = current.receipts?.bobToAlice || [];
   if (!incoming.length && !outgoing.length) return '<section class="panel"><h3>Shared information receipt</h3><p class="empty">Nothing has been received yet. Choosing or previewing information does not count as delivery.</p></section>';
-  return '<section class="panel"><div class="panel-heading"><h3>Approved → actually received</h3><span class="tag">Server receipts</span></div>' + incoming.map(receipt => '<article class="receipt"><div class="receipt-header"><strong>Alice → Bob</strong><span class="tag ' + (receipt.status === 'received' ? 'good' : 'warn') + '">' + escapeHtml(receipt.status) + '</span></div><dl class="definition-list"><dt>Approved fields</dt><dd>' + escapeHtml(receipt.fields?.join(', ') || 'None') + '</dd><dt>Approved window</dt><dd>' + escapeHtml(textValue(receipt.window)) + '</dd><dt>Received payload</dt><dd>' + (receipt.status === 'received' ? 'Exact snapshot below' : 'Not confirmed received') + '</dd></dl>' + (receipt.status === 'received' ? tableRows(receipt.rows) : '') + '<details><summary>Receipt identity and exact content</summary><pre>' + escapeHtml(JSON.stringify(receipt, null, 2)) + '</pre></details></article>').join('') + outgoing.map(receipt => '<article class="receipt"><div class="receipt-header"><strong>Bob → Alice</strong><span class="tag ' + (receipt.status === 'received' ? 'good' : 'warn') + '">' + escapeHtml(receipt.status) + '</span></div><p>Fields: ' + escapeHtml(receipt.fields?.join(', ') || 'None') + '</p><pre>' + escapeHtml(JSON.stringify(receipt.values, null, 2)) + '</pre><details><summary>Exact receipt</summary><pre>' + escapeHtml(JSON.stringify(receipt, null, 2)) + '</pre></details></article>').join('') + '</section>';
+  return '<section class="panel"><div class="panel-heading"><h3>Approved → actually received</h3><span class="tag">Server receipts</span></div>' + incoming.map(receipt => '<article class="receipt"><div class="receipt-header"><strong>Alice → Bob</strong><span class="tag ' + (receipt.status === 'received' ? 'good' : 'warn') + '">' + escapeHtml(receipt.status) + '</span></div><dl class="definition-list"><dt>Approved fields</dt><dd>' + escapeHtml(receipt.fields?.join(', ') || 'None') + '</dd><dt>Approved window</dt><dd>' + escapeHtml(textValue(receipt.window)) + '</dd><dt>Received payload</dt><dd>' + (receipt.status === 'received' ? 'Exact snapshot below' : 'Not confirmed received') + '</dd></dl>' + (receipt.status === 'received' ? tableRows(receipt.rows) : '') + '<details><summary>Receipt identity and exact content</summary><pre>' + escapeHtml(JSON.stringify(receipt, null, 2)) + '</pre></details></article>').join('') + outgoing.map(receipt => '<article class="receipt"><div class="receipt-header"><strong>Bob → Alice</strong><span class="tag ' + (receipt.status === 'received' ? 'good' : 'warn') + '">' + escapeHtml(receipt.status) + '</span></div><p>Fields: ' + escapeHtml(receipt.fields?.join(', ') || 'None') + '</p><dl class="definition-list">' + Object.entries(receipt.values || {}).map(([key, value]) => '<dt>' + escapeHtml(key) + '</dt><dd>' + escapeHtml(textValue(value)) + '</dd>').join('') + '</dl><details><summary>Exact receipt</summary><pre>' + escapeHtml(JSON.stringify(receipt, null, 2)) + '</pre></details></article>').join('') + '</section>';
 }
 function questionsHtml() {
   if (!current.task?.outcome || current.session.mode === 'replay') return '';
@@ -156,14 +193,18 @@ function renderParticipant() {
   const approvalPending = current.pendingApprovals?.some(item => item.status === 'pending');
   const heading = session.stage === 'initial' ? 'Choose Alice’s sharing boundary' : session.stage === 'additional' ? 'Review Bob’s additional request' : session.stage === 'replay' ? 'Labelled replay' : 'Your collaboration';
   $('participant-view').innerHTML = '<div class="panel-heading"><div><p class="eyebrow">' + escapeHtml(modeLabel(session.mode)) + ' · fictional scenario</p><h2>' + heading + '</h2></div><div class="toolbar"><span class="tag">Research ' + (session.researchConsent ? 'on' : 'off') + '</span><span class="tag mono">Epoch ' + escapeHtml(session.epoch) + '</span>' + (endingPending ? '<span class="tag warn">End needs confirmation</span>' : !session.ended ? '<button class="button quiet" data-participant-action="end" ' + (interruptBusy ? 'disabled' : '') + '>End this demo</button>' + (!current.alice.stopped && session.mode !== 'replay' ? '<button class="button" data-participant-action="stop_sharing" ' + (interruptBusy ? 'disabled' : '') + '>Stop future sharing</button>' : '') : '<button class="button" data-participant-action="fresh" ' + (requestBusy || interruptBusy || pending ? 'disabled' : '') + '>New demo</button>') + '</div></div><div class="step-bar"><span class="step ' + (session.stage === 'initial' ? 'current' : '') + '">Choose scope</span><span class="step ' + (session.stage === 'additional' ? 'current' : '') + '">Additional request</span><span class="step ' + (session.stage === 'complete' ? 'current' : '') + '">Review receipts</span></div><small style="margin-bottom:15px">' + escapeHtml(modeDisclosure(session.mode)) + '</small>' + (hasPending ? '<div class="notice warning" role="status"><strong>Submission outcome needs verification</strong><p>The same request ID and intent are retained. No changed sharing choice will be resubmitted automatically.</p><div class="toolbar"><button class="button" data-participant-action="verify_pending" ' + (interruptBusy || requestBusy && !isInterrupt(pending?.body?.action) ? 'disabled' : '') + '>Verify the same submission</button><button class="button" data-participant-action="refresh">Check session state</button></div></div>' : '') + (current.alice?.stopped ? '<div class="notice">' + (stoppingPending ? 'Waiting for Stop confirmation. ' : 'Future Alice sharing is stopped. ') + 'Previously received snapshots remain in the receipt history.</div>' : '') + (waiting || session.paused ? '<div class="notice warning" role="status"><strong>' + (session.paused ? 'Collaboration paused' : 'Waiting') + '</strong><p>' + escapeHtml(waiting?.message || 'The researcher paused this round. Your current step and received information are preserved.') + '</p>' + (approvalPending || waiting?.reason === 'admin' || waiting?.reason === 'configuration_changed' ? '<div class="toolbar"><button class="button" data-participant-action="admin_review">Open researcher review window</button><span class="muted">Closing it leaves the request pending.</span></div>' : '') + '</div>' : '') + (outcome ? '<section class="panel">' + outcome + '<div class="toolbar">' + (!session.ended ? '<button class="button quiet" data-participant-action="end" ' + (interruptBusy ? 'disabled' : '') + '>End this demo</button>' : '') + '</div></section>' : '') + '<div class="split-layout"><div class="stack">' + (!session.ended && !session.paused && !waiting && ['initial', 'additional'].includes(session.stage) ? choicesHtml(session.stage) : '') + (session.stage === 'replay' ? '<section class="panel"><h3>Saved trace · replay</h3><p class="muted">Source: ' + escapeHtml(current.replay?.source || 'Saved replay') + ' · step ' + escapeHtml(current.replay?.index ?? 0) + ' / ' + escapeHtml(current.replay?.total ?? 0) + '</p><button class="button primary section-actions" data-participant-action="replay_next" ' + (requestBusy || interruptBusy || pending || session.ended || (current.replay?.index ?? 0) >= (current.replay?.total ?? 0) ? 'disabled' : '') + '>Next replay step</button></section>' : '') + receiptsHtml() + questionsHtml() + '</div><div class="stack">' + calendarHtml() + '<section class="panel"><div class="panel-heading"><h3>Agent conversation</h3><span class="tag">Bob r' + escapeHtml(current.bob?.configRevision) + '</span></div><ol class="conversation">' + messages.slice(-8).map(message => '<li class="message" data-from="' + escapeHtml(message.from) + '"><header><strong>' + escapeHtml(message.from) + '</strong><span>' + escapeHtml(message.kind || '') + '</span></header><p>' + escapeHtml(message.text) + '</p></li>').join('') + '</ol>' + (!messages.length ? '<p class="empty">No messages yet.</p>' : '') + '</section></div></div>';
+  const observatory = document.createElement('div'); observatory.id = 'live-agent-states';
+  $('participant-view').insertBefore(observatory, $('participant-view').querySelector(':scope > .split-layout'));
+  mountAgentStates(observatory, current.agentStates, { scope: 'participant-live' });
 }
 
 async function startSession() {
   if (requestBusy || interruptBusy) return;
   requestBusy = true; renderParticipant();
   try {
+    const initialConditions = await conditionsController.submission();
     const previous = current ? { previousSessionId: current.session.id, previousToken: participantToken } : {};
-    const result = await api('/api/sessions', { method: 'POST', auth: false, body: { mode: local.mode, researchConsent: local.mode !== 'replay' && local.consent, ...previous } });
+    const result = await api('/api/sessions', { method: 'POST', auth: false, researcher: true, body: { mode: local.mode, researchConsent: local.mode !== 'replay' && local.consent, ...initialConditions, ...previous } });
     rememberPending(null); rememberSession(result.token, result.state); planningNewRound = false; clearPreview(); local.initial = null; local.additional = null; local.prediction = null; local.revocation = null; local.predictionSubmitted = false; local.revocationSubmitted = false;
     if (!selectedSessionId || selectedSessionId === previous.previousSessionId) selectedSessionId = current.session.id; notify('');
   } catch (error) { notify(error.message, 'error'); }
@@ -299,6 +340,7 @@ $('admin-dialog-body').addEventListener('submit', async event => {
   event.target.querySelectorAll('button,input').forEach(node => { node.disabled = true; });
   try {
     const result = await api('/api/admin/login', { method: 'POST', auth: false, body: { pin } }); adminToken = result.token;
+    conditionsController?.authorizationChanged();
     document.querySelectorAll('[data-admin-nav]').forEach(node => { node.hidden = false; }); $('admin-logout').hidden = false; $('admin-open').textContent = 'Researcher tools';
     selectedSessionId ||= current?.session.id;
     if (context?.kind === 'approval') await loadApprovals(context.sessionId); else closeDialog('admin-dialog');
@@ -365,7 +407,7 @@ $('console-view').addEventListener('click', async event => {
   } catch (error) { notify(error.message, 'error'); renderConsole(); }
 });
 
-function qualityLabel(value) { return typeof value === 'string' ? value : value?.status || value?.label || textValue(value); }
+function qualityLabel(value) { return Array.isArray(value) ? value.length ? value.map(item => String(item).replaceAll('_', ' ')).join(', ') : 'No quality flags' : typeof value === 'string' ? value : value?.status || value?.label || textValue(value); }
 async function loadResearch() {
   if (!adminToken) return;
   try { research = await api('/api/admin/research'); renderResearch(); } catch (error) { notify(error.message, 'error'); }
@@ -378,10 +420,60 @@ function renderResearch() {
   const counts = [...new Set(filtered.map(run => run.mode))].map(mode => ({ mode, count: filtered.filter(run => run.mode === mode).length }));
   const max = Math.max(1, ...counts.map(item => item.count));
   $('research-view').innerHTML = '<div class="panel-heading"><div><h2>Research review</h2><small>Actual consented records only · calendar data is fictional</small></div><div class="toolbar"><button class="button" data-research-action="refresh">Refresh records</button><button class="button" data-research-action="csv">Export CSV</button><button class="button" data-research-action="jsonl">Export JSONL</button></div></div><section class="panel"><div class="summary-grid">' + [['Recorded runs', summary.runs], ['Task outcomes', summary.taskCompleted], ['Closed completed', summary.completed], ['Awaiting end', summary.runsPendingClose]].map(([label, value]) => '<div class="summary-item"><small>' + label + '</small><strong>' + escapeHtml(value ?? '—') + '</strong></div>').join('') + '</div><small>Server totals · stopped: ' + escapeHtml(summary.stopped ?? '—') + ' · technical: ' + escapeHtml(summary.technical ?? '—') + ' · affected by technical issues: ' + escapeHtml(summary.affectedByTechnical ?? '—') + ' · replay excluded: ' + escapeHtml(summary.replayExcluded ?? 0) + '. Unconsented rounds have no research rows.</small><div class="form-grid" style="margin-top:17px">' + optionList('mode', all.map(run => run.mode), 'Mode') + optionList('status', all.map(run => run.status), 'Status') + optionList('quality', all.map(run => qualityLabel(run.quality)), 'Quality') + '</div><h3 style="margin-top:22px">Filtered recorded runs by mode</h3><div class="chart-bars" aria-label="Counts from actual filtered records">' + counts.map(item => '<div class="chart-row"><span>' + escapeHtml(modeLabel(item.mode)) + '</span><div class="chart-track"><div class="chart-fill" style="width:' + item.count / max * 100 + '%"></div></div><span class="chart-value">' + item.count + '</span></div>').join('') + '</div>' + (!filtered.length ? '<p class="empty">No actual consented runs match these filters. No sample measurements are inserted.</p>' : '') + '<table class="research-table"><thead><tr><th>Run</th><th>Started</th><th>Mode</th><th>Config</th><th>Status / quality</th><th>Events</th></tr></thead><tbody>' + filtered.map(run => '<tr><td data-label="Run" class="mono">' + escapeHtml(run.runId) + '</td><td data-label="Started">' + escapeHtml(formatDate(run.startedAt)) + '</td><td data-label="Mode">' + escapeHtml(modeLabel(run.mode)) + '</td><td data-label="Config">r' + escapeHtml(run.configRevision) + '</td><td data-label="Status / quality">' + escapeHtml(run.status) + '<small>' + escapeHtml(qualityLabel(run.quality)) + '</small></td><td data-label="Events">' + (run.events?.length || 0) + '<details><summary>Inspect</summary><pre>' + escapeHtml(JSON.stringify(run.events, null, 2)) + '</pre></details></td></tr>').join('') + '</tbody></table></section>';
+  if (!filtered.some(run => run.runId === selectedResearchRunId)) { selectedResearchRunId = filtered[0]?.runId; researchStep = 0; }
+  $('research-view').querySelectorAll('.research-table tbody tr').forEach((row, index) => {
+    const run = filtered[index], button = document.createElement('button'); button.className = 'button section-actions'; button.dataset.researchRun = run.runId; button.textContent = selectedResearchRunId === run.runId ? 'Viewing timeline' : 'Review timeline'; button.setAttribute('aria-pressed', String(selectedResearchRunId === run.runId)); row.cells[0].append(button);
+  });
+  if (selectedResearchRunId) { const holder = document.createElement('div'); holder.id = 'research-agent-replay'; $('research-view').append(holder); mountResearchReplay(holder, filtered.find(run => run.runId === selectedResearchRunId)); }
+}
+function readableEvent(event) {
+  const label = String(event?.type || event?.kind || 'Recorded event').replaceAll('_', ' ');
+  const values = Object.entries(event?.data || event || {}).filter(([key, value]) => !['seq', 'kind', 'type', 'payloadHash'].includes(key) && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || Array.isArray(value) && value.every(item => typeof item === 'string'))).slice(0, 8);
+  return '<strong>' + escapeHtml(label) + '</strong>' + (values.length ? '<small>' + values.map(([key, value]) => escapeHtml(key.replaceAll('_', ' ') + ': ' + (Array.isArray(value) ? value.join(', ') : value))).join(' · ') + '</small>' : '');
+}
+function traceChanges(previous, next) {
+  if (!previous) return '<p class="muted">Initial snapshot · the starting conditions for this recorded run.</p>';
+  const changes = [];
+  for (const role of ['Alice', 'Bob']) {
+    const before = previous[role] || {}, after = next?.[role] || {}, beforeNodes = new Map((before.kg?.nodes || []).map(node => [node.id, node])), afterNodes = new Map((after.kg?.nodes || []).map(node => [node.id, node]));
+    const added = [...afterNodes.values()].filter(node => !beforeNodes.has(node.id)), removed = [...beforeNodes.values()].filter(node => !afterNodes.has(node.id)), changed = [...afterNodes.values()].filter(node => beforeNodes.has(node.id) && JSON.stringify(node) !== JSON.stringify(beforeNodes.get(node.id)));
+    const names = nodes => nodes.slice(0, 8).map(node => node.label || node.id).join(', ') + (nodes.length > 8 ? ' and ' + (nodes.length - 8) + ' more' : '');
+    if (added.length) changes.push([role, 'Added ' + added.length + ' facts', names(added)]);
+    if (removed.length) changes.push([role, 'Removed ' + removed.length + ' facts', names(removed)]);
+    if (changed.length) changes.push([role, 'Updated ' + changed.length + ' facts', names(changed)]);
+    if (JSON.stringify(before.kg?.edges) !== JSON.stringify(after.kg?.edges)) changes.push([role, 'Relationships changed', (after.kg?.edges?.length || 0) + ' current relations']);
+    if (JSON.stringify(before.skills) !== JSON.stringify(after.skills)) changes.push([role, 'Capabilities changed', (after.skills || []).filter(skill => skill.enabled !== false).map(skill => skill.label || skill.id).join(', ') || 'No enabled skills']);
+    if (JSON.stringify(before.authorization) !== JSON.stringify(after.authorization)) changes.push([role, 'Authorization changed', after.authorization?.summary || after.authorization?.status || 'Review the authorization cards below']);
+    if (JSON.stringify(before.data) !== JSON.stringify(after.data)) changes.push([role, 'Data inventory changed', (after.data || []).map(item => (item.label || item.id) + ' · ' + (item.count ?? item.items?.length ?? 0) + ' items').join('; ')]);
+  }
+  return changes.length ? '<div class="table-wrap"><table><thead><tr><th scope="col">Agent</th><th scope="col">Change</th><th scope="col">Details</th></tr></thead><tbody>' + changes.map(([role, label, detail]) => '<tr><td>' + role + '</td><td>' + escapeHtml(label) + '</td><td>' + escapeHtml(detail) + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="muted">No knowledge, data, skills or authorization changes at this step. The event remains part of the recorded timeline.</p>';
+}
+function mountResearchReplay(holder, run) {
+  const trace = run.trace || [];
+  if (!trace.length) { holder.innerHTML = '<section class="panel"><h3>Step-by-step review</h3><p class="empty">This older run has no stored agent snapshots. Its original events remain available in the table above.</p></section>'; return; }
+  researchStep = Math.max(0, Math.min(researchStep, trace.length - 1));
+  holder.innerHTML = '<section class="panel research-replay"><div class="panel-heading"><div><h3>Step-by-step review</h3><small>Run ' + escapeHtml(run.runId) + ' · ' + trace.length + ' stored snapshots</small></div><span class="tag">Read-only historical state</span></div><div class="replay-controls"><button class="button" data-trace-move="-1">Previous</button><label class="field trace-slider"><span data-trace-position></span><input type="range" min="0" max="' + (trace.length - 1) + '" value="' + researchStep + '" step="1" aria-label="Recorded snapshot step" data-trace-slider></label><button class="button" data-trace-move="1">Next</button><button class="button" data-trace-latest>Latest</button></div><div data-trace-event></div><div data-trace-diff></div><details><summary>Recorded initial conditions & complete evidence</summary><pre>' + escapeHtml(JSON.stringify(run.initialConditions || {}, null, 2)) + '</pre><div data-trace-evidence></div></details><div data-trace-states></div></section>';
+  const renderStep = () => {
+    const step = trace[researchStep], previous = trace[researchStep - 1], snapshot = step.snapshot || {};
+    holder.querySelector('[data-trace-position]').textContent = 'Step ' + (researchStep + 1) + ' of ' + trace.length + ' · sequence ' + (step.seq ?? researchStep);
+    holder.querySelector('[data-trace-slider]').value = researchStep;
+    holder.querySelector('[data-trace-move="-1"]').disabled = researchStep === 0;
+    holder.querySelector('[data-trace-move="1"]').disabled = researchStep === trace.length - 1;
+    holder.querySelector('[data-trace-latest]').disabled = researchStep === trace.length - 1;
+    const events = (run.events || []).filter(event => event.seq === step.eventSeq || event.eventSeq === step.eventSeq);
+    holder.querySelector('[data-trace-event]').innerHTML = '<article class="timeline-event"><div class="panel-heading"><strong>' + escapeHtml(String(step.kind || 'State recorded').replaceAll('_', ' ')) + '</strong><small>' + escapeHtml(formatDate(step.at)) + '</small></div>' + (events.length ? '<ul class="timeline-event-list">' + events.map(event => '<li>' + readableEvent(event) + '</li>').join('') + '</ul>' : '<small>Agent snapshot at this point in the recorded run.</small>') + '</article>';
+    holder.querySelector('[data-trace-diff]').innerHTML = '<div class="trace-diff"><h4>Changes since the previous snapshot</h4>' + traceChanges(previous?.snapshot?.agentStates, snapshot.agentStates) + '</div>';
+    holder.querySelector('[data-trace-evidence]').innerHTML = '<pre>' + escapeHtml(JSON.stringify({ step, events }, null, 2)) + '</pre>';
+    mountAgentStates(holder.querySelector('[data-trace-states]'), snapshot.agentStates, { scope: 'research-' + run.runId, heading: 'Alice & Bob at this step', description: 'Exact historical snapshots; use the graph and cards to inspect what each agent knew and could do.' });
+  };
+  holder.addEventListener('input', event => { if (event.target.matches('[data-trace-slider]')) { researchStep = Number(event.target.value); renderStep(); } });
+  holder.addEventListener('click', event => { const move = event.target.closest('[data-trace-move]'); if (move && !move.disabled) { researchStep += Number(move.dataset.traceMove); renderStep(); } if (event.target.closest('[data-trace-latest]')) { researchStep = trace.length - 1; renderStep(); } });
+  renderStep();
 }
 function formatDate(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? String(value ?? '') : date.toLocaleString(); }
 $('research-view').addEventListener('change', event => { if (event.target.dataset.researchFilter) { researchFilters[event.target.dataset.researchFilter] = event.target.value; renderResearch(); } });
 $('research-view').addEventListener('click', async event => {
+  const runButton = event.target.closest('[data-research-run]'); if (runButton) { selectedResearchRunId = runButton.dataset.researchRun; researchStep = 0; renderResearch(); return; }
   const button = event.target.closest('[data-research-action]'); if (!button) return;
   const format = button.dataset.researchAction; if (format === 'refresh') { loadResearch(); return; }
   button.disabled = true;
@@ -395,6 +487,7 @@ $('research-view').addEventListener('click', async event => {
 
 configController = mountBobConfig($('config-view'), { api, getSessionId: () => selectedSessionId || current?.session.id, onApplied: result => { if (result.state) applyState(result.state); if (activeView === 'console') loadAdminSessions(); } });
 modelController = mountModelConfig($('models-view'), { api, getCurrentRevision: () => current?.session.modelRevision, onApplied: async () => { try { meta = await api('/api/meta', { auth: false }); if (!current || planningNewRound) renderParticipant(); } catch (error) { notify(error.message, 'error'); } } });
+conditionsController = createInitialConditions({ api, isResearcher: () => Boolean(adminToken), onChange: updateStartControls, onSignIn: () => openAdminDialog() });
 
 window.addEventListener('pagehide', () => modelController?.clearSecret());
 
@@ -410,6 +503,7 @@ async function boot() {
       catch (error) { current = null; participantToken = null; writeStorage(sessionKey, null); rememberPending(null); notify('The previous in-memory round is unavailable. Start a new demo; no previous sharing choice will be reconstructed.', 'warning'); }
     } else rememberPending(null);
     renderParticipant();
+    await conditionsController.load();
   } catch (error) { $('connection-status').textContent = 'Unavailable'; $('connection-status').className = 'tag warn'; $('participant-view').innerHTML = '<section class="panel"><h2>Demo service unavailable</h2><p class="lead">' + escapeHtml(error.message) + '</p><button class="button" id="retry-boot">Reconnect</button></section>'; $('retry-boot').addEventListener('click', boot); }
 }
 setInterval(async () => {

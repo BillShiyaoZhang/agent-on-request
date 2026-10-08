@@ -6,6 +6,10 @@ import {
   macObject, verifyMac, errorJSON, fromErrorJSON, validateSessionRef, validateOperation, WORKER_RPC_METHODS,
 } from './runtime-helpers.mjs';
 
+// Windows may inject PATH into a child even when fork receives an explicit
+// environment allowlist. Remove it inside the paired worker as well.
+if (process.send && process.env.AGENT_DEMO_ROLE) delete process.env.PATH;
+
 const SHARED_FIELDS = ['day', 'time', 'status'];
 const FULL_FIELDS = [...SHARED_FIELDS, 'title', 'note'];
 const clone = value => structuredClone(value);
@@ -30,17 +34,20 @@ function withinTime(proposed, available, requireThirtyMinutes = false) {
     && (!requireThirtyMinutes || part.end - part.start === 30));
 }
 
-function projectedCalendar(calendar, stage, choice) {
+function projectedCalendar(calendar, stage, choice, profile) {
   const initial = stage === 'initial';
   invariant(initial || stage === 'additional', 'INVALID_STAGE', 'Unknown projection stage.');
   invariant((initial ? ['free', 'busy', 'full', 'none'] : ['keep', 'narrow', 'week']).includes(choice),
     'INVALID_CHOICE', 'Unknown sharing choice.');
   if (choice === 'none' || choice === 'keep') return { rows: [], fields: [], window: 'none' };
-  const fields = choice === 'full' || choice === 'week' ? FULL_FIELDS : SHARED_FIELDS;
-  const window = initial ? 'Tue–Wed' : choice === 'narrow' ? 'Thu' : 'Mon–Sun';
+  const requestedFields = choice === 'full' || choice === 'week' ? FULL_FIELDS : SHARED_FIELDS;
+  const fields = profile ? requestedFields.filter(field => profile.authorization.fields.includes(field)) : requestedFields;
+  const requestedDays = initial ? ['Tue', 'Wed'] : choice === 'narrow' ? ['Thu'] : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const days = profile ? requestedDays.filter(day => profile.authorization.windows.includes(day)) : requestedDays;
+  const window = days.length === requestedDays.length ? (initial ? 'Tue–Wed' : choice === 'narrow' ? 'Thu' : 'Mon–Sun') : days.length ? days : 'none';
+  invariant(!profile || profile.skills.includes('read_synthetic_calendar') && profile.skills.includes('preview_scoped_calendar'), 'TOOL_DISABLED', 'Alice calendar reading and preview skills are required.', 403);
   const rows = calendar.filter(row => {
-    if (initial && !['Tue', 'Wed'].includes(row.day)) return false;
-    if (choice === 'narrow' && row.day !== 'Thu') return false;
+    if (!days.includes(row.day) || !fields.length) return false;
     return !['free', 'narrow'].includes(choice) || isFree(row);
   }).map(row => Object.fromEntries(fields.map(field => [field, row[field] ?? ''])));
   return { rows, fields: [...fields], window };
@@ -182,13 +189,15 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
         modelSettings: args.modelSettings ? clone(args.modelSettings) : null,
         peerPublicKey: args.peerPublicKey, initialHash,
         calendar: clone(calendar), bobConfig: role === 'Bob' ? clone(args.bobConfig) : undefined,
+        agentProfile: args.agentProfile ? clone(args.agentProfile) : null, initializedAt: Date.now(),
         configRevision: args.configRevision, received: new Map(), outgoing: new Map(), modelCalls: new Set() };
       sessions.set(args.sessionId, state);
       return { ready: true, role, epoch: args.epoch };
     },
     projectAlice(args) {
       invariant(role === 'Alice', 'WRONG_AGENT', 'Only Alice can project her own fixture.', 403);
-      return projectedCalendar(current(args).calendar, args.stage, args.choice);
+      const state = current(args);
+      return projectedCalendar(state.calendar, args.stage, args.choice, state.agentProfile);
     },
     prepareOutgoing(args) {
       validateOperation(args);
@@ -203,11 +212,16 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
         return clone(previous.result);
       }
       if (role === 'Alice') {
+        if (state.agentProfile) {
+          invariant(state.agentProfile.skills.includes('send_scoped_snapshot'), 'TOOL_DISABLED', 'Alice snapshot sending skill is disabled.', 403);
+          invariant(state.outgoing.size < state.agentProfile.authorization.maxUses, 'ALICE_AUTH_LIMIT', 'Alice initial sharing budget is exhausted.', 403);
+          invariant(Date.now() < state.initializedAt + state.agentProfile.authorization.expiryMinutes * 60_000, 'ALICE_AUTH_EXPIRED', 'Alice initial authorization has expired.', 403);
+        }
         const expected = hashPayload({ rows: args.rows, fields: args.fields, window: args.window });
         invariant(args.payloadHash === expected, 'PAYLOAD_HASH_MISMATCH', 'The Alice payload does not match its exact preview hash.', 409);
         const projections = [['initial', 'free'], ['initial', 'busy'], ['initial', 'full'], ['initial', 'none'],
           ['additional', 'keep'], ['additional', 'narrow'], ['additional', 'week']];
-        invariant(projections.some(([stage, choice]) => hashPayload(projectedCalendar(state.calendar, stage, choice)) === expected),
+        invariant(projections.some(([stage, choice]) => hashPayload(projectedCalendar(state.calendar, stage, choice, state.agentProfile)) === expected),
           'INVALID_PROJECTION', 'Alice can send only an exact supported projection of her own fixture.', 403);
       } else {
         invariant(args.values && typeof args.values === 'object' && !Array.isArray(args.values)
@@ -275,6 +289,8 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
       invariant(['initial', 'additional', 'brief'].includes(args.purpose), 'INVALID_PURPOSE', 'Unknown Bob planning purpose.');
       const revision = state.configRevision;
       const config = state.bobConfig;
+      invariant(args.purpose === 'brief' || config.tools?.capabilities?.includes('read_synthetic_calendar'), 'TOOL_DISABLED', 'Bob calendar reading skill is disabled.', 403);
+      invariant(args.purpose !== 'brief' || config.tools?.capabilities?.includes('share_brief'), 'TOOL_DISABLED', 'Bob brief sharing skill is disabled.', 403);
       const matches = intersections(state);
       const brief = clone(config.data?.brief || {});
       if (config.collaboration?.acceptInvitations === false || !config.collaboration?.allowedPeers?.includes('Alice')) {
@@ -289,9 +305,9 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
           + 'For share_brief instead return fields, values and resource="meeting_brief". Never invent a meeting or source values. '
           + 'You have only the actual received Alice projection. You do not know any unshared calendar entry. Do not execute tools.';
         output = await callModel(state, system, {
-          purpose: args.purpose, allowedActions: actions,
+          purpose: args.purpose, allowedActions: actions, ownKnowledgeGraph: clone(state.agentProfile?.kg || { nodes: [], edges: [] }), skills: clone(config.tools?.capabilities || []),
           received: [...state.received.values()].map(item => clone(item.payload)),
-          ownAvailableTimes: clone(config.data?.availableTimes || []), sharedIntersection: matches,
+          ownAvailableTimes: config.tools?.capabilities?.includes('read_synthetic_calendar') ? clone(config.data?.availableTimes || []) : [], sharedIntersection: args.purpose === 'brief' ? [] : matches,
           ...(args.purpose === 'brief' ? { ownBrief: brief } : { followUpInstruction: config.prompts?.followUp || '' }),
         }, config.runtime || {});
         assertStillCurrent(args, state, revision);
@@ -336,7 +352,7 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
       const output = await callModel(state,
         'You are Alice, a fictional assistant speaking to your own participant. Return JSON {"message":"text"}. '
           + 'Explain that the participant chooses any sharing. Never claim you have already sent or authorized anything.',
-        { purpose: args.purpose, ownCalendar: clone(state.calendar), receivedBobData: [...state.received.values()].map(item => clone(item.payload)) });
+        { purpose: args.purpose, ownCalendar: state.agentProfile && !state.agentProfile.skills.includes('read_synthetic_calendar') ? [] : clone(state.calendar), ownKnowledgeGraph: clone(state.agentProfile?.kg || { nodes: [], edges: [] }), skills: clone(state.agentProfile?.skills || []), receivedBobData: state.agentProfile && !state.agentProfile.skills.includes('inspect_received_snapshot') ? [] : [...state.received.values()].map(item => clone(item.payload)) });
       assertStillCurrent(args, state);
       return { message: messageFrom(output) };
     },
@@ -367,6 +383,7 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
         state.outgoing.clear();
         state.calendar.length = 0;
         state.bobConfig = undefined;
+        state.agentProfile = null;
         state.modelSettings = null;
         state.modelSnapshot = null;
         state.initialHash = undefined;

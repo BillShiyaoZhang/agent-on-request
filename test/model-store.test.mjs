@@ -98,8 +98,10 @@ test('apply persists only current secret with private permissions and saved valu
   assert.equal(store.snapshot().apiKey, FIRST_KEY);
   assert.equal(snapshotBefore.apiKey, '', 'existing round snapshots do not change');
   assert.equal(snapshotBefore.config.agents.Bob.temperature, 1);
-  assert.equal((await stat(directory)).mode & 0o777, 0o700);
-  assert.equal((await stat(path.join(directory, 'models.json'))).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') {
+    assert.equal((await stat(directory)).mode & 0o777, 0o700);
+    assert.equal((await stat(path.join(directory, 'models.json'))).mode & 0o777, 0o600);
+  }
   assert.deepEqual(await readdir(directory), ['models.json']);
   const changed = clone(draft);
   changed.agents.Alice.maxTokens = 2048;
@@ -175,12 +177,16 @@ test('model persistence rejects symlinks and corrupt files; memory-compatible pr
   assert.equal(noKey.view().keyConfigured, false);
   const target = path.join(directory, 'target.json');
   await writeFile(target, '{}');
-  await symlink(target, path.join(directory, 'models.json'));
-  await assert.rejects(new ModelStore({ directory }).init(), { code: 'MODEL_STORAGE' });
-  await rm(path.join(directory, 'models.json'));
+  let fileLink = true;
+  try { await symlink(target, path.join(directory, 'models.json')); }
+  catch (error) { if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(error.code)) { fileLink = false; t.diagnostic('File-symlink check requires Windows symlink privilege.'); } else throw error; }
+  if (fileLink) {
+    await assert.rejects(new ModelStore({ directory }).init(), { code: 'MODEL_STORAGE' });
+    await rm(path.join(directory, 'models.json'));
+  }
   await writeFile(path.join(directory, 'models.json'), 'null');
   await assert.rejects(new ModelStore({ directory }).init(), { code: 'MODEL_STORAGE' });
   const linked = path.join(directory, 'linked');
-  await symlink(directory, linked);
+  await symlink(directory, linked, process.platform === 'win32' ? 'junction' : 'dir');
   await assert.rejects(new ModelStore({ directory: linked }).init(), { code: 'MODEL_STORAGE' });
 });

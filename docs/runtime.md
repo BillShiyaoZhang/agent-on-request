@@ -1,6 +1,6 @@
 # Local Alice and Bob runtime
 
-Node.js 26 or newer is required. `npm start` always creates two local child processes; neither the event app nor its default configuration selects a remote Bob. Each Agent owns independent in-memory contexts, received projections, outgoing ledgers, an ephemeral signing identity and a private 0700 temporary working directory. The directory is removed on process exit.
+Node.js 26 or newer is required. `npm start` always creates two local child processes; neither the event app nor its default configuration selects a remote Bob. Each Agent owns independent in-memory contexts, received projections, outgoing ledgers, an ephemeral signing identity and a private temporary working directory. POSIX directories use mode 0700; Windows access follows the parent directory's ACL. The directory is removed on process exit.
 
 ## Isolation boundary
 
@@ -8,7 +8,7 @@ Workers start with Node's permission model and exact read allowlists for `agent-
 
 These controls restrict the trusted, fixed Worker implementation. They are not an OS container or a hostile-code sandbox: [Node's permission documentation](https://nodejs.org/api/permissions.html) explicitly limits that guarantee. The harness does not run model-produced code or arbitrary user tools.
 
-Alice receives her fictional calendar only. Bob receives his own synthetic configuration only. Alice rows enter Bob's context through an exact authorized projection and confirmed delivery. Both Agents use real local IPC and separate processes in Controlled and Live modes.
+Alice receives her own initialized KG, fictional calendar, skills and authorization profile. Bob receives his own initialized KG, profile and synthetic configuration. Neither receives the other's initial private profile. Alice rows enter Bob's context through an exact authorized projection and confirmed delivery. Both Agents use real local IPC and separate processes in Controlled and Live modes.
 
 ## Purpose-built harness
 

@@ -1,8 +1,9 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { canonicalStringify, clone } from './config.mjs';
+import { hashValue } from './config.mjs';
+import { buildTraceSnapshot, sanitizeTraceSnapshot } from './agent-observability.mjs';
 
 const IDENTIFIER = /^[A-Za-z0-9_.:\/-]{1,128}$/;
 const SAFE_KINDS = /^[a-z][a-z0-9_]{0,63}$/;
@@ -17,6 +18,12 @@ const STOPPED = new Set(['stopped', 'ended', 'incomplete', 'withdrawn']);
 const NUMERIC_KEYS = new Set(['configRevision', 'policyRevision', 'adminWaitMs', 'decisionMs']);
 const IDENTIFIER_KEYS = new Set(['operationId', 'code', 'reason', 'grantRevision', 'fieldSet', 'field_set', 'scenarioVersion', 'requestId', 'action']);
 const ALIASES = { sharing_choice: 'choice', scope_requested: 'request', delivered: 'delivery', receipt: 'delivery', configuration: 'config_changed', configuration_changed: 'config_changed', config_change: 'config_changed' };
+// Research records contain many validated snapshots, so the per-configuration
+// JSON complexity limit must not be applied to the accumulated run collection.
+const clone = value => structuredClone(value);
+const stringify = value => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
+  ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
+const traceHash = value => createHash('sha256').update(stringify(value)).digest('hex');
 
 function metadata(session) { return session?.session && typeof session.session === 'object' ? session.session : session; }
 function consented(session) { const meta = metadata(session); return meta?.researchConsent === true && (meta.mode === 'controlled' || meta.mode === 'live'); }
@@ -92,6 +99,17 @@ function csvCell(value) {
   return `"${safe.replaceAll('"', '""')}"`;
 }
 
+function fullTrace(session) { return metadata(session)?.consentVersion === 'research-v2' && Boolean(session?.conditions); }
+function addTrace(run, snapshot, kind, eventSeq = null) {
+  if (run.consentVersion !== 'research-v2' || !run.trace) return;
+  const clean = sanitizeTraceSnapshot(snapshot);
+  if (!clean) return;
+  const previousHash = run.trace.at(-1)?.hash ?? null;
+  const item = { seq: run.trace.length + 1, at: clean.capturedAt, kind: SAFE_KINDS.test(kind) ? kind : 'checkpoint', eventSeq, snapshot: clean, previousHash };
+  item.hash = traceHash(item);
+  run.trace.push(item);
+}
+
 export class ResearchStore {
   constructor({ directory, persist = true } = {}) {
     if (persist && (typeof directory !== 'string' || !directory)) throw new TypeError('A research directory is required when persistence is enabled.');
@@ -132,6 +150,20 @@ export class ResearchStore {
             };
             if (run.endedAt && Number.isFinite(Date.parse(run.endedAt))) clean.endedAt = new Date(run.endedAt).toISOString();
             for (const event of run.events) { const cleaned = whitelistEvent(event, clean); if (cleaned) clean.events.push(cleaned); }
+            if (clean.consentVersion === 'research-v2') {
+              clean.trace = [];
+              for (const step of Array.isArray(run.trace) ? run.trace : []) {
+                const snapshot = sanitizeTraceSnapshot(step.snapshot);
+                if (!snapshot || !SAFE_KINDS.test(step.kind) || step.seq !== clean.trace.length + 1 || step.previousHash !== (clean.trace.at(-1)?.hash ?? null)
+                  || !(step.eventSeq === null || Number.isSafeInteger(step.eventSeq) && step.eventSeq > 0 && step.eventSeq <= clean.events.length)) {
+                  clean.quality = [...new Set([...clean.quality, 'trace_integrity_failed'])]; break;
+                }
+                const item = { seq: step.seq, at: snapshot.capturedAt, kind: step.kind, eventSeq: step.eventSeq, snapshot, previousHash: step.previousHash };
+                if (traceHash(item) !== step.hash) { clean.quality = [...new Set([...clean.quality, 'trace_integrity_failed'])]; break; }
+                clean.trace.push({ ...item, hash: step.hash });
+              }
+              if (clean.trace.length) { clean.initialConditions = clone(clean.trace[0].snapshot.conditions); clean.conditionsHash = hashValue(clean.initialConditions); }
+            }
             // Controller sessions cannot survive a process restart. Keep any recorded
             // task outcome, but do not pretend an orphan can still accept answers.
             if (clean.status === 'active') {
@@ -140,10 +172,12 @@ export class ResearchStore {
             }
             // Also scrub closed records and migrate older records. Filtering only
             // the in-memory export would leave rejected historical fields on disk.
-            try { if (canonicalStringify(run) !== canonicalStringify(clean)) rewrite = true; }
+            try { if (stringify(run) !== stringify(clean)) rewrite = true; }
             catch { rewrite = true; }
             this.runs.set(clean.runId, clean);
           }
+          // Windows cannot replace a destination file while this read handle is open.
+          await handle.close(); handle = null;
           if (rewrite) await this.save(this.runs);
         } finally { await handle?.close(); }
         await chmod(this.directory, 0o700);
@@ -172,7 +206,7 @@ export class ResearchStore {
     let handle;
     try {
       handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      await handle.writeFile(`${canonicalStringify({ schemaVersion: 1, runs: [...nextRuns.values()] })}\n`, 'utf8');
+      await handle.writeFile(`${stringify({ schemaVersion: 1, runs: [...nextRuns.values()] })}\n`, 'utf8');
       await handle.sync();
       await handle.close();
       handle = null;
@@ -191,6 +225,7 @@ export class ResearchStore {
     // There is intentionally no global model-store fallback.
     const models = whitelistModels(sourceModels);
     const modelRevision = models?.revision ?? safeRevision(initialMeta?.modelRevision ?? sourceModels?.revision);
+    const captured = fullTrace(session) ? buildTraceSnapshot(session) : null;
     return this.enqueue(async () => {
       if (!consented(session)) return null;
       await this.init();
@@ -207,6 +242,11 @@ export class ResearchStore {
         status: 'active', quality: [], configRevision: safeRevision(meta.configRevision ?? session?.bob?.configRevision),
         modelRevision, models, events: []
       };
+      if (captured) {
+        run.trace = [];
+        addTrace(run, captured, 'initialized');
+        if (run.trace.length) { run.initialConditions = clone(run.trace[0].snapshot.conditions); run.conditionsHash = hashValue(run.initialConditions); }
+      }
       const next = new Map(this.runs).set(runId, run);
       await this.save(next);
       this.runs = next;
@@ -215,8 +255,9 @@ export class ResearchStore {
     });
   }
 
-  async append(session, event) {
+  async append(session, event, snapshot) {
     if (!consented(session)) return false;
+    const captured = fullTrace(session) ? clone(snapshot ?? buildTraceSnapshot(session)) : null;
     return this.enqueue(async () => {
       if (!consented(session)) return false;
       await this.init();
@@ -227,6 +268,7 @@ export class ResearchStore {
       if (!filtered) return false;
       const run = clone(current);
       run.events.push(filtered);
+      if (captured) addTrace(run, captured, filtered.kind, filtered.seq);
       if (filtered.kind === 'admin_intervention' && !run.quality.includes('admin_intervention')) run.quality.push('admin_intervention');
       if (filtered.kind === 'config_changed' && !run.quality.includes('configuration_changed')) run.quality.push('configuration_changed');
       if (filtered.kind === 'technical' && !run.quality.includes('technical_issue')) run.quality.push('technical_issue');
@@ -237,9 +279,26 @@ export class ResearchStore {
     });
   }
 
+  async checkpoint(session, kind, snapshot) {
+    if (!consented(session) || !fullTrace(session)) return false;
+    const captured = clone(snapshot ?? buildTraceSnapshot(session));
+    return this.enqueue(async () => {
+      await this.init();
+      const runId = this.activeSessions.get(sessionKey(session));
+      const current = this.runs.get(runId);
+      if (!current || current.status !== 'active') return false;
+      const run = clone(current);
+      addTrace(run, captured, kind);
+      const next = new Map(this.runs).set(runId, run);
+      await this.save(next); this.runs = next;
+      return true;
+    });
+  }
+
   async finish(session, status, quality = []) {
     if (!consented(session)) return false;
     if (!STATUSES.has(status) || status === 'active') throw new TypeError('Unknown research completion status.');
+    const captured = fullTrace(session) ? buildTraceSnapshot(session) : null;
     return this.enqueue(async () => {
       if (!consented(session)) return false;
       await this.init();
@@ -248,6 +307,7 @@ export class ResearchStore {
       const current = this.runs.get(runId);
       if (!current || current.status !== 'active') return false;
       const run = clone(current);
+      if (captured) addTrace(run, captured, 'closed');
       run.status = status;
       run.endedAt = new Date().toISOString();
       run.quality = [...new Set([...run.quality, ...safeQuality(quality)])];
@@ -280,11 +340,12 @@ export class ResearchStore {
     const { runs } = this.list();
     if (format === 'jsonl') return runs.map(run => JSON.stringify(run)).join('\n') + (runs.length ? '\n' : '');
     if (format !== 'csv') throw new TypeError('Export format must be jsonl or csv.');
-    const columns = ['runId', 'mode', 'scenarioVersion', 'consentVersion', 'startedAt', 'status', 'quality', 'configRevision', 'modelRevision', 'models', 'seq', 'elapsedMs', 'kind', 'stage', 'choice', 'fields', 'window', 'timeWindow', 'time_window', 'operationId', 'payloadHash', 'recipient', 'questionId', 'answer', 'correct', 'actor', 'action', 'code', 'reason', 'policyRevision', 'adminWaitMs', 'decisionMs', 'eventConfigRevision', 'eventStatus', 'assisted', 'repeat', 'group', 'modeSwitched', 'fieldSet', 'field_set', 'requestId', 'grantRevision'];
+    const columns = ['runId', 'mode', 'scenarioVersion', 'consentVersion', 'startedAt', 'status', 'quality', 'configRevision', 'modelRevision', 'models', 'seq', 'elapsedMs', 'kind', 'stage', 'choice', 'fields', 'window', 'timeWindow', 'time_window', 'operationId', 'payloadHash', 'recipient', 'questionId', 'answer', 'correct', 'actor', 'action', 'code', 'reason', 'policyRevision', 'adminWaitMs', 'decisionMs', 'eventConfigRevision', 'eventStatus', 'assisted', 'repeat', 'group', 'modeSwitched', 'fieldSet', 'field_set', 'requestId', 'grantRevision', 'conditionsHash', 'initialConditions', 'trace'];
     const lines = [columns.map(csvCell).join(',')];
     for (const run of runs) {
       for (const event of run.events.length ? run.events : [{}]) {
-        const row = { ...run, ...event, status: run.status, configRevision: run.configRevision, eventConfigRevision: event.configRevision, eventStatus: event.status };
+        const row = { ...run, ...event, status: run.status, configRevision: run.configRevision, eventConfigRevision: event.configRevision, eventStatus: event.status,
+          initialConditions: event.seq === 1 || !event.seq ? run.initialConditions : undefined, trace: event.seq === 1 || !event.seq ? run.trace : undefined };
         lines.push(columns.map(column => csvCell(row[column])).join(','));
       }
     }

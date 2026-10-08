@@ -146,8 +146,8 @@ export function createRuntimeManager(options = {}) {
         modelRevision: snapshot.revision, modelAvailable: available(snapshot) };
       try {
         const [a, b] = await Promise.all([
-          alice.call('initialize', { ...common, ...(!legacyMode ? { modelSettings: snapshot.config.agents.Alice } : {}), aliceData: args.aliceData, peerPublicKey: bob.identity }),
-          bob.call('initialize', { ...common, ...(!legacyMode ? { modelSettings: snapshot.config.agents.Bob } : {}), bobConfig: args.bobConfig, peerPublicKey: alice.identity }),
+          alice.call('initialize', { ...common, ...(!legacyMode ? { modelSettings: snapshot.config.agents.Alice } : {}), aliceData: args.aliceData, ...(args.aliceProfile ? { agentProfile: args.aliceProfile } : {}), peerPublicKey: bob.identity }),
+          bob.call('initialize', { ...common, ...(!legacyMode ? { modelSettings: snapshot.config.agents.Bob } : {}), bobConfig: args.bobConfig, ...(args.bobProfile ? { agentProfile: args.bobProfile } : {}), peerPublicKey: alice.identity }),
         ]);
         sessions.set(args.sessionId, { epoch: args.epoch, mode: args.mode, digest,
           configRevision: args.configRevision, runtime: structuredClone(args.bobConfig?.runtime || {}), models: snapshot, legacyMode });
