@@ -80,7 +80,10 @@ const PRESET_BY_ID = new Map(PRESETS.map(item => [item.id, item]));
 function effectiveComponent(id, bobTemplate) {
   const entry = clone(COMPONENT_BY_ID.get(id));
   if (id === 'bob-data-template') entry.patch.data = { availableTimes: clone(bobTemplate.data.availableTimes), brief: clone(bobTemplate.data.brief) };
-  if (id === 'bob-skills-template') entry.patch.skills = clone(bobTemplate.tools.capabilities);
+  if (id === 'bob-skills-template') {
+    entry.patch.skills = clone(bobTemplate.tools.capabilities);
+    if (Object.hasOwn(bobTemplate.tools, 'skillDefinitions')) entry.patch.skillDefinitions = clone(bobTemplate.tools.skillDefinitions);
+  }
   if (id === 'bob-auth-template') entry.patch.authorization = clone(bobTemplate.permissions);
   return entry;
 }
@@ -224,10 +227,31 @@ function validators(errors, bobTemplate = DEFAULT_BOB_CONFIG) {
     if (Object.hasOwn(value, 'askAdminForNewScope') && typeof value.askAdminForNewScope !== 'boolean') add(`${path}.askAdminForNewScope`, 'Must be a boolean.');
   };
   const agent = (value, path, role, partial) => {
-    if (!object(value, path, CATEGORIES, partial ? [] : CATEGORIES)) return;
+    if (!object(value, path, [...CATEGORIES, 'skillDefinitions'], partial ? [] : CATEGORIES)) return;
     if (Object.hasOwn(value, 'kg')) kg(value.kg, `${path}.kg`, partial);
     if (Object.hasOwn(value, 'data')) data(value.data, `${path}.data`, role, partial);
-    if (Object.hasOwn(value, 'skills')) list(value.skills, `${path}.skills`, role === 'Alice' ? ALICE_SKILLS : [...new Set([...BOB_SKILLS, ...bobTemplate.tools.capabilities])]);
+    if (Object.hasOwn(value, 'skills') && list(value.skills, `${path}.skills`, null)) {
+      for (const [index, id] of value.skills.entries()) {
+        const registered = SKILLS.find(skill => skill.id === id);
+        if (registered && !registered.roles.includes(role)) add(`${path}.skills[${index}]`, `This registered skill is unavailable to ${role}.`, 'UNKNOWN_VALUE');
+      }
+    }
+    if (Object.hasOwn(value, 'skillDefinitions')) {
+      if (!Array.isArray(value.skillDefinitions) || value.skillDefinitions.length > 100) add(`${path}.skillDefinitions`, 'Must be an array of at most 100 skill definitions.');
+      else {
+        const ids = new Set();
+        for (const [index, definition] of value.skillDefinitions.entries()) {
+          const target = `${path}.skillDefinitions[${index}]`;
+          if (!object(definition, target, ['id', 'label', 'description'])) continue;
+          text(definition.id, `${target}.id`, 128);
+          text(definition.label, `${target}.label`, 200);
+          text(definition.description, `${target}.description`, 4000, true, true);
+          if (ids.has(definition.id)) add(`${target}.id`, 'Skill definition IDs must be unique.', 'DUPLICATE');
+          ids.add(definition.id);
+          if (!partial && Array.isArray(value.skills) && !value.skills.includes(definition.id)) add(`${target}.id`, 'Define only a skill enabled for this agent.', 'SKILL_REFERENCE');
+        }
+      }
+    }
     if (Object.hasOwn(value, 'authorization')) authorization(value.authorization, `${path}.authorization`, role, partial);
   };
   const componentIds = (value, path, partial) => {
@@ -274,8 +298,16 @@ function baseAgents(bobTemplate, empty = false) {
   };
   return {
     Alice: { kg: graph('Alice'), data: { calendar: clone(ALICE_CALENDAR) }, skills: clone(ALICE_SKILLS), authorization: clone(aliceAuthorization) },
-    Bob: { kg: graph('Bob'), data: { availableTimes: clone(bobTemplate.data.availableTimes), brief: clone(bobTemplate.data.brief) }, skills: clone(bobTemplate.tools.capabilities), authorization: clone(bobTemplate.permissions) }
+    Bob: { kg: graph('Bob'), data: { availableTimes: clone(bobTemplate.data.availableTimes), brief: clone(bobTemplate.data.brief) }, skills: clone(bobTemplate.tools.capabilities), ...(Object.hasOwn(bobTemplate.tools, 'skillDefinitions') ? { skillDefinitions: clone(bobTemplate.tools.skillDefinitions) } : {}), authorization: clone(bobTemplate.permissions) }
   };
+}
+
+function applyComponent(agent, entry) {
+  agent[entry.category] = clone(entry.patch[entry.category]);
+  if (entry.category === 'skills') {
+    if (Object.hasOwn(entry.patch, 'skillDefinitions')) agent.skillDefinitions = clone(entry.patch.skillDefinitions);
+    else if (agent.skillDefinitions) agent.skillDefinitions = agent.skillDefinitions.filter(definition => agent.skills.includes(definition.id));
+  }
 }
 
 function normalize(conditions) {
@@ -315,15 +347,21 @@ export function resolveConditions(input, bobTemplate = DEFAULT_BOB_CONFIG) {
   for (const role of ROLES) {
     for (const id of preset.componentIds[role]) {
       const entry = effectiveComponent(id, bobTemplate);
-      conditions.agents[role][entry.category] = clone(entry.patch[entry.category]);
+      applyComponent(conditions.agents[role], entry);
     }
     for (const id of input.componentIds?.[role] ?? []) {
       const entry = effectiveComponent(id, bobTemplate);
       conditions.componentIds[role] = conditions.componentIds[role].filter(existing => COMPONENT_BY_ID.get(existing).category !== entry.category);
       conditions.componentIds[role].push(id);
-      conditions.agents[role][entry.category] = clone(entry.patch[entry.category]);
+      applyComponent(conditions.agents[role], entry);
     }
-    if (input.custom?.[role]) merge(conditions.agents[role], input.custom[role]);
+    if (input.custom?.[role]) {
+      const patch = input.custom[role];
+      merge(conditions.agents[role], patch);
+      // Explicitly replacing skills also removes their inherited definitions.
+      // A supplied definition list is validated as authored instead of pruned.
+      if (Object.hasOwn(patch, 'skills') && !Object.hasOwn(patch, 'skillDefinitions') && conditions.agents[role].skillDefinitions) conditions.agents[role].skillDefinitions = conditions.agents[role].skillDefinitions.filter(definition => patch.skills.includes(definition.id));
+    }
     v.agent(conditions.agents[role], `$.agents.${role}`, role, false);
   }
   if (errors.length) invalid(errors);
@@ -337,6 +375,8 @@ export function conditionBobConfig(conditions, bobTemplate = DEFAULT_BOB_CONFIG)
   const config = clone(bobTemplate), bob = resolved.agents.Bob;
   config.data = { ...config.data, synthetic: true, availableTimes: clone(bob.data.availableTimes), brief: clone(bob.data.brief) };
   config.tools.capabilities = clone(bob.skills);
+  if (Object.hasOwn(bob, 'skillDefinitions')) config.tools.skillDefinitions = clone(bob.skillDefinitions);
+  else delete config.tools.skillDefinitions;
   config.permissions = clone(bob.authorization);
   const validation = validateConfig(config);
   if (!validation.valid) invalid(validation.errors);
@@ -345,14 +385,14 @@ export function conditionBobConfig(conditions, bobTemplate = DEFAULT_BOB_CONFIG)
 
 /** Fresh copies keep UI edits from mutating global catalog definitions. */
 export function conditionCatalog(bobTemplate = DEFAULT_BOB_CONFIG) {
-  const skills = [...SKILLS, ...bobTemplate.tools.capabilities.filter(id => !BOB_SKILLS.includes(id)).map(id => ({ id, name: id, description: 'A capability label inherited from the current owner template. Only registered runtime actions can execute.', roles: ['Bob'] }))];
+  const skills = [...SKILLS.map(skill => ({ ...skill, registered: true })), ...bobTemplate.tools.capabilities.filter(id => !SKILLS.some(skill => skill.id === id)).map(id => ({ id, name: bobTemplate.tools.skillDefinitions?.find(definition => definition.id === id)?.label ?? id, description: bobTemplate.tools.skillDefinitions?.find(definition => definition.id === id)?.description ?? 'A capability label inherited from the current owner template. Only registered runtime actions can execute.', roles: ['Bob'], registered: false }))];
   // Each fixture/component is independently validated; the accumulated catalog
   // can exceed the per-fixture JSON node budget because template data repeats.
   return JSON.parse(JSON.stringify({
     schemaVersion: 1, defaultPresetId: 'conference', defaultInput: { presetId: 'conference', componentIds: { Alice: [], Bob: [] } }, categories: CATEGORIES, roles: ROLES, days: DAYS, skills,
     presets: PRESETS.map(preset => ({ ...preset, agents: resolveConditions({ presetId: preset.id }, bobTemplate).agents })),
     components: COMPONENTS.map(entry => effectiveComponent(entry.id, bobTemplate)),
-    limits: { kgNodes: 200, kgEdges: 400, calendarEntries: 500, maxUses: 10_000, expiryMinutes: 1440 },
+    limits: { kgNodes: 200, kgEdges: 400, calendarEntries: 500, skills: 100, skillLabel: 200, skillDescription: 4000, maxUses: 10_000, expiryMinutes: 1440 },
     composition: { order: ['preset', 'components', 'custom'], arrays: 'replace', componentSelection: 'one per category per role; overrides preset category', syntheticOnly: true, aliceRequiresExplicitSharing: true }
   }));
 }
@@ -362,7 +402,7 @@ export function conditionSchema(bobTemplate = DEFAULT_BOB_CONFIG) {
   const string = maxLength => ({ type: 'string', minLength: 1, maxLength, pattern: '^[^\\u0000-\\u001f\\u007f]*$' });
   const strings = values => ({ type: 'array', maxItems: values.length, uniqueItems: true, items: { enum: values } });
   const safeStrings = { type: 'array', maxItems: 100, uniqueItems: true, items: string(128) };
-  const object = (properties, required = Object.keys(properties)) => ({ type: 'object', additionalProperties: false, properties, required });
+  const object = (properties, required = Object.keys(properties)) => ({ type: 'object', additionalProperties: false, properties, required: [...required] });
   const interval = { type: 'string', pattern: '^\\d{2}:\\d{2}[–-]\\d{2}:\\d{2}$', description: 'A valid within-day time interval with end after start; semantic validation applies.' };
   const kg = object({
     nodes: { type: 'array', maxItems: 200, items: object({ id: string(80), label: string(200), type: string(64) }) },
@@ -370,8 +410,10 @@ export function conditionSchema(bobTemplate = DEFAULT_BOB_CONFIG) {
   });
   const calendar = { type: 'array', maxItems: 500, items: object({ day: { enum: DAYS }, time: interval, status: { enum: ['Free', 'Busy'] }, title: { type: 'string', maxLength: 500 }, note: { type: 'string', maxLength: 2000 } }) };
   const budget = { maxUses: { type: 'integer', minimum: 1, maximum: 10_000 }, expiryMinutes: { type: 'number', minimum: 0.01, maximum: 1440 } };
-  const alice = object({ kg, data: object({ calendar }), skills: strings(ALICE_SKILLS), authorization: object({ fields: strings(ALICE_FIELDS), windows: strings(DAYS), ...budget }) });
-  const bob = object({ kg, data: object({ availableTimes: { type: 'array', maxItems: 500, items: object({ day: { enum: DAYS }, time: interval }) }, brief: { type: 'object', description: 'Extensible fictional JSON; semantic validation rejects credentials and unsafe keys.' } }), skills: strings([...new Set([...BOB_SKILLS, ...bobTemplate.tools.capabilities])]), authorization: object({ recipients: safeStrings, fields: safeStrings, resources: safeStrings, window: string(128), ...budget, confirmation: { ...string(128), description: 'bounded permits policy-limited sends; other owner modes require explicit review.' }, askAdminForNewScope: { type: 'boolean' } }) });
+  const skillDefinitions = { type: 'array', maxItems: 100, description: 'Optional role-local labels and instructions for enabled skills. IDs must be unique and enabled; custom IDs do not create executable tools.', items: object({ id: string(128), label: string(200), description: { type: 'string', maxLength: 4000, pattern: '^[^\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f\\u007f]*$' } }) };
+  const skillIds = { ...safeStrings, description: 'Registered role skills or custom metadata labels. Only registered actions execute; opposite-role registered IDs are rejected.' };
+  const alice = object({ kg, data: object({ calendar }), skills: skillIds, skillDefinitions, authorization: object({ fields: strings(ALICE_FIELDS), windows: strings(DAYS), ...budget }) }, CATEGORIES);
+  const bob = object({ kg, data: object({ availableTimes: { type: 'array', maxItems: 500, items: object({ day: { enum: DAYS }, time: interval }) }, brief: { type: 'object', description: 'Extensible fictional JSON; semantic validation rejects credentials and unsafe keys.' } }), skills: skillIds, skillDefinitions, authorization: object({ recipients: safeStrings, fields: safeStrings, resources: safeStrings, window: string(128), ...budget, confirmation: { ...string(128), description: 'bounded permits policy-limited sends; other owner modes require explicit review.' }, askAdminForNewScope: { type: 'boolean' } }) }, CATEGORIES);
   const partial = schema => {
     const copy = clone(schema);
     // Arrays replace whole values, so array item objects remain complete.
@@ -388,6 +430,6 @@ export function conditionSchema(bobTemplate = DEFAULT_BOB_CONFIG) {
       object({ schemaVersion: { const: 1 }, presetId, componentIds: { ...ids, required: [] }, custom: object({ Alice: partial(alice), Bob: partial(bob) }, []) }, []),
       object({ schemaVersion: { const: 1 }, presetId, componentIds: ids, agents: object({ Alice: alice, Bob: bob }) })
     ],
-    $defs: { Alice: alice, Bob: bob, kg }
+    $defs: { Alice: alice, Bob: bob, kg, skillDefinitions }
   };
 }

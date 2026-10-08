@@ -133,8 +133,10 @@ try {
   await reveal(field('agents.Alice.thinking'));
   await field('agents.Alice.thinking').selectOption('adaptive');
   const check = response('/api/admin/models/validate'); await modelAction('validate').click(); assert.equal((await (await check).json()).valid, true);
-  await page.locator('[data-model-diff]').waitFor({ state: 'visible' });
-  assert.equal(await page.locator('[data-model-diff]').isVisible(), true, 'Validation reveals the exact configuration diff.');
+  await page.locator('[data-model-change-summary]').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('[data-model-change-summary]').isVisible(), true, 'Validation reveals readable configuration changes.');
+  await reveal(page.locator('[data-model-diff]'));
+  assert.equal(await page.locator('[data-model-diff]').isVisible(), true, 'Exact configuration properties remain available on demand.');
   assert.equal(await modelAction('apply').isDisabled(), true, 'An existing key cannot silently move to a different provider.');
   await reveal(page.locator('[data-model-clear-key]')); await page.locator('[data-model-clear-key]').check();
   assert.equal(await page.locator('[data-model-key]').isDisabled(), true);
@@ -145,7 +147,8 @@ try {
   assert.equal(saved.config.agents.Alice.thinking, 'adaptive');
   assert.equal((await current()).session.modelRevision, before.session.modelRevision);
   for (const role of ['Alice', 'Bob']) {
-    const tested = response('/api/admin/models/test'); await page.locator('[data-model-action="test"][data-model-role="' + role + '"]').click();
+    const testButton = await reveal(page.locator('[data-model-action="test"][data-model-role="' + role + '"]'));
+    const tested = response('/api/admin/models/test'); await testButton.click();
     const value = await (await tested).json(); assert.equal(value.role, role); assert.equal(value.model, saved.config.agents[role].model); assert.ok(value.latencyMs >= 0);
     await page.waitForFunction(role => document.querySelector('[data-model-test="' + role + '"]').textContent.includes('Connection successful · fictional test data'), role);
   }

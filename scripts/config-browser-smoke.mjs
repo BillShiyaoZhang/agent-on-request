@@ -36,7 +36,8 @@ try {
   await reveal(addNode); await addNode.click(); await addNode.click();
   const nodeIds = page.locator('[data-conditions-row-path="kg.nodes"][data-key="id"]');
   const count = await nodeIds.count();
-  await page.locator('[data-conditions-action="remove-row"][data-path="kg.nodes"][data-index="' + (count - 2) + '"]').click();
+  const removePriorNode = await reveal(page.locator('[data-conditions-action="remove-row"][data-path="kg.nodes"][data-index="' + (count - 2) + '"]'));
+  await removePriorNode.click();
   await addNode.click();
   const ids = await nodeIds.evaluateAll(nodes => nodes.map(node => node.value));
   assert.equal(ids.length, new Set(ids).size, 'Add after removing a generated row must still generate a unique node ID.');

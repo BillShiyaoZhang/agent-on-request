@@ -115,7 +115,7 @@ test('unknown fields cannot silently request real data, tools or policy broadeni
   rejects({ custom: { Alice: { tools: ['filesystem'] } } }, '$.custom.Alice.tools', 'UNKNOWN_FIELD');
   rejects({ custom: { Alice: { authorization: { recipients: ['Eve'] } } } }, '$.custom.Alice.authorization.recipients', 'UNKNOWN_FIELD');
   rejects({ custom: { Bob: { authorization: { recipients: [''] } } } }, '$.custom.Bob.authorization.recipients[0]');
-  rejects({ custom: { Bob: { skills: ['filesystem'] } } }, '$.custom.Bob.skills[0]', 'UNKNOWN_VALUE');
+  assert.deepEqual(resolveConditions({ custom: { Bob: { skills: ['filesystem'] } } }).agents.Bob.skills, ['filesystem'], 'Custom labels are inert metadata; registered actions retain their explicit checks.');
   rejects({ custom: { Alice: { skills: ['share_brief'] } } }, '$.custom.Alice.skills[0]', 'UNKNOWN_VALUE');
 });
 

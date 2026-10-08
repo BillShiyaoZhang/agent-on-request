@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 const BLOCKED_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const SECRET_KEYS = new Set(['apikey', 'modelapikey', 'providerkey', 'password', 'passwd', 'secret', 'clientsecret', 'token', 'accesstoken', 'refreshtoken', 'bobtoken', 'adminpin', 'authorization', 'credentials', 'credential', 'privatekey', 'connectionstring']);
 const DAYS = new Set(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+const ALICE_ONLY_SKILLS = new Set(['preview_scoped_calendar', 'send_scoped_snapshot', 'inspect_received_snapshot']);
 
 export const DEFAULT_BOB_CONFIG = {
   persona: 'Bob is a calm research collaborator.',
@@ -144,7 +145,33 @@ export function validateConfig(config) {
     object(config.data.brief, '$.data.brief');
   }
   if (object(config.collaboration, '$.collaboration')) { boolean(config.collaboration.acceptInvitations, '$.collaboration.acceptInvitations'); strings(config.collaboration.allowedPeers, '$.collaboration.allowedPeers'); }
-  if (object(config.tools, '$.tools')) strings(config.tools.capabilities, '$.tools.capabilities');
+  if (object(config.tools, '$.tools')) {
+    strings(config.tools.capabilities, '$.tools.capabilities');
+    if (Array.isArray(config.tools.capabilities)) for (const [index, id] of config.tools.capabilities.entries()) {
+      if (ALICE_ONLY_SKILLS.has(id)) errors.push({ path: `$.tools.capabilities[${index}]`, code: 'UNKNOWN_VALUE', message: 'This registered skill is unavailable to Bob.' });
+    }
+    if (Object.hasOwn(config.tools, 'skillDefinitions')) {
+      const definitions = config.tools.skillDefinitions;
+      if (!Array.isArray(definitions) || definitions.length > 100) add('$.tools.skillDefinitions', 'Must be an array of at most 100 skill definitions.');
+      else {
+        const ids = new Set();
+        for (const [index, definition] of definitions.entries()) {
+          const path = `$.tools.skillDefinitions[${index}]`;
+          if (!object(definition, path)) continue;
+          for (const key of Object.keys(definition)) if (!['id', 'label', 'description'].includes(key)) add(`${path}.${key}`, 'Unknown skill definition field.');
+          for (const [key, limit] of [['id', 128], ['label', 200], ['description', 4000]]) {
+            const value = definition[key];
+            const controls = key === 'description' ? /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/ : /[\u0000-\u001f\u007f]/;
+            if (typeof value !== 'string' || key !== 'description' && !value.trim() || value.length > limit || controls.test(value)) add(`${path}.${key}`, `Must be ${key === 'description' ? 'a' : 'a nonempty'} string of at most ${limit} characters without invalid control characters.`);
+            else if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:Bearer|Basic)\s+[A-Za-z0-9+/=._-]{12,}|\bsk-[A-Za-z0-9_-]{16,}/.test(value)) errors.push({ path: `${path}.${key}`, code: 'CREDENTIAL', message: 'Credentials must not be included in skill definitions.' });
+          }
+          if (ids.has(definition.id)) add(`${path}.id`, 'Skill definition IDs must be unique.');
+          ids.add(definition.id);
+          if (Array.isArray(config.tools.capabilities) && !config.tools.capabilities.includes(definition.id)) add(`${path}.id`, 'Define only an enabled capability.');
+        }
+      }
+    }
+  }
   if (object(config.permissions, '$.permissions')) {
     for (const key of ['recipients', 'fields', 'resources']) strings(config.permissions[key], `$.permissions.${key}`);
     text(config.permissions.window, '$.permissions.window', 128);

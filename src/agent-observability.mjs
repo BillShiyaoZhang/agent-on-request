@@ -38,7 +38,7 @@ const windowValue = value => Array.isArray(value) ? strings(value).slice(0, 7) :
 const windowLabel = value => Array.isArray(value) ? value.join('、') : value;
 const iso = value => (typeof value === 'string' || typeof value === 'number') && Number.isFinite(new Date(value).getTime()) ? new Date(value).toISOString() : null;
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 20);
-const labelField = field => FIELD_LABELS[field] ?? field.replaceAll('_', ' ');
+const labelField = field => Object.hasOwn(FIELD_LABELS, field) ? FIELD_LABELS[field] : field.replaceAll('_', ' ');
 
 function scalars(input, fields = Object.keys(object(input) ? input : {})) {
   const output = {};
@@ -107,6 +107,17 @@ function bobAuthorization(input) {
     window: text(read(input, 'window'), 128), maxUses: number(read(input, 'maxUses')), expiryMinutes: number(read(input, 'expiryMinutes')),
     confirmation: text(read(input, 'confirmation'), 128), askAdminForNewScope: read(input, 'askAdminForNewScope') === true };
 }
+function skillDefinitions(input, enabled) {
+  const definitions = [], ids = new Set();
+  for (const definition of list(input).slice(0, 100)) {
+    const id = text(read(definition, 'id'), 128), label = text(read(definition, 'label'), 200), description = text(read(definition, 'description'), 4000);
+    if (!id || !label || description === null || !enabled.includes(id) || ids.has(id)) continue;
+    if ([id, label, description].some(value => /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:Bearer|Basic)\s+[A-Za-z0-9+/=._-]{12,}|\bsk-[A-Za-z0-9_-]{16,}/.test(value))) continue;
+    ids.add(id);
+    definitions.push({ id, label, description });
+  }
+  return definitions;
+}
 function conditions(input) {
   if (!object(input) || !object(read(input, 'agents'))) return null;
   const agents = {};
@@ -114,20 +125,20 @@ function conditions(input) {
     const agent = read(read(input, 'agents'), role), data = read(agent, 'data');
     agents[role] = { kg: kg(read(agent, 'kg')), data: role === 'Alice' ? { calendar: calendar(read(data, 'calendar')) }
       : { availableTimes: calendar(read(data, 'availableTimes'), true), brief: syntheticFields(read(data, 'brief')) },
-    skills: strings(read(agent, 'skills')), authorization: role === 'Alice' ? aliceAuthorization(read(agent, 'authorization')) : bobAuthorization(read(agent, 'authorization')) };
+    skills: strings(read(agent, 'skills')), ...(read(agent, 'skillDefinitions') === undefined ? {} : { skillDefinitions: skillDefinitions(read(agent, 'skillDefinitions'), strings(read(agent, 'skills'))) }), authorization: role === 'Alice' ? aliceAuthorization(read(agent, 'authorization')) : bobAuthorization(read(agent, 'authorization')) };
   }
   const componentIds = read(input, 'componentIds');
   return { schemaVersion: 1, presetId: text(read(input, 'presetId'), 128), componentIds: { Alice: strings(read(componentIds, 'Alice')), Bob: strings(read(componentIds, 'Bob')) }, agents };
 }
 function config(input) {
   if (!object(input)) return null;
-  const data = read(input, 'data'), collaboration = read(input, 'collaboration'), response = read(input, 'response');
+  const data = read(input, 'data'), collaboration = read(input, 'collaboration'), response = read(input, 'response'), tools = read(input, 'tools');
   // Prompts, provider/runtime settings and arbitrary extensions are intentionally outside this trace schema.
   return { persona: text(read(input, 'persona')), objective: text(read(input, 'objective')),
     data: { source: text(read(data, 'source'), 128), synthetic: read(data, 'synthetic') === true,
       availableTimes: calendar(read(data, 'availableTimes'), true), brief: syntheticFields(read(data, 'brief')) },
     collaboration: { acceptInvitations: read(collaboration, 'acceptInvitations') === true, allowedPeers: strings(read(collaboration, 'allowedPeers')) },
-    tools: { capabilities: strings(read(read(input, 'tools'), 'capabilities')) }, permissions: bobAuthorization(read(input, 'permissions')),
+    tools: { capabilities: strings(read(tools, 'capabilities')), ...(read(tools, 'skillDefinitions') === undefined ? {} : { skillDefinitions: skillDefinitions(read(tools, 'skillDefinitions'), strings(read(tools, 'capabilities'))) }) }, permissions: bobAuthorization(read(input, 'permissions')),
     response: { constraints: text(read(response, 'constraints')), maxWords: number(read(response, 'maxWords')), offerBrief: read(response, 'offerBrief') === true } };
 }
 function receipt(input, direction) {
@@ -313,8 +324,13 @@ export function buildAgentStates(session, at = Date.now()) {
     const incoming = state.receipts[role === 'Alice' ? 'bobToAlice' : 'aliceToBob'].filter(receipt => receipt.status === 'received');
     const graph = graphFor(role, initialized?.kg ?? { nodes: [], edges: [] }, ownData, incoming);
     const capabilities = role === 'Bob' ? state.config?.tools.capabilities ?? initialized?.skills ?? [] : initialized?.skills ?? ['read_synthetic_calendar', 'project_calendar', 'send_scoped_snapshot'];
+    const definitions = new Map((role === 'Bob' && state.config ? state.config.tools.skillDefinitions ?? [] : initialized?.skillDefinitions ?? []).map(definition => [definition.id, definition]));
     result[role] = { id: role, label: role, kg: graph,
-      skills: capabilities.map(id => ({ id, label: SKILLS[id]?.[0] ?? id.replaceAll('_', ' '), description: SKILLS[id]?.[1] ?? '此能力已在当前初始化条件中启用。', enabled: true })),
+      skills: capabilities.map(id => {
+        const registered = Object.hasOwn(SKILLS, id) ? SKILLS[id] : null;
+        const definition = definitions.get(id);
+        return { id, label: definition?.label ?? registered?.[0] ?? id.replaceAll('_', ' '), description: definition?.description ?? registered?.[1] ?? '此标签提供自定义角色指导；只会执行已注册的操作。', enabled: true, ...(!registered || definition ? { customized: true } : {}) };
+      }),
       data: [...ownData, ...incoming.map(receipt => ({ id: `received:${receipt.operationId}`, label: `来自 ${role === 'Alice' ? 'Bob' : 'Alice'} 的快照`,
         kind: 'snapshot', origin: 'received', count: receipt.rows?.length ?? Object.keys(receipt.values).length, fields: receipt.fields,
         summary: `${receipt.fields.map(labelField).join('、')}${receipt.window ? ` · ${windowLabel(receipt.window)}` : ''}`,

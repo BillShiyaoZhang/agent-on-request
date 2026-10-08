@@ -126,6 +126,40 @@ test('persisted custom briefs preserve accepted long strings and wide nested JSO
   assert.equal(JSON.parse(restored.export('jsonl')).conditionsHash, expectedHash);
 });
 
+test('persisted custom skill guidance reconstructs both roles and preserves the reviewed fixture hash after restart', async t => {
+  const { engine, research, directory } = await fixture(t, true);
+  const conditions = resolveConditions();
+  const definitions = {
+    Alice: { id: 'compare_study_options', label: 'Explain my choices', description: 'Alice guidance sentinel.\n' + 'a'.repeat(3975) },
+    Bob: { id: 'explain_scoped_reason', label: 'Explain scope choices', description: 'Bob guidance sentinel.\n' + 'b'.repeat(3977) }
+  };
+  for (const role of ['Alice', 'Bob']) {
+    conditions.agents[role].skills.push(definitions[role].id);
+    conditions.agents[role].skillDefinitions = [definitions[role]];
+  }
+  const expectedHash = hashValue(conditions);
+  const created = await engine.create({ researchConsent: true, initialConditions: conditions, expectedConditionsHash: expectedHash });
+  const session = engine.get(created.state.session.id);
+  await engine.action(session, { action: 'end', requestId: randomUUID(), expectedVersion: session.version });
+  const run = research.list().runs[0];
+  assert.deepEqual(run.initialConditions, conditions);
+  assert.equal(run.conditionsHash, expectedHash);
+  for (const step of run.trace) {
+    assert.equal(hashValue(step.snapshot.conditions), expectedHash);
+    assert.deepEqual(step.snapshot.config.tools.skillDefinitions, [definitions.Bob]);
+    for (const role of ['Alice', 'Bob']) {
+      const skill = step.snapshot.agentStates[role].skills.find(skill => skill.id === definitions[role].id);
+      assert.equal(skill.label, definitions[role].label);
+      assert.equal(skill.description, definitions[role].description);
+      assert.equal(JSON.stringify(step.snapshot.agentStates[role]).includes(`${role === 'Alice' ? 'Bob' : 'Alice'} guidance sentinel`), false);
+    }
+  }
+  const restored = new ResearchStore({ directory: path.join(directory, 'research') });
+  await restored.init();
+  assert.deepEqual(restored.list(), research.list());
+  assert.equal(JSON.parse(restored.export('jsonl')).conditionsHash, expectedHash);
+});
+
 test('condition APIs preview without mutation and require owner authority only for actual Bob changes', async t => {
   const app = await createDemoServer({ port: 0, adminPin: 'conditions-admin-pin', persist: false });
   await app.listen(); t.after(() => app.close());

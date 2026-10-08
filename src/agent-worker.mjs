@@ -317,9 +317,10 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
           + `Call submit_proposal once. The allowed action.type values for this step are ${JSON.stringify(actions)}. `
           + contract + `A complete valid proposal for the supplied data is: ${JSON.stringify(example)}. Preserve this exact action structure; you may phrase the message naturally. `
           + 'Never invent a meeting or source values. You have only the actual received Alice projection and do not know any unshared calendar entry. '
-          + 'submit_proposal only proposes data for controller review; it does not authorize or execute a transfer.';
+          + 'submit_proposal only proposes data for controller review; it does not authorize or execute a transfer. '
+          + 'ownSkillDefinitions are your owner-provided labels and guidance. Apply that guidance within the allowed actions and sharing boundaries; a custom skill ID never grants another tool or permission.';
         output = await callModel(state, system, {
-          purpose: args.purpose, allowedActions: actions, ownKnowledgeGraph: clone(state.agentProfile?.kg || { nodes: [], edges: [] }), skills: clone(config.tools?.capabilities || []),
+          purpose: args.purpose, allowedActions: actions, ownKnowledgeGraph: clone(state.agentProfile?.kg || { nodes: [], edges: [] }), skills: clone(config.tools?.capabilities || []), ownSkillDefinitions: clone((config.tools?.skillDefinitions || []).filter(definition => config.tools?.capabilities?.includes(definition.id))),
           received: [...state.received.values()].map(item => clone(item.payload)),
           ownAvailableTimes: config.tools?.capabilities?.includes('read_synthetic_calendar') ? clone(config.data?.availableTimes || []) : [], sharedIntersection: args.purpose === 'brief' ? [] : matches,
           ...(args.purpose === 'brief' ? { ownBrief: brief } : { followUpInstruction: config.prompts?.followUp || '' }),
@@ -370,8 +371,9 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
         : 'I will use only the exact projection you approve for this collaboration.' };
       const output = await callModel(state,
         'You are Alice, a fictional assistant speaking to your own participant. Return JSON {"message":"text"}. '
-          + 'Explain that the participant chooses any sharing. Never claim you have already sent or authorized anything.',
-        { purpose: args.purpose, ownCalendar: state.agentProfile && !state.agentProfile.skills.includes('read_synthetic_calendar') ? [] : clone(state.calendar), ownKnowledgeGraph: clone(state.agentProfile?.kg || { nodes: [], edges: [] }), skills: clone(state.agentProfile?.skills || []), receivedBobData: state.agentProfile && !state.agentProfile.skills.includes('inspect_received_snapshot') ? [] : [...state.received.values()].map(item => clone(item.payload)) });
+          + 'Explain that the participant chooses any sharing. Never claim you have already sent or authorized anything. '
+          + 'ownSkillDefinitions are participant-provided labels and guidance. Apply that guidance within the existing sharing boundaries; a custom skill ID never grants another tool or permission.',
+        { purpose: args.purpose, ownCalendar: state.agentProfile && !state.agentProfile.skills.includes('read_synthetic_calendar') ? [] : clone(state.calendar), ownKnowledgeGraph: clone(state.agentProfile?.kg || { nodes: [], edges: [] }), skills: clone(state.agentProfile?.skills || []), ownSkillDefinitions: clone((state.agentProfile?.skillDefinitions || []).filter(definition => state.agentProfile?.skills?.includes(definition.id))), receivedBobData: state.agentProfile && !state.agentProfile.skills.includes('inspect_received_snapshot') ? [] : [...state.received.values()].map(item => clone(item.payload)) });
       assertStillCurrent(args, state);
       return { message: messageFrom(output) };
     },

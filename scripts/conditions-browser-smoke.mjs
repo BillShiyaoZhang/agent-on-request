@@ -79,10 +79,13 @@ try {
   checked.push('Role component composition changes Alice while unsigned Bob controls and changed-Bob starts remain gated.');
 
   await openDetails('.custom-condition-editor');
+  await reveal(page.locator('[data-conditions-path="authorization.maxUses"]'));
   await page.locator('[data-conditions-path="authorization.maxUses"]').fill('4');
   assert.equal(await participantAction('start').isDisabled(), true);
   assert.equal(await page.locator('[data-conditions-summary-status]').innerText(), 'Previous preview · draft has changed', 'The compact overview identifies its stale validated snapshot.');
+  await reveal(conditionAction('add-row').filter({ hasText: 'Add node' }));
   await conditionAction('add-row').filter({ hasText: 'Add node' }).click();
+  await reveal(page.locator('[data-conditions-row-path="kg.nodes"][data-key="label"]').last());
   await page.locator('[data-conditions-row-path="kg.nodes"][data-key="label"]').last().fill('Study protocol QA');
   await openDetails('.conditions-state-details');
   await openDetails('.advanced-condition-editor:not(.saved-condition-bundles)');
@@ -155,6 +158,7 @@ try {
   assert.equal(await page.locator('[data-conditions-preset]:checked').count(), 0, 'A complete fixture can explicitly select its original starter kit again.');
   await chooseRole('Bob'); await openDetails('.custom-condition-editor');
   assert.equal(await page.locator('[data-conditions-component="bob-data-template"]').isChecked(), false, 'An imported data definition differs from the owner component and can be replaced explicitly.');
+  await reveal(page.locator('[data-conditions-path="data.brief.topic"]'));
   await page.locator('[data-conditions-path="data.brief.topic"]').fill('Edited imported topic');
   const editedImport = await validate();
   assert.deepEqual(editedImport.conditions.agents.Bob.data.brief, { topic: 'Edited imported topic' });
