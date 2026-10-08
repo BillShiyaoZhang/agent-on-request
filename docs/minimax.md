@@ -7,10 +7,10 @@
 需要 Node.js 26 或更高版本；本项目使用 Node 权限机制启动独立 Agent 进程，无生产 npm 依赖。
 
 ```sh
-npm start
+npm run demo
 ```
 
-1. 在研究者面板登录，打开 **Model configuration**。
+1. 直接打开 **Model configuration**，本地演示无需登录。
 2. 选择 **MiniMax China · Token Plan**。中国区地址固定为 `https://api.minimax.cn/v1`，实际请求为 `POST /chat/completions`。这是官方 OpenAI 兼容入口。[官方接口说明](https://platform.minimax.cn/docs/api-reference/text-openai-api)
 3. 在密钥输入框中输入中国区订阅密钥，点击旁边的 **Save API key**（也可按 Enter）。单独保存密钥无需验证整份配置，成功提示显示在按钮旁；未保存的 Agent 参数仍保留在草稿中。Token Plan 密钥以 `sk-cp` 开头；不要用按量计费密钥代替。官方说明区分订阅和按量服务，本项目也不会自动切换产品或地区。[Token Plan 概要](https://platform.minimax.cn/docs/token-plan/intro)、[官方订阅密钥说明](https://platform.minimax.cn/docs/token-plan/openclaw)
 4. 分别检查 Alice、Bob 的参数，点击 **Validate & preview diff**，审阅后点击 **Save for new rounds**。
@@ -30,9 +30,9 @@ npm start
 
 密钥输入框始终为空白读出：留空表示保留已保存密钥，填写新值并保存表示替换，勾选清除并应用才会删除。切换服务商或地址时，单独保存密钥按钮暂不可用；应明确提供新密钥或清除旧密钥，验证后用 **Save for new rounds** 一起保存连接配置，以免把旧凭据发往新地址。密钥不属于配置 JSON、差异预览、Bob 配置历史或研究事件；不会写入浏览器存储，也不会从管理 API 返回。
 
-服务端以原子替换方式保存当前 `models.json`，目录权限为 `0700`，文件为 `0600`，拒绝符号链接。它包含当前密钥，未使用额外的磁盘加密，因此运行主机及其管理员仍属于信任边界。模型存储没有密钥历史；正在进行的轮次可在服务端内存中持有启动时密钥，直到轮次清理。默认未配置密钥时，ModelStore 不创建自己的存储文件。
+服务端以原子替换方式保存当前 `models.json`，目录权限为 `0700`，文件为 `0600`，拒绝符号链接。使用环境文件的本地演示只在模型存储中保留环境来源标记，Key 保存在 Git 忽略的 `.env`；通过表单单独保存的新 Key 仍可保存在服务端模型存储中。存储没有密钥历史；正在进行的轮次可在服务端内存中持有启动时密钥，直到轮次清理。默认未配置密钥时，ModelStore 不创建自己的存储文件。
 
-首次运行也可通过服务端环境变量 `MINIMAX_TOKEN_PLAN_KEY` 初始化密钥。已有保存配置优先于启动环境。环境变量方式适合受控部署；本地人工操作优先使用密码输入框，避免把密钥放进命令历史、聊天或截图。
+`npm run demo` 自动读取项目根目录 `.env` 中的 `MINIMAX_TOKEN_PLAN_KEY`，无需每次输入。`.env.example` 是空值模板；实际 `.env` 由 `.gitignore` 排除。已有演示的 MiniMax Key 自动迁移到环境文件；修改后重启生效。进程显式环境变量优先于文件。环境 Key 只用于官方 MiniMax 中国区 Token Plan 地址，不会自动带到新的服务地址。页面明确清除 Key 后，重启不会重新启用。`npm start` 的可选 PIN 活动模式保留原有环境初始化行为。
 
 ## 单次行动提案
 

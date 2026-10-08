@@ -3,22 +3,22 @@
 Use Node.js 26 or newer for the isolated Agent runtime. Production uses built-in Node modules and has no npm dependencies. Launch the app from the repository root:
 
 ```sh
-npm start
+npm run demo
 ```
 
-The app defaults to port `4317`. Open the local participant page shown in the console. If `AGENT_DEMO_ADMIN_PIN` is unset, startup generates and prints an admin PIN. Set a dedicated demonstration PIN through the environment when repeatability is needed; do not put it in a saved Bob configuration or browser code. `HOST` and `PORT` control the HTTP listener.
+The demo opens at `http://127.0.0.1:4327` with all controls available directly, without researcher sign-in. It loads `MINIMAX_TOKEN_PLAN_KEY` from the project `.env`, which Git ignores; existing saved demo keys migrate automatically. `DEMO_PORT` changes the local demo port. The separate `npm start` event mode uses port `4317`, optional `HOST` / `PORT`, and PIN sign-in.
 
 ```sh
 AGENT_DEMO_ADMIN_PIN='a-dedicated-demo-pin' npm start
 ```
 
-The default participant mode uses controlled local Alice and Bob processes with synthetic stores. `npm test` runs the implementation checks. Configure Live mode in the researcher's Model configuration panel: the default is MiniMax China Token Plan with `MiniMax-M3`, separate Alice/Bob settings and a shared server-held subscription key. Enter the key and click **Save API key** beside its field (or press Enter); this saves just the key and preserves other draft settings. Validate, review and save any model parameter changes separately, then test each saved role before starting a new Live round. If changing the provider or URL, validate and save that connection and its key together using **Save for new rounds**. Existing rounds keep their original model snapshot. Read [minimax.md](minimax.md) for credentials, request format and the local process isolation boundary. Optional `MINIMAX_TOKEN_PLAN_KEY` initializes a first-run subscription key; saved settings take precedence. The participant page shows the model/traffic disclosure. A live provider error is a visible failure, not an automatic switch to controlled mode.
+The default participant mode uses controlled local Alice and Bob processes with synthetic stores. `npm test` runs the implementation checks. Configure Live mode in the researcher's Model configuration panel: the default is MiniMax China Token Plan with `MiniMax-M3`, separate Alice/Bob settings and a shared server-held subscription key. Enter the key and click **Save API key** beside its field (or press Enter); this saves just the key and preserves other draft settings. Validate, review and save any model parameter changes separately, then test each saved role before starting a new Live round. If changing the provider or URL, validate and save that connection and its key together using **Save for new rounds**. Existing rounds keep their original model snapshot. Read [minimax.md](minimax.md) for credentials, request format and the local process isolation boundary. The local demo loads `MINIMAX_TOKEN_PLAN_KEY` from the ignored `.env` automatically; key-source markers preserve explicit clear decisions. Optional PIN event mode retains first-run environment initialization. The participant page shows the model/traffic disclosure. A live provider error is a visible failure, not an automatic switch to controlled mode.
 
 ## Local rehearsal
 
 Before admitting a participant, rehearse these paths using research consent off:
 
-1. Open initialization and review both agents' preset, KG, data, skills and authorization cards. Try an Alice-only component change, then a Bob change that requires researcher sign-in. Resolve and review again after modifying the owner template; the reference preset uses its current values.
+1. Open initialization and review both agents' preset, KG, data, skills and authorization cards. Try an Alice-only component change, then a Bob change using the directly available controls. Resolve and review again after modifying the owner template; the reference preset uses its current values.
 1. Preview Tue–Wed free slots. Confirm the preview does not populate Bob's receipt store. Send once and check the approved hash matches the received hash.
 2. Add only Thursday free slots. Confirm Bob receives no titles/notes and can arrange the baseline common slot.
 3. Decline the initial request, then decline an additional request in another round. Both paths must reach a valid complete outcome.
@@ -36,13 +36,13 @@ When a participant wants more context, open **Inside Alice · optional** first t
 
 Choose a complete preset or compose each agent's KG, data, skills and authorization components. There is at most one component per category per role. Custom JSON patches apply last; arrays replace the selected array. The from-scratch preset starts with empty data/graphs/skills/scopes and still requires complete, validated synthetic conditions before running. Invalid time intervals, duplicate graph IDs, missing edge endpoints, unregistered skills, wrong-role components and credentials are rejected. The catalog and JSON Schema are served by the backend, and the preview uses the same resolver as session creation.
 
-Participants may change Alice's initial conditions. Changing Bob's KG, data, skills or authorization requires a researcher token; the UI obtains it through researcher sign-in. API integrations send that token in `X-Researcher-Token` while retaining the participant token for any previous-session replacement. A resolve preview supplies `hash` and `requiresResearcher`; creation sends `expectedConditionsHash` and fails if effective conditions have changed. Re-preview after an owner-template update instead of guessing the current baseline values.
+Participants may change Alice's initial conditions. The local demo also permits direct changes to Bob's KG, data, skills and authorization. The optional PIN event mode requires a researcher token obtained through sign-in for those Bob changes. API integrations send that token in `X-Researcher-Token` while retaining the participant token for any previous-session replacement. A resolve preview supplies `hash` and `requiresResearcher`; creation sends `expectedConditionsHash` and fails if effective conditions have changed. Re-preview after an owner-template update instead of guessing the current baseline values.
 
 Review the graph and category cards inside the optional Alice and Bob sections during a round. Own knowledge and confirmed received knowledge have distinct origins; a received node carries receipt provenance. Bob cannot gain Alice's private rows or initial KG through the state visualization. Initial KG enters only its owning model context. Each agent's skills card reflects its actual current configuration, and authorization cards expose allowed fields/dates, budget consumption, remaining uses, expiry and owner-review requests. Alice read/preview/send skills and field/date/usage/expiry limits are enforced in the runtime as well as the controller. Taking a preview consumes no send budget; allocating an authorized transmission consumes a use even if receipt confirmation is delayed.
 
 ## Researcher's controls
 
-The admin PIN opens researcher controls. Authentication does not create any Alice sharing permission.
+Local demo controls are available directly. The optional PIN event mode uses sign-in. Access to these controls does not create any Alice sharing permission.
 
 The operator console starts with the selected round, confirmed submission and receipt counts, its outcome, and the pause/resume, approval, new-round and Bob configuration actions. Open the session switcher when changing rounds. Connection simulation, retries, injected requests, technical identity and exact receipt JSON are separate optional sections.
 

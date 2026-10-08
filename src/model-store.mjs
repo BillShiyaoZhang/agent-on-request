@@ -83,8 +83,10 @@ function validateKey(key, config) {
 export class ModelStore {
   #apiKey = '';
   #initialApiKey;
+  #environmentApiKey;
+  #keySource = 'none';
 
-  constructor({ directory, persist = true, initialConfig = DEFAULT_MODEL_CONFIG, apiKey = '' } = {}) {
+  constructor({ directory, persist = true, initialConfig = DEFAULT_MODEL_CONFIG, apiKey = '', environmentApiKey } = {}) {
     requireThat(!persist || (typeof directory === 'string' && directory), 'MODEL_STORAGE', 'A model configuration directory is required.');
     this.directory = directory ? path.resolve(directory) : null;
     this.filename = this.directory ? path.join(this.directory, 'models.json') : null;
@@ -92,6 +94,7 @@ export class ModelStore {
     try { this.initialConfig = clone(initialConfig); }
     catch { throw new AppError('MODEL_JSON', 'Initial model configuration must be plain JSON.'); }
     this.#initialApiKey = apiKey;
+    this.#environmentApiKey = environmentApiKey;
     this.config = null;
     this.revision = 1;
     this.initialized = false;
@@ -129,21 +132,29 @@ export class ModelStore {
       }
     }
     const config = saved ? saved.config : this.initialConfig;
-    const key = saved ? saved.apiKey : this.#initialApiKey;
+    const storedKey = saved ? saved.apiKey ?? '' : this.#initialApiKey;
     const validation = validateModelConfig(config);
     requireThat(validation.valid, 'MODEL_CONFIG_INVALID', 'Model configuration failed validation.', 422, validation.errors);
-    if (saved) requireThat(saved.schemaVersion === 1 && Number.isSafeInteger(saved.revision) && saved.revision >= 1 && Object.keys(saved).every(name => ['schemaVersion', 'config', 'revision', 'apiKey'].includes(name)), 'MODEL_STORAGE', 'Saved model configuration metadata is invalid.');
+    if (saved) requireThat(saved.schemaVersion === 1 && Number.isSafeInteger(saved.revision) && saved.revision >= 1 && Object.keys(saved).every(name => ['schemaVersion', 'config', 'revision', 'apiKey', 'keySource'].includes(name)) && (saved.keySource === undefined || ['none', 'stored', 'environment', 'cleared'].includes(saved.keySource)), 'MODEL_STORAGE', 'Saved model configuration metadata is invalid.');
+    let keySource = saved?.keySource ?? (storedKey ? 'stored' : 'none');
+    const officialMiniMax = config.provider === 'minimax_cn_token_plan' && normalizedEndpoint(config.baseUrl) === normalizedEndpoint(DEFAULT_MODEL_CONFIG.baseUrl);
+    const useEnvironment = officialMiniMax && (keySource === 'environment' || keySource === 'none' && Boolean(this.#environmentApiKey));
+    const key = useEnvironment ? this.#environmentApiKey ?? '' : keySource === 'environment' || keySource === 'cleared' ? '' : storedKey;
+    if (useEnvironment) keySource = 'environment';
+    else if (keySource === 'environment') keySource = 'none';
     validateKey(key, config);
     const revision = saved ? saved.revision : 1;
     if (this.persist) {
-      if (saved) { await chmod(this.directory, 0o700); await chmod(this.filename, 0o600); }
-      else if (key) await this.save({ config, revision, apiKey: key });
+      if (saved) { await chmod(this.directory, 0o700); await chmod(this.filename, 0o600); if (useEnvironment && (saved.apiKey || saved.keySource !== 'environment')) await this.save({ config, revision, apiKey: key, keySource }); }
+      else if (key) await this.save({ config, revision, apiKey: key, keySource });
     }
     this.config = clone(config);
     this.#apiKey = key;
+    this.#keySource = keySource;
     this.revision = revision;
     this.initialConfig = null;
     this.#initialApiKey = null;
+    this.#environmentApiKey = null;
     this.initialized = true;
     return this;
   }
@@ -188,16 +199,17 @@ export class ModelStore {
       requireThat(!this.#apiKey || !endpointChanged || newKey || clearKey, 'MODEL_KEY_RECONFIRM', 'Changing provider or endpoint requires a new key or explicit clearKey confirmation.', 409);
       const nextKey = clearKey ? '' : newKey ? apiKey : this.#apiKey;
       validateKey(nextKey, nextConfig);
-      const next = { config: nextConfig, revision: this.revision + 1, apiKey: nextKey };
+      const next = { config: nextConfig, revision: this.revision + 1, apiKey: nextKey, keySource: clearKey ? 'cleared' : newKey ? 'stored' : this.#keySource };
       await this.save(next);
       this.config = next.config;
       this.revision = next.revision;
       this.#apiKey = next.apiKey;
+      this.#keySource = next.keySource;
       return this.view();
     });
   }
 
-  async save({ config, revision, apiKey }) {
+  async save({ config, revision, apiKey, keySource = 'stored' }) {
     if (!this.persist) return;
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const directory = await lstat(this.directory);
@@ -211,7 +223,7 @@ export class ModelStore {
     let handle;
     try {
       handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-      await handle.writeFile(`${canonicalStringify({ schemaVersion: 1, config, revision, apiKey })}\n`, 'utf8');
+      await handle.writeFile(`${canonicalStringify({ schemaVersion: 1, config, revision, keySource, ...(keySource === 'stored' ? { apiKey } : {}) })}\n`, 'utf8');
       await handle.sync();
       await handle.close();
       handle = null;

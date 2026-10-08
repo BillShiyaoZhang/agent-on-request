@@ -1,10 +1,15 @@
 import { RuntimeError, invariant } from './runtime-helpers.mjs';
 
 const BOB_ACTIONS = new Set(['request_more', 'meeting', 'no_match', 'share_brief']);
+const CONNECTIVITY_ACK = 'Synthetic connectivity test acknowledged.';
 function proposalTool(context) {
   const actions = Array.isArray(context?.allowedActions) ? context.allowedActions.filter(type => BOB_ACTIONS.has(type)) : [];
   const parameters = { type: 'object', additionalProperties: false,
     properties: { message: { type: 'string', minLength: 1, maxLength: 4000, description: 'Short participant-facing message, without private data or reasoning.' } }, required: ['message'] };
+  if (context?.purpose === 'connectivity_test' && context.synthetic === true) parameters.properties.message = {
+    type: 'string', const: CONNECTIVITY_ACK, minLength: 1, maxLength: 2000,
+    description: 'Copy this fixed acknowledgement exactly into message; no action or extra fields.'
+  };
   if (actions.length) {
     const action = { type: 'object', additionalProperties: false,
       properties: { type: { type: 'string', enum: actions, description: 'Choose exactly one listed action name.' } }, required: ['type'] };
@@ -97,10 +102,11 @@ export async function probeModel(snapshot, role, signal) {
   invariant(['Alice', 'Bob'].includes(role), 'MODEL_ROLE', 'Choose Alice or Bob.');
   const started = Date.now();
   const result = await callProvider({ connection: { ...snapshot.config, apiKey: snapshot.apiKey }, settings: snapshot.config.agents[role],
-    system: 'This is a synthetic connectivity check. Submit a JSON object with a short message acknowledging the test. Never include keys or reasoning.',
+    system: `This is a synthetic connectivity check. Call submit_proposal exactly once with these complete JSON arguments: ${JSON.stringify({ message: CONNECTIVITY_ACK })}. `
+      + 'message is a required string. Copy the fixed acknowledgement exactly; do not add action, keys, reasoning or any other fields. This submits data only and performs no transfer.',
     context: { purpose: 'connectivity_test', role, synthetic: true }, signal });
   invariant(typeof result.message === 'string' && result.message.trim().length > 0 && result.message.length <= 2000,
     'MODEL_INVALID_OUTPUT', 'The model did not acknowledge the synthetic connectivity check.', 502);
   return { role, model: snapshot.config.agents[role].model, latencyMs: Date.now() - started,
-    response: 'Synthetic connectivity test acknowledged.' };
+    response: CONNECTIVITY_ACK };
 }

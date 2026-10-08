@@ -16,6 +16,9 @@ const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '
 const textValue = value => Array.isArray(value) ? value.map(textValue).join(', ') : value && typeof value === 'object' ? Object.entries(value).map(([key, item]) => key + ': ' + textValue(item)).join(' · ') : String(value ?? 'None');
 const sessionKey = 'agent-on-request.session';
 const pendingKey = 'agent-on-request.pending';
+// This is a UI capability marker, not a credential. Only the server's explicit
+// local open-controls mode accepts unauthenticated control requests.
+const openControlsMarker = 'local-demo-open-controls-access';
 let meta, current, participantToken, adminToken, adminState, selectedSessionId, activeView = 'participant', configController, modelController, conditionsController;
 let adminSessions = [], research = null, dialogContext = null, dialogOpener = null, requestBusy = false, interruptBusy = false, requestSequence = 0, interruptSequence = 0, pollBusy = false, planningNewRound = false;
 let pending = readStorage(pendingKey);
@@ -97,18 +100,32 @@ async function api(path, { method = 'GET', body, admin = path.startsWith('/api/a
   }
   return value;
 }
+function enableControls(token = adminToken) {
+  const open = meta?.openControls === true;
+  const next = open ? openControlsMarker : token === openControlsMarker ? null : token || null;
+  const changed = adminToken !== next;
+  adminToken = next;
+  document.querySelectorAll('[data-admin-nav]').forEach(node => { node.hidden = !next; });
+  $('admin-open').hidden = open;
+  $('admin-open').textContent = next ? 'Researcher tools' : 'Researcher sign in';
+  $('admin-logout').hidden = open || !next;
+  if (next) selectedSessionId ||= current?.session.id;
+  if (changed) conditionsController?.authorizationChanged();
+  if (!next && activeView !== 'participant') setView('participant');
+}
 function clearAdmin() {
+  if (meta?.openControls) { enableControls(); return; }
   adminLoadSequence++;
   approvalDrafts.clear();
   adminToken = null; adminState = null; adminSessions = []; research = null;
-  document.querySelectorAll('[data-admin-nav]').forEach(node => { node.hidden = true; });
-  $('admin-logout').hidden = true; $('admin-open').textContent = 'Researcher sign in';
+  enableControls(null);
   configController?.clear();
   modelController?.clear();
   conditionsController?.authorizationChanged();
   if (activeView !== 'participant') setView('participant');
 }
 function setView(view) {
+  if (meta?.openControls && !adminToken) enableControls();
   if (view !== 'participant' && !adminToken) { openAdminDialog(); return; }
   if (activeView === 'models' && view !== 'models') modelController?.clearSecret();
   activeView = view;
@@ -181,7 +198,7 @@ function updateStartControls() {
   const modeReady = meta?.modes?.find(mode => mode.id === local.mode)?.available && meta.runtime?.alice?.online !== false && meta.runtime?.bob?.online !== false;
   button.disabled = !modeReady || requestBusy || !conditionsController?.ready();
   const note = button.parentElement.querySelector('.muted');
-  if (note) note.textContent = !modeReady ? 'Waiting for an available mode and both agents.' : conditionsController?.ready() ? 'Ready · creates the exact reviewed initial states.' : 'Resolve and validate your initial conditions; Bob changes need researcher sign-in.';
+  if (note) note.textContent = !modeReady ? 'Waiting for an available mode and both agents.' : conditionsController?.ready() ? 'Ready · creates the exact reviewed initial states.' : meta?.openControls ? 'Resolve and validate your initial conditions before starting.' : 'Resolve and validate your initial conditions; Bob changes need researcher sign-in.';
 }
 function choicesHtml(stage) {
   const initial = stage === 'initial';
@@ -387,7 +404,7 @@ function rememberApprovalDraft() {
   if (!approval || !body.querySelector('input[name="approval-field"]')) return;
   approvalDrafts.set(approval.id, { selectedFields: [...body.querySelectorAll('input[name="approval-field"]:checked')].map(node => node.value), maxUses: $('approval-max-uses')?.value, expiryMinutes: $('approval-expiry')?.value });
 }
-function closeDialog(id) { if (id === 'admin-dialog') rememberApprovalDraft(); const dialog = $(id); if (dialog.open) dialog.close(); if (dialogOpener?.isConnected) dialogOpener.focus(); else $('admin-open').focus(); if (id === 'admin-dialog') dialogContext = null; }
+function closeDialog(id) { if (id === 'admin-dialog') rememberApprovalDraft(); const dialog = $(id); if (dialog.open) dialog.close(); if (dialogOpener?.isConnected) dialogOpener.focus(); else ($('admin-open').hidden ? document.querySelector('[data-view="' + activeView + '"]') : $('admin-open'))?.focus(); if (id === 'admin-dialog') dialogContext = null; }
 for (const dialog of document.querySelectorAll('dialog')) {
   dialog.addEventListener('cancel', event => { event.preventDefault(); closeDialog(dialog.id); });
   dialog.addEventListener('keydown', event => {
@@ -402,6 +419,7 @@ for (const dialog of document.querySelectorAll('dialog')) {
 document.addEventListener('click', event => { const button = event.target.closest('[data-close-dialog]'); if (button) closeDialog(button.dataset.closeDialog); });
 
 function openAdminDialog(context = { kind: 'login' }) {
+  if (meta?.openControls) enableControls();
   dialogContext = context;
   showDialog('admin-dialog');
   if (!adminToken) renderLogin();
@@ -422,17 +440,14 @@ $('admin-dialog-body').addEventListener('submit', async event => {
   event.preventDefault(); const pin = $('admin-pin').value; $('admin-pin').value = ''; const context = dialogContext;
   event.target.querySelectorAll('button,input').forEach(node => { node.disabled = true; });
   try {
-    const result = await api('/api/admin/login', { method: 'POST', auth: false, body: { pin } }); adminToken = result.token;
-    conditionsController?.authorizationChanged();
-    document.querySelectorAll('[data-admin-nav]').forEach(node => { node.hidden = false; }); $('admin-logout').hidden = false; $('admin-open').textContent = 'Researcher tools';
-    selectedSessionId ||= current?.session.id;
+    const result = await api('/api/admin/login', { method: 'POST', auth: false, body: { pin } }); enableControls(result.token);
     if (context?.kind === 'approval') await loadApprovals(context.sessionId); else closeDialog('admin-dialog');
   } catch (error) { renderLogin(error.message); }
 });
 async function loadApprovals(sessionId) {
   if (!adminToken || !sessionId) return;
   rememberApprovalDraft();
-  dialogContext = { kind: 'approval', sessionId }; $('admin-dialog-title').textContent = 'Bob authorization · researcher review'; $('admin-dialog-body').innerHTML = '<p class="loading">Loading the immutable pending request…</p>';
+  dialogContext = { kind: 'approval', sessionId }; $('admin-dialog-title').textContent = meta?.openControls ? 'Review Bob’s sharing request' : 'Bob authorization · researcher review'; $('admin-dialog-body').innerHTML = '<p class="loading">Loading the immutable pending request…</p>';
   try {
     const result = await api('/api/admin/sessions/' + encodeURIComponent(sessionId) + '/approvals');
     if (!dialogContext || dialogContext.sessionId !== sessionId || !$('admin-dialog').open) return;
@@ -460,7 +475,7 @@ $('admin-dialog-body').addEventListener('click', async event => {
   if (body.decision === 'allow_round') { body.maxUses = Number($('approval-max-uses').value); body.expiryMinutes = Number($('approval-expiry').value); }
   $('admin-dialog-body').querySelectorAll('button,input').forEach(node => { node.disabled = true; });
   try { const result = await api('/api/admin/approvals/' + encodeURIComponent(approval.id) + '/decision', { method: 'POST', body }); applyState(result.state); closeDialog('admin-dialog'); approvalDrafts.delete(approval.id); if (activeView === 'console') loadAdminSessions(); }
-  catch (error) { if (error.status === 401) { renderLogin('Researcher sign-in expired. Sign in again to review this pending request.'); } else if (error.status === 409) { await loadApprovals(approval.sessionId); notify('The pending Bob request changed. Review its new revision; no decision was automatically resent.', 'warning'); } else renderApproval(approval, error.message); }
+  catch (error) { if (error.status === 401 && !meta?.openControls) { renderLogin('Researcher sign-in expired. Sign in again to review this pending request.'); } else if (error.status === 409) { await loadApprovals(approval.sessionId); notify('The pending Bob request changed. Review its new revision; no decision was automatically resent.', 'warning'); } else renderApproval(approval, error.message); }
 });
 $('admin-open').addEventListener('click', () => openAdminDialog());
 $('admin-logout').addEventListener('click', async () => { try { await api('/api/admin/logout', { method: 'POST' }); } catch { /* Clearing local admin capability is still required. */ } clearAdmin(); });
@@ -486,7 +501,7 @@ function renderConsole() {
   const view = $('console-view');
   rememberDisclosures(view, view.dataset.disclosureScope || 'console');
   view.dataset.disclosureScope = 'console:' + (adminState?.session.id || 'empty');
-  view.innerHTML = renderConsoleHtml({ state: adminState, sessions: adminSessions, selectedSessionId, modeLabel, loading: Boolean(selectedSessionId && !adminState) });
+  view.innerHTML = renderConsoleHtml({ state: adminState, sessions: adminSessions, selectedSessionId, modeLabel, loading: Boolean(selectedSessionId && !adminState), openControls: meta?.openControls === true });
   restoreDisclosures(view, view.dataset.disclosureScope);
 }
 
@@ -534,14 +549,15 @@ async function researchAction(format, button) {
 }
 
 configController = mountBobConfig($('config-view'), { api, getSessionId: () => selectedSessionId || current?.session.id, onApplied: result => { if (result.state) applyState(result.state); if (activeView === 'console') loadAdminSessions(); } });
-modelController = mountModelConfig($('models-view'), { api, getCurrentRevision: () => current?.session.modelRevision, onApplied: async () => { try { meta = await api('/api/meta', { auth: false }); if (!current || planningNewRound) renderParticipant(); } catch (error) { notify(error.message, 'error'); } } });
-conditionsController = createInitialConditions({ api, isResearcher: () => Boolean(adminToken), onChange: updateStartControls, onSignIn: () => openAdminDialog() });
+modelController = mountModelConfig($('models-view'), { api, getCurrentRevision: () => current?.session.modelRevision, onApplied: async () => { try { meta = await api('/api/meta', { auth: false }); enableControls(); if (!current || planningNewRound) renderParticipant(); } catch (error) { notify(error.message, 'error'); } } });
+conditionsController = createInitialConditions({ api, isResearcher: () => Boolean(adminToken), isOpenControls: () => meta?.openControls === true, onChange: updateStartControls, onSignIn: () => openAdminDialog() });
 
 window.addEventListener('pagehide', () => modelController?.clearSecret());
 
 async function boot() {
   try {
     meta = await api('/api/meta', { auth: false });
+    enableControls();
     $('connection-status').textContent = 'Local demo'; $('connection-status').className = 'tag good';
     $('runtime-status').textContent = 'Alice: ' + (meta.runtime?.alice?.online ? 'ready' : 'offline') + ' · Bob: ' + (meta.runtime?.bob?.online ? 'ready' : 'offline');
     const stored = readStorage(sessionKey);

@@ -35,6 +35,8 @@ function json(res, data, status = 200) {
 export async function createDemoServer(options = {}) {
   const host = options.host ?? process.env.HOST ?? '127.0.0.1';
   const port = Number(options.port ?? process.env.PORT ?? 4317);
+  const openControls = options.openControls === true;
+  requireThat(!openControls || ['127.0.0.1', '::1', 'localhost'].includes(host), 'OPEN_CONTROLS_HOST', 'Direct demo controls require a localhost listener.');
   const directory = options.directory ?? path.join(root, '.data');
   const adminPin = options.adminPin ?? process.env.AGENT_DEMO_ADMIN_PIN ?? randomBytes(5).toString('hex');
   requireThat(typeof adminPin === 'string' && adminPin.length >= 6 && adminPin.length <= 128, 'PIN_CONFIG', '管理员 PIN 需要 6–128 个字符。');
@@ -47,7 +49,8 @@ export async function createDemoServer(options = {}) {
       temperature: 0.2, timeoutSeconds: (options.modelTimeoutMs ?? 20_000) / 1000 }]))
   } : DEFAULT_MODEL_CONFIG);
   const models = options.models ?? new ModelStore({ directory, persist: options.persist !== false, initialConfig: initialModelConfig,
-    apiKey: legacyProvider ? options.modelApiKey ?? '' : options.minimaxApiKey ?? process.env.MINIMAX_TOKEN_PLAN_KEY ?? '' });
+    apiKey: legacyProvider ? options.modelApiKey ?? '' : options.minimaxApiKey ?? process.env.MINIMAX_TOKEN_PLAN_KEY ?? '',
+    environmentApiKey: options.environmentApiKey });
   const profiles = options.profiles ?? new ProfileStore({ directory, persist: options.persist !== false });
   const research = options.research ?? new ResearchStore({ directory: path.join(directory, 'research'), persist: options.persist !== false });
   const conditionsStore = options.conditionsStore ?? new ConditionStore({ directory, persist: options.persist !== false });
@@ -66,12 +69,14 @@ export async function createDemoServer(options = {}) {
   const probes = new Set();
 
   function requireAdmin(req) {
+    if (openControls) return 'local-demo-open-controls';
     const token = bearer(req); const expires = adminTokens.get(token);
     if (expires && expires <= Date.now()) adminTokens.delete(token);
     requireThat(expires > Date.now(), 'ADMIN_AUTH', 'Sign in through the researcher window.', 401);
     return token;
   }
   function participant(req, id) {
+    if (openControls) return engine.get(id);
     if (adminTokens.get(bearer(req)) > Date.now()) return engine.get(id);
     return engine.authorize(id, bearer(req));
   }
@@ -100,7 +105,7 @@ export async function createDemoServer(options = {}) {
           { id: 'controlled', label: 'Controlled', available: true, description: 'Offline rule-based planning with real process communication and receipt confirmation.' },
           { id: 'live', label: 'Live', available: status.live.available, description: 'Configured model planning; the session controller still enforces permissions.' },
           { id: 'replay', label: 'Replay', available: true, description: 'A synthetic reference trace; no messages or research records.' }
-        ], live: status.live, consentVersion: 'research-v2', runtime: status });
+        ], live: status.live, openControls, consentVersion: 'research-v2', runtime: status });
       }
       if (route === '/api/conditions/catalog' && req.method === 'GET') return json(res, { ...conditionCatalog(profiles.template), templateRevision: profiles.templateRevision });
       if (route === '/api/conditions/schema' && req.method === 'GET') return json(res, conditionSchema(profiles.template));
@@ -116,7 +121,7 @@ export async function createDemoServer(options = {}) {
         limit(creations, req.socket.remoteAddress, 100, 60_000, 'CREATE_LIMIT');
         const input = await body(req);
         const conditions = resolveConditions(input.initialConditions, profiles.template);
-        if (hashValue(conditions.agents.Bob) !== hashValue(resolveConditions(undefined, profiles.template).agents.Bob)) {
+        if (!openControls && hashValue(conditions.agents.Bob) !== hashValue(resolveConditions(undefined, profiles.template).agents.Bob)) {
           const token = req.headers['x-researcher-token'] ?? bearer(req);
           requireThat(typeof token === 'string' && adminTokens.get(token) > Date.now(), 'BOB_CONDITIONS_AUTH', 'Sign in as researcher to initialize Bob with different knowledge, data, skills or authorization.', 401);
         }

@@ -4,7 +4,9 @@
 
 ## 运行
 
-直接演示可运行 `npm run demo`，或在 Windows 运行 `powershell -ExecutionPolicy Bypass -File scripts/start-demo.ps1`。演示实例默认打开 [http://127.0.0.1:4327](http://127.0.0.1:4327)，使用独立 `.data/demo`，研究者 PIN 在终端显示。Windows 启动器会选择可用的 Node 26+（也支持 `AGENT_DEMO_NODE`）。[操作、用户心智与完整验收](docs/demo-acceptance.md) 包含逐项矩阵和可直接照着走的演示脚本。
+直接演示可运行 `npm run demo`，或在 Windows 运行 `powershell -ExecutionPolicy Bypass -File scripts/start-demo.ps1`。演示实例默认打开 [http://127.0.0.1:4327](http://127.0.0.1:4327)，全部控制入口直接可用，无需研究者登录。数据和公开配置使用独立 `.data/demo`。Windows 启动器会选择可用的 Node 26+（也支持 `AGENT_DEMO_NODE`）。[操作、用户心智与完整验收](docs/demo-acceptance.md) 包含逐项矩阵和可直接照着走的演示脚本。
+
+启动演示会自动读取项目根目录的 `.env`，MiniMax Key 使用 `MINIMAX_TOKEN_PLAN_KEY`，无需在页面重复填写。`.env` 已被 Git 忽略；`.env.example` 只提供空值模板。已有演示的 MiniMax Key 会自动迁移到 `.env`，模型存储只保留来源标记。修改 `.env` 后重启演示生效；在页面明确清除 Key 后，重启不会重新启用它。
 
 需要 Node.js 26 或更高版本，无生产依赖，不需要 `npm install`。旧版 Node 缺少网络权限限制时，启动会明确失败。
 
@@ -12,7 +14,7 @@
 npm start
 ```
 
-打开 [http://127.0.0.1:4317](http://127.0.0.1:4317)。终端会显示随机生成的管理员 PIN。点击 **Researcher sign in** 登录；PIN 和模型密钥不会出现在浏览器配置里。设置固定 PIN 可使用：
+`npm start` 是可选的 PIN 活动模式，打开 [http://127.0.0.1:4317](http://127.0.0.1:4317)。终端会显示随机生成的管理员 PIN。点击 **Researcher sign in** 登录；PIN 和模型密钥不会出现在浏览器配置里。设置固定 PIN 可使用：
 
 ```sh
 AGENT_DEMO_ADMIN_PIN=your-event-pin npm start

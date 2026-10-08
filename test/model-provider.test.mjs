@@ -65,6 +65,51 @@ test('proposal schemas require stage-specific Bob actions and complete meeting a
   assert.equal(input.tools[0].function.parameters.properties.action, undefined);
 });
 
+test('both connectivity probes give submit_proposal a complete fixed acknowledgement contract', async t => {
+  const inputs = [];
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    const input = JSON.parse(options.body); inputs.push(input);
+    const message = input.tools[0].function.parameters.properties.message.const;
+    return response({ choices: [{ finish_reason: 'tool_calls', message: { reasoning_content: 'SYNTHETIC_PRIVATE_REASONING',
+      tool_calls: [{ type: 'function', function: { name: 'submit_proposal', arguments: JSON.stringify({ message }) } }] } }] });
+  });
+  for (const role of ['Alice', 'Bob']) {
+    const result = await probeModel({ config: DEFAULT_MODEL_CONFIG, apiKey: connection.apiKey }, role);
+    assert.equal(result.response, 'Synthetic connectivity test acknowledged.');
+    const input = inputs.at(-1), schema = input.tools[0].function.parameters;
+    assert.deepEqual(schema.required, ['message']);
+    assert.equal(schema.additionalProperties, false);
+    assert.equal(schema.properties.message.type, 'string');
+    assert.equal(schema.properties.message.const, result.response);
+    assert.equal(schema.properties.message.maxLength, 2000);
+    assert.equal(schema.properties.action, undefined);
+    assert(input.messages[0].content.includes('Call submit_proposal exactly once'));
+    assert(input.messages[0].content.includes(JSON.stringify({ message: result.response })));
+    assert.deepEqual(JSON.parse(input.messages[1].content), { purpose: 'connectivity_test', role, synthetic: true });
+    assert.equal(JSON.stringify(result).includes('PRIVATE_REASONING'), false);
+  }
+  assert.equal(inputs.length, 2, 'each explicit probe makes exactly one provider request');
+});
+
+test('connectivity probes retain bounded string validation and never retry malformed acknowledgements', async t => {
+  let proposed, calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    return response({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ type: 'function',
+      function: { name: 'submit_proposal', arguments: JSON.stringify(proposed) } }] } }] });
+  });
+  for (proposed of [{}, { message: '' }, { message: { content: 'SYNTHETIC_PROVIDER_SECRET' } }, { message: 'x'.repeat(2001) }]) {
+    const before = calls;
+    await assert.rejects(probeModel({ config: DEFAULT_MODEL_CONFIG, apiKey: connection.apiKey }, 'Alice'), error => {
+      assert.equal(error.code, 'MODEL_INVALID_OUTPUT');
+      assert.equal(error.message, 'The model did not acknowledge the synthetic connectivity check.');
+      assert.equal(error.message.includes('PROVIDER_SECRET'), false);
+      return true;
+    });
+    assert.equal(calls, before + 1);
+  }
+});
+
 test('truncation, refusals, business errors, unregistered tools and unsafe JSON cannot become successful plans', async t => {
   const cases = [
     { choices: [{ finish_reason: 'length', message: { content: '{"message":"partial"}' } }] },
