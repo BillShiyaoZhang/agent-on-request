@@ -2,6 +2,20 @@ const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '
 const array = value => Array.isArray(value) ? value : [];
 const readable = value => Array.isArray(value) ? value.join(', ') : value && typeof value === 'object' ? Object.entries(value).map(([key, item]) => key + ': ' + readable(item)).join(' · ') : String(value ?? '—');
 const controls = new Map();
+const categoryStates = new Map();
+function categoryIcon(category) {
+  const shapes = {
+    knowledge: '<circle cx="7" cy="16" r="4"/><circle cx="24" cy="7" r="4"/><circle cx="24" cy="25" r="4"/><path d="m11 14 9-5m-9 9 9 5"/>',
+    skills: '<path d="m18 3-12 16h9l-1 10 12-17h-9Z"/>',
+    data: '<rect x="6" y="5" width="20" height="22" rx="4"/><path d="M6 12h20M12 3v6m8-6v6m-8 9h8m-8 5h5"/>',
+    authorization: '<path d="m16 3 11 5v9c0 6-11 12-11 12S5 23 5 17V8Z"/><path d="M12 16v-3a4 4 0 0 1 8 0v3m-9 0h10v7H11z"/>'
+  };
+  return '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + shapes[category] + '</svg>';
+}
+function categoryHtml(scope, role, category, title, value, label, contents) {
+  const key = scope + ':' + role + ':' + category;
+  return '<details class="state-category ' + category + '" data-state-category="' + category + '" data-state-disclosure-key="' + escapeHtml(key) + '" data-disclosure-id="agent-category-' + escapeHtml(key) + '" ' + (categoryStates.get(key) ? 'open' : '') + '><summary><span class="state-category-icon">' + categoryIcon(category) + '</span><span class="state-category-title"><strong>' + title + '</strong><small>' + label + '</small></span><span class="state-category-count">' + escapeHtml(value) + '</span></summary><div class="state-category-body">' + contents + '</div></details>';
+}
 const originLabel = origin => origin === 'received' ? 'Received from peer' : 'Own knowledge';
 const statusLabel = value => ({ active: 'Active', pending: 'Awaiting approval', expired: 'Expired', exhausted: 'Uses exhausted', disabled: 'Disabled', stopped: 'Sharing stopped', denied: 'Declined', bounded: 'Within bounded policy', per_action: 'Confirm each action', each_action: 'Confirm each action' })[value] || value;
 function detailsHtml(details) {
@@ -58,16 +72,41 @@ function nodeDetailsHtml(state, id) {
 
 export function mountAgentStates(container, states, { scope = 'live', heading = 'Inside Alice & Bob', description = 'Separate knowledge, capabilities, data and authorization. Received knowledge is linked to its delivery receipt.' } = {}) {
   if (!container) return;
+  container.querySelectorAll('[data-state-disclosure-key]').forEach(node => categoryStates.set(node.dataset.stateDisclosureKey, node.open));
   if (!states || !states.Alice && !states.Bob) { container.innerHTML = '<section class="panel"><h3>' + escapeHtml(heading) + '</h3><p class="empty">Agent snapshots are unavailable for this record.</p></section>'; return; }
   container.innerHTML = '<section class="panel agent-observatory"><div class="panel-heading"><div><h3>' + escapeHtml(heading) + '</h3><small>' + escapeHtml(description) + '</small></div><span class="tag">Owner / received provenance</span></div><div class="agent-state-grid">' + ['Alice', 'Bob'].map(role => {
     const state = states[role]; if (!state) return '';
     const key = scope + ':' + role, view = controls.get(key) || { origin: 'all', query: '', selected: null, page: 0 }; controls.set(key, view);
     const nodes = array(state.kg?.nodes);
-    return '<article class="agent-state" data-state-role="' + role + '"><div class="agent-state-heading"><div><p class="eyebrow">' + (role === 'Alice' ? 'Your agent' : 'Peer agent') + '</p><h3>' + role + '</h3></div><div class="toolbar"><span class="tag">' + nodes.filter(node => node.origin !== 'received').length + ' own</span><span class="tag received-tag">' + nodes.filter(node => node.origin === 'received').length + ' received</span></div></div><section class="agent-section"><h4>Knowledge graph</h4><div class="graph-controls"><label class="field"><span>Filter provenance</span><select data-knowledge-origin><option value="all" ' + (view.origin === 'all' ? 'selected' : '') + '>All knowledge</option><option value="own" ' + (view.origin === 'own' ? 'selected' : '') + '>Own only</option><option value="received" ' + (view.origin === 'received' ? 'selected' : '') + '>Received only</option></select></label><label class="field"><span>Find a fact</span><input type="search" data-knowledge-query value="' + escapeHtml(view.query) + '" placeholder="Label, type, or detail"></label></div><div data-knowledge-graph>' + graphHtml(state, view, key) + '</div></section>' + skillHtml(state.skills) + dataHtml(state.data) + authorizationHtml(state.authorization) + '</article>';
+    const knowledge = '<section class="agent-section"><h4>Knowledge graph</h4><div class="graph-controls"><label class="field"><span>Filter provenance</span><select data-knowledge-origin><option value="all" ' + (view.origin === 'all' ? 'selected' : '') + '>All knowledge</option><option value="own" ' + (view.origin === 'own' ? 'selected' : '') + '>Own only</option><option value="received" ' + (view.origin === 'received' ? 'selected' : '') + '>Received only</option></select></label><label class="field"><span>Find a fact</span><input type="search" data-knowledge-query value="' + escapeHtml(view.query) + '" placeholder="Label, type, or detail"></label></div><small class="sr-only" data-knowledge-page-status role="status" aria-live="polite" aria-atomic="true"></small><div data-knowledge-graph>' + graphHtml(state, view, key) + '</div></section>';
+    const skills = array(state.skills), data = array(state.data), authorization = state.authorization || {};
+    return '<article class="agent-state" data-state-role="' + role + '"><div class="agent-state-heading"><div><p class="eyebrow">' + (role === 'Alice' ? 'Your agent' : 'Peer agent') + '</p><h3>' + role + '</h3></div><div class="toolbar"><span class="tag">' + nodes.filter(node => node.origin !== 'received').length + ' own</span><span class="tag received-tag">' + nodes.filter(node => node.origin === 'received').length + ' received</span></div></div><div class="state-categories">'
+      + categoryHtml(scope, role, 'knowledge', 'Knowledge graph', nodes.length, 'Knowledge nodes', knowledge)
+      + categoryHtml(scope, role, 'skills', 'Skills & capabilities', skills.filter(skill => skill.enabled !== false).length + '/' + skills.length, 'Enabled skills / all skills', skillHtml(state.skills))
+      + categoryHtml(scope, role, 'data', 'Data inventory', data.length, 'Data sources', dataHtml(state.data))
+      + categoryHtml(scope, role, 'authorization', 'Authorization', statusLabel(authorization.status) || 'No grant', 'Current authorization status', authorizationHtml(authorization))
+      + '</div></article>';
   }).join('') + '</div></section>';
   container.querySelectorAll('[data-state-role]').forEach(article => {
     const role = article.dataset.stateRole, state = states[role], view = controls.get(scope + ':' + role), graph = article.querySelector('[data-knowledge-graph]');
-    const redraw = () => { const listOpen = graph.querySelector('.knowledge-list')?.open; graph.innerHTML = graphHtml(state, view, scope + ':' + role); if (listOpen) graph.querySelector('.knowledge-list').open = true; };
+    article.querySelectorAll('[data-state-disclosure-key]').forEach(node => node.addEventListener('toggle', () => {
+      // A queued toggle from a replaced view must not overwrite its successor.
+      if (node.isConnected && container.contains(node)) categoryStates.set(node.dataset.stateDisclosureKey, node.open);
+    }));
+    const pageStatus = article.querySelector('[data-knowledge-page-status]');
+    const announcePage = () => { pageStatus.textContent = graph.querySelector('.knowledge-list > .toolbar small')?.textContent || ''; };
+    announcePage();
+    const redraw = () => {
+      const listOpen = graph.querySelector('.knowledge-list')?.open;
+      const focusedPage = graph.contains(document.activeElement) ? document.activeElement?.dataset.knowledgePage : undefined;
+      graph.innerHTML = graphHtml(state, view, scope + ':' + role);
+      if (listOpen) graph.querySelector('.knowledge-list').open = true;
+      announcePage();
+      if (focusedPage) {
+        const nextFocus = graph.querySelector('[data-knowledge-page="' + focusedPage + '"]:not(:disabled)') || graph.querySelector('[data-knowledge-page]:not(:disabled)') || graph.querySelector('.knowledge-list > summary');
+        nextFocus?.focus({ preventScroll: true });
+      }
+    };
     const selectNode = id => { view.selected = id; graph.querySelector('[data-knowledge-detail]').innerHTML = nodeDetailsHtml(state, id); graph.querySelectorAll('.knowledge-node').forEach(node => { const selected = node.dataset.knowledgeNode === id; node.classList.toggle('selected', selected); node.setAttribute('aria-pressed', String(selected)); }); graph.querySelectorAll('.knowledge-edge').forEach(node => node.classList.toggle('selected', node.dataset.edgeSource === id || node.dataset.edgeTarget === id)); };
     article.addEventListener('change', event => { if (event.target.matches('[data-knowledge-origin]')) { view.origin = event.target.value; view.page = 0; redraw(); } });
     article.addEventListener('input', event => { if (event.target.matches('[data-knowledge-query]')) { view.query = event.target.value; view.page = 0; redraw(); } });

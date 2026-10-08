@@ -1,0 +1,28 @@
+.state-categories { display:grid; grid-template-columns:minmax(0,1fr); gap:10px; padding:12px; }
+.state-category { --category-tone:var(--blue); --category-soft:var(--blue-soft); min-width:0; margin:0; border:1px solid var(--line); border-radius:10px; background:var(--surface); }
+.state-category.skills { --category-tone:var(--amber); --category-soft:var(--amber-soft); }
+.state-category.data { --category-tone:var(--violet); --category-soft:var(--violet-soft); }
+.state-category.authorization { --category-tone:var(--teal); --category-soft:var(--teal-soft); }
+.state-category > summary { display:flex; align-items:center; gap:10px; padding:12px; list-style:none; min-width:0; }
+.state-category > summary::-webkit-details-marker { display:none; }
+.state-category > summary::after { content:'›'; color:var(--category-tone); font-size:21px; line-height:1; flex:none; }
+.state-category[open] > summary::after { transform:rotate(90deg); }
+.state-category[open] > summary { background:var(--category-soft); border-radius:10px 10px 0 0; }
+.state-category-icon { display:block; width:34px; height:34px; padding:5px; background:var(--category-soft); color:var(--category-tone); border-radius:9px; flex:none; }
+.state-category-icon svg { display:block; width:100%; height:100%; }
+.state-category-title { flex:1; min-width:0; }
+.state-category-title strong { display:block; font-size:13px; overflow-wrap:anywhere; color:var(--category-tone); }
+.state-category-title small { display:block; margin-top:2px; font-size:10px; }
+.state-category-count { max-width:42%; flex:none; font-size:12px; color:var(--category-tone); padding:4px 7px; background:var(--category-soft); border-radius:6px; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; text-align:center; }
+.state-category-body { min-width:0; }
+.state-category-body > .agent-section { border-top:1px solid var(--line); padding:14px; }
+.state-category-body > .agent-section > h4 { margin-bottom:10px; }
+.state-category-body .knowledge-viewport { max-width:100%; }
+@media(max-width:480px) {
+  .state-categories { padding:8px; gap:8px; }
+  .state-category > summary { gap:7px; padding:10px; flex-wrap:wrap; }
+  .state-category-icon { width:28px; height:28px; padding:4px; }
+  .state-category-title { min-width:70px; }
+  .state-category-count { max-width:100%; }
+  .state-category-body > .agent-section { padding:10px; }
+}

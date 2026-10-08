@@ -59,6 +59,8 @@ try {
     stale = app.engine.view(app.engine.get(auth.id));
     assert.equal(stale.receipts.aliceToBob.length, 1); assert.equal(stale.receipts.aliceToBob[0].status, 'received');
     assert.equal((await pending()).requestId, originalBody.requestId);
+    assert.equal(await page.locator('[data-processing-choice]').count(), 1);
+    assert.equal(await action('verify_pending').count(), 0, 'An in-flight model request is normal progress, not an unknown result.');
     assert.equal(await page.locator('input[name="initial-choice"]').first().isDisabled(), true);
     assert.equal(await action('preview').isDisabled(), true);
     assert.equal(await action('end').isDisabled(), false);
@@ -75,7 +77,7 @@ try {
     assert.equal(outstanding.body.action, interrupt); assert.deepEqual(outstanding.prior.body, originalBody);
     assert.equal(await action('fresh').count(), 0, 'No new round before the restriction response is confirmed.');
     if (mode === 'end_unknown') {
-      await page.waitForFunction(() => !document.querySelector('[data-participant-action="verify_pending"]').disabled);
+      await page.waitForFunction(() => document.querySelector('[data-participant-action="verify_pending"]')?.disabled === false);
       const retained = await pending(); assert.deepEqual(retained.body, safetyBody);
       releaseSafety.resolve(); await action('verify_pending').click();
     } else {

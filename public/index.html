@@ -7,12 +7,17 @@
   <title>Agent on Request</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/participant-ui.css">
+  <link rel="stylesheet" href="/operator-ui.css">
+  <link rel="stylesheet" href="/understanding.css">
+  <link rel="stylesheet" href="/research-ui.css">
+  <link rel="stylesheet" href="/agent-state-details.css">
 </head>
 <body>
   <div class="app-shell">
     <header class="app-header">
       <a class="brand" href="/" aria-label="Agent on Request home"><span class="brand-mark" aria-hidden="true">AR</span><span><strong>Agent on Request</strong><small>Two agents. Your sharing boundary.</small></span></a>
-      <div class="toolbar"><span class="tag" id="connection-status">Connecting</span><button class="button" id="admin-open">Researcher sign in</button><button class="button" id="admin-logout" hidden>Sign out</button></div>
+      <div class="toolbar"><button class="button" id="language-toggle" type="button" data-i18n-ignore aria-label="Switch to Chinese" title="Switch to Chinese" lang="zh-CN">中文</button><span class="tag" id="connection-status">Connecting</span><button class="button" id="admin-open">Researcher sign in</button><button class="button" id="admin-logout" hidden>Sign out</button></div>
     </header>
     <nav class="app-tabs" aria-label="Application views" id="app-tabs">
       <button class="tab" data-view="participant" aria-current="page">Participant</button>

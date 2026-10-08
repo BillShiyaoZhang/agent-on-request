@@ -300,10 +300,24 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
       if (state.mode === 'live') {
         const actions = args.purpose === 'brief' ? ['share_brief']
           : args.purpose === 'initial' ? ['request_more', 'meeting', 'no_match'] : ['meeting', 'no_match'];
+        const firstMatch = matches[0];
+        const matchStart = firstMatch ? interval(firstMatch.time).start : null;
+        const exampleMeeting = firstMatch ? { day: firstMatch.day, time: `${formatMinute(matchStart)}–${formatMinute(matchStart + 30)}` } : null;
+        const briefField = Object.keys(brief)[0];
+        const example = args.purpose === 'brief'
+          ? { message: 'Bob prepared an optional meeting brief.', action: { type: 'share_brief', fields: briefField ? [briefField] : [], values: briefField ? { [briefField]: brief[briefField] } : {}, resource: 'meeting_brief' } }
+          : exampleMeeting ? { message: 'A shared 30-minute time is available.', action: { type: 'meeting', meeting: exampleMeeting } }
+          : { message: args.purpose === 'initial' ? 'Would you like to add a sharing scope?' : 'No matching shared free time is available.', action: { type: args.purpose === 'initial' ? 'request_more' : 'no_match' } };
+        const contract = args.purpose === 'brief'
+          ? 'Choose nonempty fields from ownBrief and copy their exact JSON values into action.values. All brief fields, values and resource belong inside action. '
+          : 'If sharedIntersection contains a valid overlap, propose type="meeting" and include the REQUIRED action.meeting object with both day and time. '
+            + (args.purpose === 'initial' ? 'If sharedIntersection is empty, propose type="request_more". ' : '')
+            + 'If no collaboration can be arranged, propose type="no_match". request_more and no_match have only action.type; omit action.meeting for them. ';
         const system = `You are Bob, a fictional collaboration agent. ${config.persona || ''}\n${config.objective || ''}\n${config.prompts?.system || ''}\n${config.response?.constraints || ''}\n`
-          + 'Return JSON {"message":"text","action":{"type":"allowed type","meeting":{"day":"...","time":"..."}}}. '
-          + 'For share_brief instead return fields, values and resource="meeting_brief". Never invent a meeting or source values. '
-          + 'You have only the actual received Alice projection. You do not know any unshared calendar entry. Do not execute tools.';
+          + `Call submit_proposal once. The allowed action.type values for this step are ${JSON.stringify(actions)}. `
+          + contract + `A complete valid proposal for the supplied data is: ${JSON.stringify(example)}. Preserve this exact action structure; you may phrase the message naturally. `
+          + 'Never invent a meeting or source values. You have only the actual received Alice projection and do not know any unshared calendar entry. '
+          + 'submit_proposal only proposes data for controller review; it does not authorize or execute a transfer.';
         output = await callModel(state, system, {
           purpose: args.purpose, allowedActions: actions, ownKnowledgeGraph: clone(state.agentProfile?.kg || { nodes: [], edges: [] }), skills: clone(config.tools?.capabilities || []),
           received: [...state.received.values()].map(item => clone(item.payload)),
@@ -312,8 +326,12 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
         }, config.runtime || {});
         assertStillCurrent(args, state, revision);
         const message = messageFrom(output, config.response?.maxWords || 80);
-        invariant(output.action && actions.includes(output.action.type), 'MODEL_INVALID_OUTPUT', 'The model proposed an unsupported Bob action.', 502);
+        invariant(output.action && typeof output.action === 'object' && !Array.isArray(output.action), 'MODEL_INVALID_OUTPUT', 'The model proposal is missing the required action object.', 502);
+        invariant(actions.includes(output.action.type), 'MODEL_INVALID_OUTPUT', 'The model action.type is not permitted for this planning step.', 502);
         if (output.action.type === 'meeting') {
+          invariant(output.action.meeting && typeof output.action.meeting === 'object' && !Array.isArray(output.action.meeting)
+            && typeof output.action.meeting.day === 'string' && typeof output.action.meeting.time === 'string',
+            'MODEL_INVALID_MEETING', 'The model meeting action is missing action.meeting.day or action.meeting.time.', 502);
           invariant(matches.some(meeting => meeting.day === output.action.meeting?.day
             && withinTime(output.action.meeting?.time, meeting.time, true)),
             'MODEL_INVALID_MEETING', 'The model meeting is outside the actually shared free-time intersection.', 502);
@@ -321,8 +339,9 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
         }
         if (output.action.type === 'share_brief') {
           const { fields, values, resource } = output.action;
-          invariant(Array.isArray(fields) && fields.length && new Set(fields).size === fields.length && values
-            && fields.every(field => Object.hasOwn(brief, field) && canonical(brief[field]) === canonical(values[field]))
+          invariant(Array.isArray(fields) && fields.length && new Set(fields).size === fields.length, 'MODEL_INVALID_OUTPUT', 'The model brief requires a nonempty unique action.fields list.', 502);
+          invariant(values && typeof values === 'object' && !Array.isArray(values) && resource === 'meeting_brief', 'MODEL_INVALID_OUTPUT', 'The model brief requires action.values and action.resource = meeting_brief.', 502);
+          invariant(fields.every(field => Object.hasOwn(brief, field) && canonical(brief[field]) === canonical(values[field]))
             && canonical(Object.keys(values).sort()) === canonical([...fields].sort()) && resource === 'meeting_brief',
             'MODEL_INVALID_OUTPUT', 'The model brief must propose actual Bob data only.', 502);
           return { message: 'Bob prepared an optional meeting brief.', action: { type: 'share_brief', fields: clone(fields), values: clone(values), resource } };

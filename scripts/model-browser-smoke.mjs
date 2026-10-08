@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createDemoServer } from '../src/server.mjs';
+import { reveal } from './disclosure-helpers.mjs';
 
 let playwright;
 try { playwright = await import('playwright'); }
@@ -33,6 +34,7 @@ let token, baseline;
 const response = path => page.waitForResponse(value => new URL(value.url()).pathname === path && value.request().method() === 'POST');
 const modelAction = name => page.locator('[data-model-action="' + name + '"]').first();
 const field = path => page.locator('[data-model-path="' + path + '"]');
+async function fill(path, value) { await reveal(field(path)); await field(path).fill(value); }
 const credentials = () => page.evaluate(() => JSON.parse(sessionStorage.getItem('agent-on-request.session')));
 const admin = (path, body) => page.evaluate(async ({ path, body, token }) => {
   const value = await fetch(path, { method: body ? 'POST' : 'GET', headers: { Authorization: 'Bearer ' + token, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined });
@@ -67,6 +69,12 @@ try {
   assert.equal(await page.locator('[data-model-key]').inputValue(), '');
   assert.equal(await modelAction('save-key').isVisible(), true);
   assert.equal(await modelAction('save-key').isDisabled(), true);
+  assert.equal(await field('agents.Alice.model').isVisible(), true);
+  assert.equal(await field('agents.Bob.model').isVisible(), true);
+  assert.equal(await field('agents.Alice.temperature').isVisible(), false);
+  assert.equal(await field('agents.Alice.timeoutSeconds').isVisible(), false);
+  assert.equal(await field('baseUrl').isVisible(), false);
+  assert.equal(await page.locator('[data-model-disclosure="review-diff"]').getAttribute('open'), null);
   // Handover screenshot shows the pristine default revision without a current round.
   await mkdir(resolve(process.env.DEMO_ARTIFACTS || 'artifacts'), { recursive: true });
   await page.screenshot({ path: resolve(process.env.DEMO_ARTIFACTS || 'artifacts', 'models.png'), fullPage: true });
@@ -79,7 +87,7 @@ try {
   assert.equal(baseline.keyConfigured, false, 'The isolated app must start without a provider key.');
   // Generated dummy credential exists only in this non-persistent QA copy.
   // Never call the external preset: switch to loopback and explicitly clear it.
-  await field('agents.Alice.temperature').fill('0.7');
+  await fill('agents.Alice.temperature', '0.7');
   const validationCount = modelPosts.filter(path => path.endsWith('/validate')).length;
   const dummyKey = 'sk-cp-qa-' + randomUUID(); await page.locator('[data-model-key]').fill(dummyKey);
   assert.equal(await modelAction('save-key').isDisabled(), false);
@@ -89,6 +97,7 @@ try {
   assert.equal(firstKeySave.submitted.expectedRevision, baseline.revision);
   assert.equal(firstKeySave.submitted.apiKey, dummyKey);
   assert.equal(await field('agents.Alice.temperature').inputValue(), '0.7', 'Unsaved parameter draft remains on screen.');
+  assert.equal(await field('agents.Alice.temperature').isVisible(), true, 'Expanded parameters remain open after key-only save.');
   assert.deepEqual(keySaved.config, baseline.config);
   assert.equal(modelPosts.filter(path => path.endsWith('/validate')).length, validationCount);
   assert.equal(JSON.stringify(keySaved).includes(dummyKey), false);
@@ -109,7 +118,8 @@ try {
   assert.equal(JSON.stringify(enterSave.value).includes(replacementKey), false);
   assert.equal((await current()).session.modelRevision, before.session.modelRevision);
   await page.locator('[data-model-provider]').selectOption('openai_compatible');
-  await field('baseUrl').fill(baseUrl);
+  assert.equal(await field('baseUrl').isVisible(), true, 'Changing provider reveals the connection draft for review.');
+  await fill('baseUrl', baseUrl);
   await page.locator('[data-model-key]').fill('not-saved-' + randomUUID());
   assert.equal(await modelAction('save-key').isDisabled(), true, 'Provider / endpoint drafts must be reviewed and saved together.');
   const beforeBlockedEnter = modelPosts.filter(path => path.endsWith('/apply')).length;
@@ -117,13 +127,16 @@ try {
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(modelPosts.filter(path => path.endsWith('/apply')).length, beforeBlockedEnter, 'Enter cannot bypass a disabled key-only save.');
   await page.locator('[data-model-key]').fill('');
-  await field('agents.Alice.model').fill('local-smoke-alice'); await field('agents.Bob.model').fill('local-smoke-bob');
-  await field('agents.Alice.temperature').fill('0.6'); await field('agents.Bob.temperature').fill('0.8');
-  await field('agents.Alice.maxTokens').fill('512'); await field('agents.Bob.maxTokens').fill('768');
+  await fill('agents.Alice.model', 'local-smoke-alice'); await fill('agents.Bob.model', 'local-smoke-bob');
+  await fill('agents.Alice.temperature', '0.6'); await fill('agents.Bob.temperature', '0.8');
+  await fill('agents.Alice.maxTokens', '512'); await fill('agents.Bob.maxTokens', '768');
+  await reveal(field('agents.Alice.thinking'));
   await field('agents.Alice.thinking').selectOption('adaptive');
   const check = response('/api/admin/models/validate'); await modelAction('validate').click(); assert.equal((await (await check).json()).valid, true);
+  await page.locator('[data-model-diff]').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('[data-model-diff]').isVisible(), true, 'Validation reveals the exact configuration diff.');
   assert.equal(await modelAction('apply').isDisabled(), true, 'An existing key cannot silently move to a different provider.');
-  await page.locator('[data-model-clear-key]').check();
+  await reveal(page.locator('[data-model-clear-key]')); await page.locator('[data-model-clear-key]').check();
   assert.equal(await page.locator('[data-model-key]').isDisabled(), true);
   assert.equal(await modelAction('save-key').isDisabled(), true);
   const saved = await apply(); assert.ok(saved.revision > baseline.revision);
@@ -134,7 +147,7 @@ try {
   for (const role of ['Alice', 'Bob']) {
     const tested = response('/api/admin/models/test'); await page.locator('[data-model-action="test"][data-model-role="' + role + '"]').click();
     const value = await (await tested).json(); assert.equal(value.role, role); assert.equal(value.model, saved.config.agents[role].model); assert.ok(value.latencyMs >= 0);
-    await page.waitForFunction(role => document.querySelector('[data-model-test="' + role + '"]').textContent.includes('Synthetic connectivity test'), role);
+    await page.waitForFunction(role => document.querySelector('[data-model-test="' + role + '"]').textContent.includes('Connection successful · fictional test data'), role);
   }
   assert.equal(calls.length, 2); assert.equal(calls[0].model, 'local-smoke-alice'); assert.equal(calls[1].model, 'local-smoke-bob');
   assert.equal(calls[0].temperature, 0.6); assert.equal(calls[1].max_tokens, 768);
@@ -156,7 +169,7 @@ try {
   const latest = await admin('/api/admin/models'); await admin('/api/admin/models/apply', { config: baseline.config, expectedRevision: latest.revision });
   await models(); await page.emulateMedia({ colorScheme: 'light' }); await page.setViewportSize({ width: 1024, height: 900 });
   assert.deepEqual(errors, []);
-  console.log(JSON.stringify({ passed: ['Save API key by click and Enter without validation; unsaved role draft preserved but not saved', 'Changed provider / endpoint and explicit clearKey disable key-only save; Enter cannot bypass', 'Write-only dummy key / redacted GET / field clears / no browser persistence / explicit clearKey', 'Validated role-specific model / temperature / tokens / thinking; saved next-round only', 'Alice and Bob real API connectivity tests through local fake provider', 'New round snapshots saved revision; previous public config restored', 'Light/dark at 320/736/1024; no horizontal overflow; pristine r1 handover screenshot'], pageErrors: errors, externalProviderCalls: 0, note: 'Isolated non-persistent QA copy; event service is unchanged and dummy key is cleared.' }, null, 2));
+  console.log(JSON.stringify({ passed: ['First level shows provider, key and both models; optional parameters stay collapsed', 'Expanded parameters survive key saves; provider changes reveal the connection; validation reveals the diff', 'Save API key by click and Enter without validation; unsaved role draft preserved but not saved', 'Changed provider / endpoint and explicit clearKey disable key-only save; Enter cannot bypass', 'Write-only dummy key / redacted GET / field clears / no browser persistence / explicit clearKey', 'Validated role-specific model / temperature / tokens / thinking; saved next-round only', 'Alice and Bob real API connectivity tests through local fake provider', 'New round snapshots saved revision; previous public config restored', 'Light/dark at 320/736/1024; no horizontal overflow; pristine r1 handover screenshot'], pageErrors: errors, externalProviderCalls: 0, note: 'Isolated non-persistent QA copy; event service is unchanged and dummy key is cleared.' }, null, 2));
 } finally {
   if (baseline && token) { try { const latest = await admin('/api/admin/models'); if (JSON.stringify(latest.config) !== JSON.stringify(baseline.config)) await admin('/api/admin/models/apply', { config: baseline.config, expectedRevision: latest.revision }); } catch { /* Server shutdown requires operator cleanup of QA state. */ } }
   await browser.close(); await new Promise(resolve => provider.close(resolve)); await app.close();

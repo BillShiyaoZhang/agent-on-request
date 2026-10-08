@@ -18,6 +18,25 @@ function policyDays(window) {
   return first >= 0 && last >= first ? DAYS.slice(first, last + 1) : bounds;
 }
 const PUBLIC_WAIT = { admin: 'Bob’s owner needs to decide whether to share this exact content.', peer_offline: 'Bob has not confirmed receipt. Restore the connection, then explicitly retry the same operation.', model_timeout: 'Agent planning did not finish. Received snapshots remain; researcher intervention is needed.', configuration_changed: 'Bob’s configuration changed in this round. Recheck the policy before resuming.', researcher: 'The researcher paused this round.' };
+// Only controller-defined diagnostics are public; never copy arbitrary provider text or thrown messages.
+const SAFE_MODEL_DIAGNOSTICS = new Set([
+  'The model proposal is missing the required action object.',
+  'The model action.type is not permitted for this planning step.',
+  'The model brief requires a nonempty unique action.fields list.',
+  'The model brief requires action.values and action.resource = meeting_brief.',
+  'The model brief must propose actual Bob data only.',
+  'The model meeting is outside the actually shared free-time intersection.',
+  'The model meeting action is missing action.meeting.day or action.meeting.time.',
+  'The model must propose a bounded message.',
+  'The model did not finish a usable planning proposal.',
+  'The model returned an unsupported planning tool.',
+  'The model returned no bounded JSON proposal.',
+  'The model proposal is not valid JSON.',
+  'The model proposal must be a JSON object.',
+  'The model proposal contains a forbidden field.',
+  'The model response exceeded the size limit.',
+  'The model response is not valid JSON.'
+]);
 
 export class SessionEngine {
   constructor({ runtime, profiles, research, maxSessions = 100, sessionTtlMs = 2 * 60 * 60 * 1000 }) {
@@ -94,7 +113,7 @@ export class SessionEngine {
       alice: { calendar: session.aliceCalendar ?? ALICE_CALENDAR, stopped: session.stopped },
       bob: { name: 'Bob', configRevision: session.configRevision, templateRevision: session.templateRevision, online: status.bob.online },
       choices: session.choices, receipts: session.receipts, messages: session.messages,
-      pendingApprovals: session.approvals.filter(item => item.status === 'pending').map(item => ({ id: item.id, owner: 'Bob', summary: item.summary, status: item.status })),
+      pendingApprovals: session.approvals.filter(item => item.status === 'pending').map(item => ({ id: item.id, owner: 'Bob', summary: item.summary, status: item.status, resource: item.resource, purpose: item.purpose })),
       waiting: session.waiting, task: session.task, runtime: { alice: status.alice, bob: status.bob }, replay: session.replay,
       answers: session.answers, models: session.models ?? null,
       initialConditions: session.conditions, conditionsHash: session.conditionsHash, agentStates: buildAgentStates(session)
@@ -277,6 +296,7 @@ export class SessionEngine {
       }
       const generation = session.interruptGeneration;
       if (['answer_prediction', 'answer_revocation'].includes(type)) {
+        requireThat(Boolean(session.task.outcome), 'ANSWER_STAGE', 'Understanding checks follow the round’s result.', 409);
         const valid = type === 'answer_prediction' ? ['approved_snapshot', 'outside_scope', 'not_sure'] : ['future_only', 'delete_received', 'not_sure'];
         requireThat(valid.includes(input.answer) && session.mode !== 'replay', 'ANSWER', 'Choose a valid answer.');
         const questionId = type === 'answer_prediction' ? 'received_scope' : 'withdrawal';
@@ -358,6 +378,13 @@ export class SessionEngine {
     session.paused = true; session.stage = 'paused';
     const reason = /OFFLINE|TRANSPORT|PEER|CONNECTION|ECONN/i.test(error.code ?? '') ? 'peer_offline' : 'model_timeout';
     session.waiting = { reason, message: PUBLIC_WAIT[reason] };
+    if (error.code?.startsWith('MODEL_')) {
+      const code = /^[A-Z_]{1,64}$/.test(error.code) ? error.code : 'MODEL_ERROR';
+      const detail = SAFE_MODEL_DIAGNOSTICS.has(error.message) ? error.message
+        : code === 'MODEL_TIMEOUT' ? 'The model request timed out; retry explicitly or end this round.'
+        : 'The model could not return a valid proposal. Check the model connection, then retry explicitly or end this round.';
+      session.waiting = { ...session.waiting, code, detail, message: `${PUBLIC_WAIT[reason]} ${code}: ${detail}` };
+    }
     this.message(session, 'system', session.waiting.message, 'technical');
     await this.event(session, 'technical', { code: /^[A-Za-z0-9_]{1,64}$/.test(error.code ?? '') ? error.code : 'RUNTIME_ERROR', stage: session.stage });
   }

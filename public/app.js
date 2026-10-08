@@ -2,6 +2,14 @@ import { mountBobConfig } from './bob-config.js';
 import { mountModelConfig } from './model-config.js';
 import { mountAgentStates } from './agent-state.js';
 import { createInitialConditions } from './initial-conditions.js';
+import { initLanguageSwitcher } from './i18n.js';
+import { renderParticipantHtml, scopeIconHtml } from './participant-ui.js';
+import { renderUnderstandingHtml, understandingQuestionForInput } from './understanding.js';
+import { renderLoginHtml, renderApprovalHtml, renderConsoleHtml } from './operator-ui.js';
+import { rememberDisclosures, restoreDisclosures, observeDisclosures } from './disclosure-state.js';
+import { mountResearchReview } from './research-ui.js';
+
+initLanguageSwitcher();
 
 const $ = id => document.getElementById(id);
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
@@ -13,7 +21,38 @@ let adminSessions = [], research = null, dialogContext = null, dialogOpener = nu
 let pending = readStorage(pendingKey);
 const local = { mode: 'controlled', consent: false, initial: null, additional: null, preview: null, previewStage: null, previewChoice: null, prediction: null, revocation: null, predictionSubmitted: false, revocationSubmitted: false };
 const researchFilters = { mode: 'all', status: 'all', quality: 'all' };
+const approvalDrafts = new Map();
 let selectedResearchRunId, researchStep = 0;
+let participantFocusFrame, participantStepFocusPending = false, participantPreviewFocusPending = false, adminLoadSequence = 0;
+
+function participantFocusSnapshot(view) {
+  const node = document.activeElement;
+  if (!view.contains(node)) return null;
+  if (node.id) return { id: node.id };
+  if (node.matches('input[name]')) return { name: node.name, value: node.value };
+  if (node.dataset.participantAction) return { action: node.dataset.participantAction, stage: node.dataset.stage };
+  return null;
+}
+function restoreParticipantPosition(view, step, focus) {
+  const previous = view.dataset.experienceStep;
+  view.dataset.experienceStep = step;
+  if (previous && previous !== step && activeView === 'participant') participantStepFocusPending = true;
+  cancelAnimationFrame(participantFocusFrame);
+  participantFocusFrame = requestAnimationFrame(() => {
+    if (activeView !== 'participant' || document.querySelector('dialog[open]')) return;
+    if (participantStepFocusPending || participantPreviewFocusPending) {
+      const heading = view.querySelector(participantStepFocusPending ? '.experience-heading h2, .start-hero h1' : '.preview-box h3');
+      participantStepFocusPending = false; participantPreviewFocusPending = false;
+      if (heading) { heading.tabIndex = -1; heading.focus({ preventScroll: true }); heading.scrollIntoView({ block: 'start', behavior: 'instant' }); }
+      return;
+    }
+    const target = focus?.id ? document.getElementById(focus.id)
+      : focus?.name ? [...view.querySelectorAll('input[name]')].find(node => node.name === focus.name && node.value === focus.value)
+      : focus?.action ? [...view.querySelectorAll('[data-participant-action]')].find(node => node.dataset.participantAction === focus.action && node.dataset.stage === focus.stage)
+      : null;
+    if (target && view.contains(target) && !target.disabled) target.focus({ preventScroll: true });
+  });
+}
 
 function readStorage(key) { try { return JSON.parse(sessionStorage.getItem(key)); } catch { return null; } }
 function writeStorage(key, value) { try { value === null ? sessionStorage.removeItem(key) : sessionStorage.setItem(key, JSON.stringify(value)); } catch { /* In-memory operation remains available when session storage is blocked. */ } }
@@ -33,7 +72,10 @@ function removePendingRequest(requestId) {
   rememberPending(remove(pending));
 }
 function newRequestId() { return globalThis.crypto?.randomUUID?.() || 'request-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2); }
-function notify(message, kind = '') { $('global-notice').textContent = message; $('global-notice').className = 'notice ' + kind; $('global-notice').hidden = !message; }
+function notify(message, kind = '') {
+  const notice = $('global-notice'); notice.textContent = message; notice.className = 'notice ' + kind; notice.hidden = !message;
+  if (message && !document.querySelector('dialog[open]')) { notice.tabIndex = -1; notice.focus({ preventScroll: true }); notice.scrollIntoView({ block: 'nearest', behavior: 'instant' }); }
+}
 
 class ApiError extends Error {
   constructor(message, status = 0, code = 'NETWORK', details) { super(message); this.status = status; this.code = code; this.details = details; }
@@ -56,6 +98,8 @@ async function api(path, { method = 'GET', body, admin = path.startsWith('/api/a
   return value;
 }
 function clearAdmin() {
+  adminLoadSequence++;
+  approvalDrafts.clear();
   adminToken = null; adminState = null; adminSessions = []; research = null;
   document.querySelectorAll('[data-admin-nav]').forEach(node => { node.hidden = true; });
   $('admin-logout').hidden = true; $('admin-open').textContent = 'Researcher sign in';
@@ -87,7 +131,7 @@ function applyState(state) {
   if (current && state.session.id === current.session.id && stateCanAdvance(state, current)) { current = state; renderParticipant(); }
   if (state.session.id === selectedSessionId && stateCanAdvance(state, adminState)) { adminState = state; if (activeView === 'console') renderConsole(); }
 }
-function clearPreview() { local.preview = null; local.previewStage = null; local.previewChoice = null; }
+function clearPreview() { local.preview = null; local.previewStage = null; local.previewChoice = null; participantPreviewFocusPending = false; }
 function modeLabel(mode) { return meta?.modes?.find(item => item.id === mode)?.label || mode; }
 function modeDisclosure(mode) {
   const item = meta?.modes?.find(entry => entry.id === mode);
@@ -103,20 +147,34 @@ function tableRows(rows, className = '') {
 }
 function calendarHtml() {
   const rows = current?.alice?.calendar || [];
-  return '<section class="panel"><div class="panel-heading"><h3>Alice’s fictional calendar</h3><span class="tag">Synthetic data</span></div>' + tableRows(rows, 'calendar-table') + '<p class="private-label" style="margin-top:12px">Event titles and notes are fictional private information. Only your confirmed snapshot can be sent to Bob.</p></section>';
+  return '<section class="panel calendar-panel"><div class="panel-heading"><h3>Alice’s fictional calendar</h3><span class="tag">Synthetic data</span></div>' + tableRows(rows, 'calendar-table') + '<p class="private-label" style="margin-top:12px">Event titles and notes are fictional private information. Only your confirmed snapshot can be sent to Bob.</p></section>';
 }
 function renderStart() {
+  const focus = participantFocusSnapshot($('participant-view'));
+  $('participant-view').setAttribute('aria-busy', String(requestBusy || interruptBusy));
   const modes = meta?.modes || [];
   const selected = modes.find(mode => mode.id === local.mode);
   const ready = meta && selected?.available && meta.runtime?.alice?.online !== false && meta.runtime?.bob?.online !== false;
-  $('participant-view').innerHTML = '<section class="panel"><p class="eyebrow">A short, fictional collaboration</p><h1>What may your agent share?</h1><p class="lead">You control Alice. Help her arrange a 30-minute discussion with Bob, then compare what you approved with what Bob actually received. Sharing less, declining and ending the demo are complete outcomes.</p><div class="identity-grid"><div class="identity"><strong>Your agent · Alice</strong><small>Your chosen fields and time window</small></div><div class="identity"><strong>Other agent · Bob</strong><small>Separate identity, calendar and permissions</small></div></div><div class="split-layout"><fieldset><legend>Run mode</legend><div class="choices">' + modes.map(mode => '<label class="choice' + (!mode.available ? ' dimmed' : '') + '"><input type="radio" name="start-mode" value="' + escapeHtml(mode.id) + '" ' + (local.mode === mode.id ? 'checked ' : '') + (!mode.available ? 'disabled ' : '') + '><span><strong>' + escapeHtml(mode.label) + '</strong><small>' + escapeHtml(mode.description) + (!mode.available ? ' · unavailable' : '') + '</small></span></label>').join('') + '</div></fieldset><div><h3>Research recording is your choice</h3><label class="check"><input id="start-consent" type="checkbox" ' + (local.consent ? 'checked ' : '') + (local.mode === 'replay' ? 'disabled ' : '') + '><span>Allow my initial conditions, choices, and step-by-step agent states to be recorded for this research demo.<small>Researchers can review the fictional KG, data, skills, authorization, changes and understanding answers. Model secrets and raw provider conversations are excluded. No name or account is requested. Sharing permission is a separate decision. Without consent, no research record is written. Session state remains in memory until replacement, reset or expiry.</small></span></label><div class="notice">' + escapeHtml(modeDisclosure(local.mode)) + '</div><small>Consent version: ' + escapeHtml(meta?.consentVersion || 'Loading') + '</small></div></div><div class="toolbar section-actions"><button class="button primary" data-participant-action="start" ' + (!ready || requestBusy ? 'disabled' : '') + '>' + (requestBusy ? 'Starting isolated agents…' : 'Start the demo') + '</button><span class="muted">' + (!ready ? 'Waiting for an available mode and both agents.' : 'About 3–5 minutes · no personal calendar access') + '</span></div></section>';
-  const actions = $('participant-view').querySelector('.section-actions');
+  const consentDetailsOpen = $('participant-view').querySelector('.consent-details')?.open;
+  const modeCopy = { controlled: ['Guided experience', 'A predictable first round'], live: ['Live models', 'Try model-driven collaboration'], replay: ['Watch a replay', 'Explore a reference example'] };
+  const modeShapes = { controlled: '<rect x="7" y="8" width="22" height="22" rx="6"/><path d="m13 19 4 4 7-8"/>', live: '<path d="m18 4 3.8 9.2L31 17l-9.2 3.8L18 30l-3.8-9.2L5 17l9.2-3.8Z"/><path d="M29 3v6m-3-3h6"/>', replay: '<circle cx="18" cy="18" r="13"/><path d="m15 12 9 6-9 6Z"/>' };
+  $('participant-view').innerHTML = `<section class="start-hero">
+    <div><p class="eyebrow">A short, fictional collaboration</p><h1>What may your agent share?</h1><p class="lead">Help Alice arrange a meeting with Bob. You decide what crosses the boundary.</p><small>About 3–5 minutes · no personal calendar access</small></div>
+    <div class="boundary-illustration" role="img" aria-label="Alice and Bob have separate data. You control the sharing boundary.">
+      <svg viewBox="0 0 360 106" aria-hidden="true"><path d="M82 49h60m76 0h60" class="boundary-path"/><circle cx="52" cy="49" r="30" class="boundary-alice"/><circle cx="308" cy="49" r="30" class="boundary-bob"/><g class="boundary-avatar"><rect x="37" y="38" width="30" height="23" rx="8"/><path d="M52 32v6m-7 10h1m12 0h1m-12 7h10"/><rect x="293" y="38" width="30" height="23" rx="8"/><path d="M308 32v6m-7 10h1m12 0h1m-12 7h10"/></g><rect x="150" y="20" width="60" height="58" rx="16" class="boundary-gate"/><g class="boundary-lock"><rect x="169" y="43" width="22" height="19" rx="4"/><path d="M174 43v-6a6 6 0 0 1 12 0v6m-6 7v5"/></g></svg>
+      <div class="boundary-captions"><span><strong>Alice</strong><small>Your agent</small></span><span><strong>Your choice</strong><small>Sharing boundary</small></span><span><strong>Bob</strong><small>Peer agent</small></span></div>
+    </div>
+  </section><section class="panel start-preferences"><fieldset><legend><span class="setup-step">1</span>Choose your experience</legend><div class="mode-grid">${modes.map(mode => `<label class="choice mode-card ${!mode.available ? 'dimmed' : ''}" data-mode="${escapeHtml(mode.id)}"><input type="radio" name="start-mode" value="${escapeHtml(mode.id)}" ${local.mode === mode.id ? 'checked ' : ''}${!mode.available ? 'disabled ' : ''}><span class="mode-icon"><svg viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${modeShapes[mode.id] || modeShapes.controlled}</svg></span><span><strong>${modeCopy[mode.id]?.[0] || escapeHtml(mode.label)}</strong><small>${modeCopy[mode.id]?.[1] || escapeHtml(mode.description)}</small><span class="mode-status">${!mode.available ? 'Unavailable' : mode.id === 'controlled' ? 'Recommended to start' : escapeHtml(mode.label)}</span></span></label>`).join('')}</div></fieldset>
+    ${local.mode === 'live' ? '<div class="notice live-disclosure">' + escapeHtml(modeDisclosure(local.mode)) + '</div>' : ''}
+    <div class="recording-option"><span class="recording-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="8" y="6" width="17" height="22" rx="4"/><path d="M12 4h9v5h-9zM12 15h9m-9 5h6"/></svg></span><div><label class="check"><input id="start-consent" type="checkbox" ${local.consent ? 'checked ' : ''}${local.mode === 'replay' ? 'disabled ' : ''}><span><strong>Record this fictional round for research</strong><small>Optional. Records fictional data and agent states; sharing permission is separate.</small></span></label><details class="consent-details" ${consentDetailsOpen ? 'open' : ''}><summary>What gets recorded?</summary><p class="muted">Researchers can review the fictional KG, data, skills, authorization, changes and understanding answers. Model secrets and raw provider conversations are excluded. No name or account is requested. Sharing permission is a separate decision. Without consent, no research record is written. Session state remains in memory until replacement, reset or expiry.</p><small>Consent version: ${escapeHtml(meta?.consentVersion || 'Loading')}</small></details></div></div></section>`;
   const holder = document.createElement('div'); holder.id = 'initial-conditions-builder';
   $('participant-view').append(holder);
   conditionsController?.attach(holder);
   const actionPanel = document.createElement('section'); actionPanel.className = 'panel start-round-panel';
-  actionPanel.append(actions); $('participant-view').insertBefore(actionPanel, holder);
+  actionPanel.innerHTML = '<div class="toolbar section-actions"><button class="button primary" data-participant-action="start" ' + (!ready || requestBusy ? 'disabled' : '') + '>' + (requestBusy ? 'Starting isolated agents…' : 'Start the demo') + '</button><span class="muted">' + (!ready ? 'Waiting for an available mode and both agents.' : 'Ready · creates the exact reviewed initial states.') + '</span></div>';
+  $('participant-view').append(actionPanel);
   updateStartControls();
+  restoreParticipantPosition($('participant-view'), 'start', focus);
 }
 function updateStartControls() {
   const button = $('participant-view').querySelector('[data-participant-action="start"]'); if (!button) return;
@@ -148,8 +206,10 @@ function choicesHtml(stage) {
   if (profile) {
     for (const choice of choices) {
       if (['none', 'keep'].includes(choice[0])) continue;
-      if (['full', 'week'].includes(choice[0]) && !['title', 'note'].every(field => allowedFields.includes(field))) choice[1] = choice[0] === 'full' ? 'Calendar information within your ceiling' : 'Weekly information within your ceiling';
-      choice[2] += ' Initial ceiling: ' + (allowedFields.join(', ') || 'no fields') + ' · allowed days ' + (allowedDays.join(', ') || 'none') + '.';
+      if (['full', 'week'].includes(choice[0]) && !['title', 'note'].every(field => allowedFields.includes(field))) {
+        choice[1] = choice[0] === 'full' ? 'Calendar information within your ceiling' : 'Weekly information within your ceiling';
+        choice[2] = choice[0] === 'full' ? 'Permitted calendar fields on Tuesday and Wednesday. Preview shows the exact scope.' : 'Permitted calendar fields for the week. Preview shows the exact scope.';
+      }
       if (!choiceEnabled(choice[0])) choice[2] += ' Unavailable with the current skills or authorization.';
     }
   }
@@ -159,7 +219,8 @@ function choicesHtml(stage) {
   const preview = local.previewStage === stage && local.previewChoice === selected ? local.preview : null;
   const stale = preview && preview.sessionVersion !== current.session.version;
   const blocked = requestBusy || interruptBusy || Boolean(pending) || current.session.paused || current.alice.stopped;
-  return '<section class="panel"><fieldset ' + (blocked ? 'disabled' : '') + '><legend>' + (initial ? 'What may Alice send to Bob?' : 'Bob is requesting a wider time window') + '</legend><p class="muted" style="margin-bottom:13px">' + (initial ? 'Choose a field set for Tuesday–Wednesday. Nothing is selected by default.' : 'Review the new request independently. A wider scope is optional.') + '</p><div class="choices">' + choices.map(([value, title, detail]) => '<label class="choice"><input type="radio" name="' + stage + '-choice" value="' + value + '" ' + (selected === value ? 'checked' : '') + (!choiceEnabled(value) ? ' disabled' : '') + '><span><strong>' + title + '</strong><small>' + detail + '</small></span></label>').join('') + '</div></fieldset><div class="toolbar section-actions"><button class="button" data-participant-action="preview" data-stage="' + stage + '" ' + (!selected || blocked ? 'disabled' : '') + '>Preview exact information</button><span class="muted">Previewing does not authorize or send.</span></div>' + (preview ? '<div class="preview-box"><div class="panel-heading"><h3>Exact snapshot · recipient Bob</h3><span class="tag">Not yet sent</span></div><dl class="definition-list"><dt>Fields</dt><dd>' + escapeHtml(preview.fields?.join(', ') || 'None') + '</dd><dt>Time window</dt><dd>' + escapeHtml(textValue(preview.window)) + '</dd></dl>' + tableRows(preview.rows) + '<details><summary>Inspect exact payload and fingerprint</summary><pre>' + escapeHtml(JSON.stringify({ fields: preview.fields, window: preview.window, rows: preview.rows }, null, 2)) + '</pre><code>' + escapeHtml(preview.payloadHash) + '</code></details>' + (stale ? '<div class="notice warning">The session changed. Preview again before confirming; this snapshot will not be sent.</div>' : '') + (cannotConfirmSend ? '<div class="notice">' + escapeHtml(sendDisabledReason) + '</div>' : '') + '<div class="toolbar section-actions"><button class="button primary" data-participant-action="confirm" data-stage="' + stage + '" ' + (blocked || stale || cannotConfirmSend ? 'disabled' : '') + '>' + (initial && selected === 'none' ? 'Confirm no sharing' : !initial && selected === 'keep' ? 'Confirm current boundary' : 'Confirm and send this snapshot') + '</button></div></div>' : '') + '</section>';
+  const limits = profile ? '<details class="scope-permission-details" data-disclosure-id="scope-limits-' + stage + '"><summary>Initial permission limits</summary><dl class="definition-list"><dt>Allowed fields</dt><dd>' + escapeHtml(allowedFields.join(', ') || 'None') + '</dd><dt>Allowed days</dt><dd>' + escapeHtml(allowedDays.join(', ') || 'None') + '</dd></dl></details>' : '';
+  return '<section class="panel"><fieldset ' + (blocked ? 'disabled' : '') + '><legend>' + (initial ? 'What may Alice send to Bob?' : 'Bob is requesting a wider time window') + '</legend><p class="muted" style="margin-bottom:13px">' + (initial ? 'Choose a field set for Tuesday–Wednesday. Nothing is selected by default.' : 'Review the new request independently. A wider scope is optional.') + '</p><div class="choices scope-choices">' + choices.map(([value, title, detail]) => '<label class="choice scope-choice" data-scope="' + value + '"><input type="radio" name="' + stage + '-choice" value="' + value + '" ' + (selected === value ? 'checked' : '') + (!choiceEnabled(value) ? ' disabled' : '') + '>' + scopeIconHtml(value) + '<span><strong>' + title + '</strong><small>' + detail + '</small></span></label>').join('') + '</div></fieldset>' + limits + '<div class="toolbar section-actions"><button class="button" data-participant-action="preview" data-stage="' + stage + '" ' + (!selected || blocked ? 'disabled' : '') + '>Preview exact information</button><span class="muted">Previewing does not authorize or send.</span></div>' + (preview ? '<div class="preview-box"><div class="panel-heading"><h3>Exact snapshot · recipient Bob</h3><span class="tag">Not yet sent</span></div><dl class="definition-list"><dt>Fields</dt><dd>' + escapeHtml(preview.fields?.join(', ') || 'None') + '</dd><dt>Time window</dt><dd>' + escapeHtml(textValue(preview.window)) + '</dd></dl>' + tableRows(preview.rows) + '<details><summary>Inspect exact payload and fingerprint</summary><pre>' + escapeHtml(JSON.stringify({ fields: preview.fields, window: preview.window, rows: preview.rows }, null, 2)) + '</pre><code>' + escapeHtml(preview.payloadHash) + '</code></details>' + (stale ? '<div class="notice warning">The session changed. Preview again before confirming; this snapshot will not be sent.</div>' : '') + (cannotConfirmSend ? '<div class="notice">' + escapeHtml(sendDisabledReason) + '</div>' : '') + '<div class="toolbar section-actions"><button class="button primary" data-participant-action="confirm" data-stage="' + stage + '" ' + (blocked || stale || cannotConfirmSend ? 'disabled' : '') + '>' + (initial && selected === 'none' ? 'Confirm no sharing' : !initial && selected === 'keep' ? 'Confirm current boundary' : 'Confirm and send this snapshot') + '</button></div></div>' : '') + '</section>';
 }
 function receiptsHtml() {
   const incoming = current.receipts?.aliceToBob || [], outgoing = current.receipts?.bobToAlice || [];
@@ -167,12 +228,17 @@ function receiptsHtml() {
   return '<section class="panel"><div class="panel-heading"><h3>Approved → actually received</h3><span class="tag">Server receipts</span></div>' + incoming.map(receipt => '<article class="receipt"><div class="receipt-header"><strong>Alice → Bob</strong><span class="tag ' + (receipt.status === 'received' ? 'good' : 'warn') + '">' + escapeHtml(receipt.status) + '</span></div><dl class="definition-list"><dt>Approved fields</dt><dd>' + escapeHtml(receipt.fields?.join(', ') || 'None') + '</dd><dt>Approved window</dt><dd>' + escapeHtml(textValue(receipt.window)) + '</dd><dt>Received payload</dt><dd>' + (receipt.status === 'received' ? 'Exact snapshot below' : 'Not confirmed received') + '</dd></dl>' + (receipt.status === 'received' ? tableRows(receipt.rows) : '') + '<details><summary>Receipt identity and exact content</summary><pre>' + escapeHtml(JSON.stringify(receipt, null, 2)) + '</pre></details></article>').join('') + outgoing.map(receipt => '<article class="receipt"><div class="receipt-header"><strong>Bob → Alice</strong><span class="tag ' + (receipt.status === 'received' ? 'good' : 'warn') + '">' + escapeHtml(receipt.status) + '</span></div><p>Fields: ' + escapeHtml(receipt.fields?.join(', ') || 'None') + '</p><dl class="definition-list">' + Object.entries(receipt.values || {}).map(([key, value]) => '<dt>' + escapeHtml(key) + '</dt><dd>' + escapeHtml(textValue(value)) + '</dd>').join('') + '</dl><details><summary>Exact receipt</summary><pre>' + escapeHtml(JSON.stringify(receipt, null, 2)) + '</pre></details></article>').join('') + '</section>';
 }
 function questionsHtml() {
-  if (!current.task?.outcome || current.session.mode === 'replay') return '';
-  return '<section class="panel"><h3>Check your understanding</h3><p class="muted" style="margin:6px 0 12px">Optional. Answers are recorded only when research consent is on.</p><fieldset ' + (local.predictionSubmitted || current.session.ended ? 'disabled' : '') + '><legend>Could Bob read entries outside the scope you approved?</legend><div class="choices">' + [['approved_snapshot', 'Only the approved snapshot'], ['outside_scope', 'Entries outside the approved scope too'], ['not_sure', 'I am not sure']].map(([value, text]) => '<label class="choice"><input type="radio" name="prediction-answer" value="' + value + '" ' + (local.prediction === value ? 'checked' : '') + '><span>' + text + '</span></label>').join('') + '</div></fieldset><button class="button section-actions" data-participant-action="answer_prediction" ' + (!local.prediction || local.predictionSubmitted || requestBusy || interruptBusy || pending || current.session.ended ? 'disabled' : '') + '>' + (local.predictionSubmitted ? 'Answer received' : 'Submit answer') + '</button><fieldset style="margin-top:21px" ' + (local.revocationSubmitted || current.session.ended ? 'disabled' : '') + '><legend>What does stopping future sharing do?</legend><div class="choices">' + [['future_only', 'Stops new sharing; already received information remains'], ['delete_received', 'Deletes information already received by Bob'], ['not_sure', 'I am not sure']].map(([value, text]) => '<label class="choice"><input type="radio" name="revocation-answer" value="' + value + '" ' + (local.revocation === value ? 'checked' : '') + '><span>' + text + '</span></label>').join('') + '</div></fieldset><button class="button section-actions" data-participant-action="answer_revocation" ' + (!local.revocation || local.revocationSubmitted || requestBusy || interruptBusy || pending || current.session.ended ? 'disabled' : '') + '>' + (local.revocationSubmitted ? 'Answer received' : 'Submit answer') + '</button></section>';
+  return renderUnderstandingHtml({ state: current, local, busy: requestBusy, interruptBusy, pending });
 }
+
 function renderParticipant() {
+  const view = $('participant-view');
+  const focus = participantFocusSnapshot(view);
+  rememberDisclosures(view, view.dataset.disclosureScope || 'start');
   if (!current || planningNewRound) { renderStart(); return; }
   const session = current.session;
+  view.setAttribute('aria-busy', String(requestBusy || interruptBusy));
+  view.dataset.disclosureScope = 'participant:' + session.id;
   if (current.answers?.received_scope) { local.prediction = current.answers.received_scope; local.predictionSubmitted = true; }
   if (current.answers?.withdrawal) { local.revocation = current.answers.withdrawal; local.revocationSubmitted = true; }
   $('runtime-status').textContent = 'Alice: ' + (current.runtime?.alice?.online ? 'ready' : 'offline') + ' · Bob: ' + (current.runtime?.bob?.online ? 'ready' : 'offline');
@@ -180,7 +246,6 @@ function renderParticipant() {
   const endingPending = hasPending && pending.body.action === 'end';
   const stoppingPending = hasPending && pending.body.action === 'stop_sharing';
   $('end-confirm').disabled = interruptBusy;
-  const messages = current.messages || [];
   let outcome = '';
   if (endingPending) outcome = '<h2>Waiting for End confirmation</h2><p class="lead">The restriction request is still being confirmed. The receipt history preserves what had actually arrived.</p>';
   else if (session.ended) outcome = '<h2>This demo has ended</h2><p class="lead">No further information will be sent. The receipts show what had already been delivered.</p>';
@@ -188,14 +253,20 @@ function renderParticipant() {
   else if (current.task?.outcome === 'arranged') outcome = '<h2>Discussion arranged</h2><p class="lead">' + escapeHtml(current.task.meeting?.day || '') + ' · ' + escapeHtml(current.task.meeting?.time || '') + '. Review what each agent actually received.</p>';
   else if (current.task?.outcome === 'boundary_kept') outcome = '<h2>Your boundary was kept</h2><p class="lead">No meeting was arranged with the information available. The wider sharing request was declined.</p>';
   else if (current.task?.outcome === 'declined') outcome = '<h2>Calendar sharing declined</h2><p class="lead">Your decision completed this collaboration. No calendar information was authorized.</p>';
-  else if (current.task?.outcome === 'ended' || session.ended) outcome = '<h2>This demo has ended</h2><p class="lead">No further information will be sent. The receipts show what had already been delivered.</p>';
+  else if (current.task?.outcome === 'ended') outcome = '<h2>This demo has ended</h2><p class="lead">No further information will be sent. The receipts show what had already been delivered.</p>';
   const waiting = current.waiting;
   const approvalPending = current.pendingApprovals?.some(item => item.status === 'pending');
   const heading = session.stage === 'initial' ? 'Choose Alice’s sharing boundary' : session.stage === 'additional' ? 'Review Bob’s additional request' : session.stage === 'replay' ? 'Labelled replay' : 'Your collaboration';
-  $('participant-view').innerHTML = '<div class="panel-heading"><div><p class="eyebrow">' + escapeHtml(modeLabel(session.mode)) + ' · fictional scenario</p><h2>' + heading + '</h2></div><div class="toolbar"><span class="tag">Research ' + (session.researchConsent ? 'on' : 'off') + '</span><span class="tag mono">Epoch ' + escapeHtml(session.epoch) + '</span>' + (endingPending ? '<span class="tag warn">End needs confirmation</span>' : !session.ended ? '<button class="button quiet" data-participant-action="end" ' + (interruptBusy ? 'disabled' : '') + '>End this demo</button>' + (!current.alice.stopped && session.mode !== 'replay' ? '<button class="button" data-participant-action="stop_sharing" ' + (interruptBusy ? 'disabled' : '') + '>Stop future sharing</button>' : '') : '<button class="button" data-participant-action="fresh" ' + (requestBusy || interruptBusy || pending ? 'disabled' : '') + '>New demo</button>') + '</div></div><div class="step-bar"><span class="step ' + (session.stage === 'initial' ? 'current' : '') + '">Choose scope</span><span class="step ' + (session.stage === 'additional' ? 'current' : '') + '">Additional request</span><span class="step ' + (session.stage === 'complete' ? 'current' : '') + '">Review receipts</span></div><small style="margin-bottom:15px">' + escapeHtml(modeDisclosure(session.mode)) + '</small>' + (hasPending ? '<div class="notice warning" role="status"><strong>Submission outcome needs verification</strong><p>The same request ID and intent are retained. No changed sharing choice will be resubmitted automatically.</p><div class="toolbar"><button class="button" data-participant-action="verify_pending" ' + (interruptBusy || requestBusy && !isInterrupt(pending?.body?.action) ? 'disabled' : '') + '>Verify the same submission</button><button class="button" data-participant-action="refresh">Check session state</button></div></div>' : '') + (current.alice?.stopped ? '<div class="notice">' + (stoppingPending ? 'Waiting for Stop confirmation. ' : 'Future Alice sharing is stopped. ') + 'Previously received snapshots remain in the receipt history.</div>' : '') + (waiting || session.paused ? '<div class="notice warning" role="status"><strong>' + (session.paused ? 'Collaboration paused' : 'Waiting') + '</strong><p>' + escapeHtml(waiting?.message || 'The researcher paused this round. Your current step and received information are preserved.') + '</p>' + (approvalPending || waiting?.reason === 'admin' || waiting?.reason === 'configuration_changed' ? '<div class="toolbar"><button class="button" data-participant-action="admin_review">Open researcher review window</button><span class="muted">Closing it leaves the request pending.</span></div>' : '') + '</div>' : '') + (outcome ? '<section class="panel">' + outcome + '<div class="toolbar">' + (!session.ended ? '<button class="button quiet" data-participant-action="end" ' + (interruptBusy ? 'disabled' : '') + '>End this demo</button>' : '') + '</div></section>' : '') + '<div class="split-layout"><div class="stack">' + (!session.ended && !session.paused && !waiting && ['initial', 'additional'].includes(session.stage) ? choicesHtml(session.stage) : '') + (session.stage === 'replay' ? '<section class="panel"><h3>Saved trace · replay</h3><p class="muted">Source: ' + escapeHtml(current.replay?.source || 'Saved replay') + ' · step ' + escapeHtml(current.replay?.index ?? 0) + ' / ' + escapeHtml(current.replay?.total ?? 0) + '</p><button class="button primary section-actions" data-participant-action="replay_next" ' + (requestBusy || interruptBusy || pending || session.ended || (current.replay?.index ?? 0) >= (current.replay?.total ?? 0) ? 'disabled' : '') + '>Next replay step</button></section>' : '') + receiptsHtml() + questionsHtml() + '</div><div class="stack">' + calendarHtml() + '<section class="panel"><div class="panel-heading"><h3>Agent conversation</h3><span class="tag">Bob r' + escapeHtml(current.bob?.configRevision) + '</span></div><ol class="conversation">' + messages.slice(-8).map(message => '<li class="message" data-from="' + escapeHtml(message.from) + '"><header><strong>' + escapeHtml(message.from) + '</strong><span>' + escapeHtml(message.kind || '') + '</span></header><p>' + escapeHtml(message.text) + '</p></li>').join('') + '</ol>' + (!messages.length ? '<p class="empty">No messages yet.</p>' : '') + '</section></div></div>';
-  const observatory = document.createElement('div'); observatory.id = 'live-agent-states';
-  $('participant-view').insertBefore(observatory, $('participant-view').querySelector(':scope > .split-layout'));
-  mountAgentStates(observatory, current.agentStates, { scope: 'participant-live' });
+  const controls = (endingPending ? '<span class="tag warn">End needs confirmation</span>' : !session.ended ? '<button class="button quiet" data-participant-action="end" ' + (interruptBusy ? 'disabled' : '') + '>End this demo</button>' + (!current.alice.stopped && session.mode !== 'replay' ? '<button class="button" data-participant-action="stop_sharing" ' + (interruptBusy ? 'disabled' : '') + '>Stop future sharing</button>' : '') : '<button class="button" data-participant-action="fresh" ' + (requestBusy || interruptBusy || pending ? 'disabled' : '') + '>New demo</button>');
+  const warnings = (hasPending && (isInterrupt(pending?.body?.action) ? interruptBusy : requestBusy) ? '<div class="notice" role="status" data-processing-choice><strong>Processing your choice</strong><p>Your original choice is being confirmed. You can stop future sharing or end this round.</p><button class="button" data-participant-action="refresh">Check session state</button></div>' : hasPending ? '<div class="notice warning" role="status"><strong>Submission outcome needs verification</strong><p>The same request ID and intent are retained. No changed sharing choice will be resubmitted automatically.</p><div class="toolbar"><button class="button" data-participant-action="verify_pending">Verify the same submission</button><button class="button" data-participant-action="refresh">Check session state</button></div></div>' : '')
+    + (current.alice?.stopped ? '<div class="notice">' + (stoppingPending ? 'Waiting for Stop confirmation. ' : 'Future Alice sharing is stopped. ') + 'Previously received snapshots remain in the receipt history.</div>' : '')
+    + (waiting || session.paused ? '<div class="notice warning" role="status"><strong>' + (session.paused ? 'Collaboration paused' : 'Waiting') + '</strong><p>' + escapeHtml(waiting?.message || 'The researcher paused this round. Your current step and received information are preserved.') + '</p>' + (approvalPending || waiting?.reason === 'admin' || waiting?.reason === 'configuration_changed' ? '<div class="toolbar"><button class="button" data-participant-action="admin_review">Open researcher review window</button><span class="muted">Closing it leaves the request pending.</span></div>' : '') + '</div>' : '');
+  const replay = session.stage === 'replay' ? '<section class="panel"><h3>Saved trace · replay</h3><p class="muted">Source: ' + escapeHtml(current.replay?.source || 'Saved replay') + ' · step ' + escapeHtml(current.replay?.index ?? 0) + ' / ' + escapeHtml(current.replay?.total ?? 0) + '</p><button class="button primary section-actions" data-participant-action="replay_next" ' + (requestBusy || interruptBusy || pending || session.ended || (current.replay?.index ?? 0) >= (current.replay?.total ?? 0) ? 'disabled' : '') + '>Next replay step</button></section>' : '';
+  view.innerHTML = renderParticipantHtml({ state: current, heading, mode: modeLabel(session.mode), warnings, controls, outcome, choices: !session.ended && !session.paused && !waiting && ['initial', 'additional'].includes(session.stage) ? choicesHtml(session.stage) : '', questions: questionsHtml(), receipts: receiptsHtml(), calendar: calendarHtml(), replay, modeDisclosure: modeDisclosure(session.mode) });
+  mountAgentStates($('live-alice-state'), { Alice: current.agentStates?.Alice }, { scope: 'participant-live:' + session.id });
+  mountAgentStates($('live-bob-state'), { Bob: current.agentStates?.Bob }, { scope: 'participant-live:' + session.id });
+  restoreDisclosures(view, view.dataset.disclosureScope);
+  restoreParticipantPosition(view, [session.id, session.stage, session.paused, session.ended, current.alice?.stopped, current.task?.outcome].join(':'), focus);
 }
 
 async function startSession() {
@@ -227,7 +298,7 @@ async function previewChoice(stage) {
   if (!current || !local[stage] || requestBusy || interruptBusy || pending) return;
   const sequence = ++requestSequence, sessionId = current.session.id, choice = local[stage];
   requestBusy = true; renderParticipant();
-  try { const preview = await api('/api/sessions/' + encodeURIComponent(sessionId) + '/preview', { method: 'POST', body: { stage, choice } }); if (sequence !== requestSequence || current?.session.id !== sessionId || current.session.ended || current.alice.stopped || interruptBusy) return; local.preview = preview; local.previewStage = stage; local.previewChoice = choice; notify(''); }
+  try { const preview = await api('/api/sessions/' + encodeURIComponent(sessionId) + '/preview', { method: 'POST', body: { stage, choice } }); if (sequence !== requestSequence || current?.session.id !== sessionId || current.session.ended || current.alice.stopped || interruptBusy) return; local.preview = preview; local.previewStage = stage; local.previewChoice = choice; participantPreviewFocusPending = true; notify(''); }
   catch (error) { if (sequence === requestSequence && current?.session.id === sessionId && !interruptBusy) notify(error.message, 'error'); }
   finally { if (sequence === requestSequence) requestBusy = false; renderParticipant(); }
 }
@@ -284,8 +355,11 @@ $('participant-view').addEventListener('change', event => {
   if (input.name === 'start-mode') { local.mode = input.value; if (local.mode === 'replay') local.consent = false; renderStart(); }
   if (input.id === 'start-consent') local.consent = input.checked;
   if (input.name === 'initial-choice' || input.name === 'additional-choice') { local[input.name.split('-')[0]] = input.value; clearPreview(); renderParticipant(); }
-  if (input.name === 'prediction-answer') { local.prediction = input.value; renderParticipant(); }
-  if (input.name === 'revocation-answer') { local.revocation = input.value; renderParticipant(); }
+  const question = understandingQuestionForInput(input.name);
+  if (question && current?.task?.outcome && !current.session.ended && current.session.mode !== 'replay' && !local[question.localKey] && !current.answers?.[question.id] && !requestBusy && !interruptBusy && !pending) {
+    local[question.localKey] = input.value;
+    performAction(question.action, { answer: input.value });
+  }
 });
 $('participant-view').addEventListener('click', event => {
   const button = event.target.closest('[data-participant-action]'); if (!button || button.disabled) return;
@@ -308,7 +382,12 @@ function showDialog(id, opener = document.activeElement) {
   dialogOpener = opener; const dialog = $(id); if (!dialog.open) dialog.showModal();
   requestAnimationFrame(() => dialog.querySelector('input:not([type="hidden"]),button,select,textarea')?.focus());
 }
-function closeDialog(id) { const dialog = $(id); if (dialog.open) dialog.close(); if (dialogOpener?.isConnected) dialogOpener.focus(); else $('admin-open').focus(); if (id === 'admin-dialog') dialogContext = null; }
+function rememberApprovalDraft() {
+  const approval = dialogContext?.selected, body = $('admin-dialog-body');
+  if (!approval || !body.querySelector('input[name="approval-field"]')) return;
+  approvalDrafts.set(approval.id, { selectedFields: [...body.querySelectorAll('input[name="approval-field"]:checked')].map(node => node.value), maxUses: $('approval-max-uses')?.value, expiryMinutes: $('approval-expiry')?.value });
+}
+function closeDialog(id) { if (id === 'admin-dialog') rememberApprovalDraft(); const dialog = $(id); if (dialog.open) dialog.close(); if (dialogOpener?.isConnected) dialogOpener.focus(); else $('admin-open').focus(); if (id === 'admin-dialog') dialogContext = null; }
 for (const dialog of document.querySelectorAll('dialog')) {
   dialog.addEventListener('cancel', event => { event.preventDefault(); closeDialog(dialog.id); });
   dialog.addEventListener('keydown', event => {
@@ -331,7 +410,11 @@ function openAdminDialog(context = { kind: 'login' }) {
 }
 function renderLogin(message = '') {
   $('admin-dialog-title').textContent = 'Researcher sign in';
-  $('admin-dialog-body').innerHTML = '<p class="dialog-note">The researcher controls Bob’s permissions. Alice’s data sharing still requires the participant’s own choice. The token stays in memory.</p><form id="admin-login-form"><label class="field"><span>Researcher PIN</span><input id="admin-pin" type="password" autocomplete="off" required></label>' + (message ? '<div class="notice error" role="alert">' + escapeHtml(message) + '</div>' : '') + '<div class="toolbar dialog-actions"><button class="button" type="button" data-close-dialog="admin-dialog">Cancel</button><button class="button primary" type="submit">Sign in</button></div></form>';
+  const body = $('admin-dialog-body');
+  rememberDisclosures(body, body.dataset.disclosureScope || 'login');
+  body.dataset.disclosureScope = 'login';
+  body.innerHTML = renderLoginHtml(message);
+  restoreDisclosures(body, 'login');
   requestAnimationFrame(() => $('admin-pin')?.focus());
 }
 $('admin-dialog-body').addEventListener('submit', async event => {
@@ -348,6 +431,7 @@ $('admin-dialog-body').addEventListener('submit', async event => {
 });
 async function loadApprovals(sessionId) {
   if (!adminToken || !sessionId) return;
+  rememberApprovalDraft();
   dialogContext = { kind: 'approval', sessionId }; $('admin-dialog-title').textContent = 'Bob authorization · researcher review'; $('admin-dialog-body').innerHTML = '<p class="loading">Loading the immutable pending request…</p>';
   try {
     const result = await api('/api/admin/sessions/' + encodeURIComponent(sessionId) + '/approvals');
@@ -359,7 +443,14 @@ async function loadApprovals(sessionId) {
 }
 function renderApproval(approval, message = '') {
   dialogContext.selected = approval;
-  $('admin-dialog-body').innerHTML = '<span class="tag">Owner Bob · Alice consent unchanged</span><h3 style="margin-top:13px">' + escapeHtml(approval.summary) + '</h3><dl class="definition-list"><dt>Recipient</dt><dd>' + escapeHtml(approval.recipient) + '</dd><dt>Purpose</dt><dd>' + escapeHtml(approval.purpose) + '</dd><dt>Resource</dt><dd>' + escapeHtml(approval.resource) + '</dd><dt>Policy revision</dt><dd>' + escapeHtml(approval.policyRevision) + '</dd><dt>Pending request expires</dt><dd>' + escapeHtml(approval.expiresAt ? new Date(approval.expiresAt).toLocaleString() : 'No deadline supplied') + '</dd><dt>Reason</dt><dd>' + escapeHtml(approval.reason || 'Outside Bob’s current permission') + '</dd></dl><fieldset><legend>Fields · narrowing only</legend><div class="approval-fields">' + (approval.fields || []).map((field, index) => '<label class="check"><input type="checkbox" name="approval-field" value="' + escapeHtml(field) + '" checked><span>' + escapeHtml(field) + '</span></label>').join('') + '</div></fieldset><details open><summary>Exact pending values</summary><pre>' + escapeHtml(JSON.stringify(approval.values, null, 2)) + '</pre><code>' + escapeHtml(approval.payloadHash) + '</code></details><div class="form-grid" style="margin-top:14px"><label class="field"><span>Round grant · maximum uses</span><input id="approval-max-uses" type="number" min="1" step="1" value="1"></label><label class="field"><span>Round grant · expiry minutes</span><input id="approval-expiry" type="number" min="1" value="5"></label></div>' + (message ? '<div class="notice error" role="alert">' + escapeHtml(message) + '</div>' : '') + '<p class="dialog-note">One-time approval applies only to this immutable Bob request. A round grant is bounded; neither changes the reusable template or authorizes Alice’s data. Closing leaves the request pending.</p><div class="toolbar dialog-actions"><button class="button" data-approval-decision="deny">Decline Bob’s request</button><button class="button" data-approval-decision="allow_once">Allow once</button><button class="button" data-approval-decision="allow_round">Allow within this round</button></div>';
+  const body = $('admin-dialog-body');
+  const scope = 'approval:' + approval.id;
+  const same = body.dataset.disclosureScope === scope && Boolean(body.querySelector('input[name="approval-field"]'));
+  const selections = same ? { selectedFields: [...body.querySelectorAll('input[name="approval-field"]:checked')].map(node => node.value), maxUses: $('approval-max-uses')?.value, expiryMinutes: $('approval-expiry')?.value } : approvalDrafts.get(approval.id) || {};
+  rememberDisclosures(body, body.dataset.disclosureScope || scope);
+  body.dataset.disclosureScope = scope;
+  body.innerHTML = renderApprovalHtml(approval, message, selections);
+  restoreDisclosures(body, scope);
 }
 $('admin-dialog-body').addEventListener('click', async event => {
   const button = event.target.closest('[data-approval-decision]'); if (!button || !dialogContext?.selected || button.disabled) return;
@@ -368,7 +459,7 @@ $('admin-dialog-body').addEventListener('click', async event => {
   const body = { decision: button.dataset.approvalDecision, fields, expectedPolicyRevision: approval.policyRevision, expectedPayloadHash: approval.payloadHash };
   if (body.decision === 'allow_round') { body.maxUses = Number($('approval-max-uses').value); body.expiryMinutes = Number($('approval-expiry').value); }
   $('admin-dialog-body').querySelectorAll('button,input').forEach(node => { node.disabled = true; });
-  try { const result = await api('/api/admin/approvals/' + encodeURIComponent(approval.id) + '/decision', { method: 'POST', body }); applyState(result.state); closeDialog('admin-dialog'); if (activeView === 'console') loadAdminSessions(); }
+  try { const result = await api('/api/admin/approvals/' + encodeURIComponent(approval.id) + '/decision', { method: 'POST', body }); applyState(result.state); closeDialog('admin-dialog'); approvalDrafts.delete(approval.id); if (activeView === 'console') loadAdminSessions(); }
   catch (error) { if (error.status === 401) { renderLogin('Researcher sign-in expired. Sign in again to review this pending request.'); } else if (error.status === 409) { await loadApprovals(approval.sessionId); notify('The pending Bob request changed. Review its new revision; no decision was automatically resent.', 'warning'); } else renderApproval(approval, error.message); }
 });
 $('admin-open').addEventListener('click', () => openAdminDialog());
@@ -377,27 +468,36 @@ $('app-tabs').addEventListener('click', event => { const button = event.target.c
 
 async function loadAdminSessions() {
   if (!adminToken) return;
+  const sequence = ++adminLoadSequence, token = adminToken;
   try {
-    const result = await api('/api/admin/sessions'); adminSessions = result.sessions;
+    const result = await api('/api/admin/sessions');
+    if (sequence !== adminLoadSequence || token !== adminToken) return;
+    adminSessions = result.sessions;
     if (!selectedSessionId || !adminSessions.some(session => session.id === selectedSessionId)) selectedSessionId = current && adminSessions.some(session => session.id === current.session.id) ? current.session.id : adminSessions[0]?.id;
-    if (selectedSessionId) adminState = await api('/api/sessions/' + encodeURIComponent(selectedSessionId), { admin: true }); else adminState = null;
+    const id = selectedSessionId;
+    if (adminState?.session.id !== id) { adminState = null; if (activeView === 'console') renderConsole(); }
+    const state = id ? await api('/api/sessions/' + encodeURIComponent(id), { admin: true }) : null;
+    if (sequence !== adminLoadSequence || token !== adminToken || id !== selectedSessionId) return;
+    adminState = state;
     renderConsole();
-  } catch (error) { notify(error.message, 'error'); }
+  } catch (error) { if (sequence === adminLoadSequence && token === adminToken) notify(error.message, 'error'); }
 }
 function renderConsole() {
-  const state = adminState, session = state?.session;
-  const received = state?.receipts?.aliceToBob?.filter(receipt => receipt.status === 'received') || [];
-  const submitted = state?.choices?.initial !== null && state?.choices?.initial !== undefined;
-  $('console-view').innerHTML = '<div class="panel-heading"><div><h2>Operator console</h2><small>Authenticated researcher · Bob control only</small></div><button class="button" data-console-action="refresh">Refresh sessions</button></div><div class="split-layout"><section class="panel"><h3>In-memory sessions</h3><div class="session-list">' + adminSessions.map(item => '<div class="session-row ' + (item.id === selectedSessionId ? 'selected' : '') + '"><div><strong class="mono">' + escapeHtml(item.id.slice(0, 12)) + ' · epoch ' + escapeHtml(item.epoch) + '</strong><small>' + escapeHtml(modeLabel(item.mode)) + ' · ' + escapeHtml(item.stage) + ' · research ' + (item.researchConsent ? 'on' : 'off') + '</small></div><button class="button" data-console-select="' + escapeHtml(item.id) + '">Inspect</button></div>').join('') + '</div>' + (!adminSessions.length ? '<p class="empty">No current sessions.</p>' : '') + '</section><section class="panel"><h3>Selected round</h3>' + (session ? '<dl class="definition-list"><dt>Session</dt><dd class="mono">' + escapeHtml(session.id) + '</dd><dt>Run mode</dt><dd>' + escapeHtml(modeLabel(session.mode)) + '</dd><dt>Bob config</dt><dd>Active r' + escapeHtml(state.bob.configRevision) + ' · template r' + escapeHtml(state.bob.templateRevision) + '</dd><dt>Research consent</dt><dd>' + (session.researchConsent ? 'On · participant agreed' : 'Off · memory only') + '</dd><dt>Agent stores</dt><dd>Alice / Bob isolated</dd></dl><div class="phase-grid"><div class="phase"><strong>Queued / submitted</strong><small>' + (submitted ? state.choices.initial === 'none' ? 'Sharing declined' : 'Confirmed action' : 'No confirmed action') + '</small></div><div class="phase"><strong>Peer receipt</strong><small>' + received.length + ' actually received</small></div><div class="phase"><strong>Business outcome</strong><small>' + escapeHtml(state.task.outcome || 'Pending') + '</small></div></div>' + (state.waiting ? '<div class="notice warning">' + escapeHtml(state.waiting.message) + '</div>' : '') + '<div class="toolbar"><button class="button" data-console-action="' + (session.paused ? 'resume' : 'pause') + '" ' + (session.ended ? 'disabled' : '') + '>' + (session.paused ? 'Recheck Bob & resume' : 'Pause at safe point') + '</button><button class="button" data-console-action="reset">Start new round</button><button class="button" data-console-action="' + (state.bob.online ? 'disconnect_bob' : 'restore_bob') + '">' + (state.bob.online ? 'Simulate Bob offline' : 'Restore Bob connection') + '</button><button class="button" data-console-action="retry" ' + (session.ended ? 'disabled' : '') + '>Verify / retry same request</button><button class="button" data-console-action="inject_request" ' + (session.ended ? 'disabled' : '') + '>Inject researcher request</button><button class="button" data-console-action="approvals">Review Bob approvals</button><button class="button" data-console-action="config">Configure Bob</button></div><small style="margin-top:14px">Reset clears both stores, revokes the old token and starts research consent off. Consented research records remain. Researcher interventions are recorded separately.</small><details><summary>Actual receipt state</summary><pre>' + escapeHtml(JSON.stringify(state.receipts, null, 2)) + '</pre></details>' : '<p class="empty">Select a current session.</p>') + '</section></div>';
+  const view = $('console-view');
+  rememberDisclosures(view, view.dataset.disclosureScope || 'console');
+  view.dataset.disclosureScope = 'console:' + (adminState?.session.id || 'empty');
+  view.innerHTML = renderConsoleHtml({ state: adminState, sessions: adminSessions, selectedSessionId, modeLabel, loading: Boolean(selectedSessionId && !adminState) });
+  restoreDisclosures(view, view.dataset.disclosureScope);
 }
+
 $('console-view').addEventListener('click', async event => {
-  const select = event.target.closest('[data-console-select]'); if (select) { selectedSessionId = select.dataset.consoleSelect; await loadAdminSessions(); return; }
+  const select = event.target.closest('[data-console-select]'); if (select) { selectedSessionId = select.dataset.consoleSelect; adminState = null; renderConsole(); await loadAdminSessions(); return; }
   const button = event.target.closest('[data-console-action]'); if (!button || button.disabled) return;
   const actionName = button.dataset.consoleAction;
   if (actionName === 'refresh') { loadAdminSessions(); return; }
   if (actionName === 'config') { setView('config'); return; }
   if (actionName === 'approvals') { openAdminDialog({ kind: 'approval', sessionId: selectedSessionId }); return; }
-  if (!selectedSessionId) return; button.disabled = true;
+  if (!selectedSessionId || adminState?.session.id !== selectedSessionId) return; button.disabled = true;
   try {
     const oldId = selectedSessionId;
     const result = await api('/api/admin/sessions/' + encodeURIComponent(oldId) + '/intervene', { method: 'POST', body: { action: actionName } });
@@ -407,75 +507,23 @@ $('console-view').addEventListener('click', async event => {
   } catch (error) { notify(error.message, 'error'); renderConsole(); }
 });
 
-function qualityLabel(value) { return Array.isArray(value) ? value.length ? value.map(item => String(item).replaceAll('_', ' ')).join(', ') : 'No quality flags' : typeof value === 'string' ? value : value?.status || value?.label || textValue(value); }
 async function loadResearch() {
   if (!adminToken) return;
   try { research = await api('/api/admin/research'); renderResearch(); } catch (error) { notify(error.message, 'error'); }
 }
 function renderResearch() {
-  if (!research) { $('research-view').innerHTML = '<section class="panel loading">Loading actual consented research runs…</section>'; return; }
-  const all = research.runs || [], summary = research.summary || {};
-  const filtered = all.filter(run => (researchFilters.mode === 'all' || run.mode === researchFilters.mode) && (researchFilters.status === 'all' || run.status === researchFilters.status) && (researchFilters.quality === 'all' || qualityLabel(run.quality) === researchFilters.quality));
-  const optionList = (key, values, label) => '<label class="field"><span>' + label + '</span><select data-research-filter="' + key + '"><option value="all">All</option>' + [...new Set(values)].sort().map(value => '<option value="' + escapeHtml(value) + '" ' + (researchFilters[key] === value ? 'selected' : '') + '>' + escapeHtml(value) + '</option>').join('') + '</select></label>';
-  const counts = [...new Set(filtered.map(run => run.mode))].map(mode => ({ mode, count: filtered.filter(run => run.mode === mode).length }));
-  const max = Math.max(1, ...counts.map(item => item.count));
-  $('research-view').innerHTML = '<div class="panel-heading"><div><h2>Research review</h2><small>Actual consented records only · calendar data is fictional</small></div><div class="toolbar"><button class="button" data-research-action="refresh">Refresh records</button><button class="button" data-research-action="csv">Export CSV</button><button class="button" data-research-action="jsonl">Export JSONL</button></div></div><section class="panel"><div class="summary-grid">' + [['Recorded runs', summary.runs], ['Task outcomes', summary.taskCompleted], ['Closed completed', summary.completed], ['Awaiting end', summary.runsPendingClose]].map(([label, value]) => '<div class="summary-item"><small>' + label + '</small><strong>' + escapeHtml(value ?? '—') + '</strong></div>').join('') + '</div><small>Server totals · stopped: ' + escapeHtml(summary.stopped ?? '—') + ' · technical: ' + escapeHtml(summary.technical ?? '—') + ' · affected by technical issues: ' + escapeHtml(summary.affectedByTechnical ?? '—') + ' · replay excluded: ' + escapeHtml(summary.replayExcluded ?? 0) + '. Unconsented rounds have no research rows.</small><div class="form-grid" style="margin-top:17px">' + optionList('mode', all.map(run => run.mode), 'Mode') + optionList('status', all.map(run => run.status), 'Status') + optionList('quality', all.map(run => qualityLabel(run.quality)), 'Quality') + '</div><h3 style="margin-top:22px">Filtered recorded runs by mode</h3><div class="chart-bars" aria-label="Counts from actual filtered records">' + counts.map(item => '<div class="chart-row"><span>' + escapeHtml(modeLabel(item.mode)) + '</span><div class="chart-track"><div class="chart-fill" style="width:' + item.count / max * 100 + '%"></div></div><span class="chart-value">' + item.count + '</span></div>').join('') + '</div>' + (!filtered.length ? '<p class="empty">No actual consented runs match these filters. No sample measurements are inserted.</p>' : '') + '<table class="research-table"><thead><tr><th>Run</th><th>Started</th><th>Mode</th><th>Config</th><th>Status / quality</th><th>Events</th></tr></thead><tbody>' + filtered.map(run => '<tr><td data-label="Run" class="mono">' + escapeHtml(run.runId) + '</td><td data-label="Started">' + escapeHtml(formatDate(run.startedAt)) + '</td><td data-label="Mode">' + escapeHtml(modeLabel(run.mode)) + '</td><td data-label="Config">r' + escapeHtml(run.configRevision) + '</td><td data-label="Status / quality">' + escapeHtml(run.status) + '<small>' + escapeHtml(qualityLabel(run.quality)) + '</small></td><td data-label="Events">' + (run.events?.length || 0) + '<details><summary>Inspect</summary><pre>' + escapeHtml(JSON.stringify(run.events, null, 2)) + '</pre></details></td></tr>').join('') + '</tbody></table></section>';
-  if (!filtered.some(run => run.runId === selectedResearchRunId)) { selectedResearchRunId = filtered[0]?.runId; researchStep = 0; }
-  $('research-view').querySelectorAll('.research-table tbody tr').forEach((row, index) => {
-    const run = filtered[index], button = document.createElement('button'); button.className = 'button section-actions'; button.dataset.researchRun = run.runId; button.textContent = selectedResearchRunId === run.runId ? 'Viewing timeline' : 'Review timeline'; button.setAttribute('aria-pressed', String(selectedResearchRunId === run.runId)); row.cells[0].append(button);
+  const result = mountResearchReview($('research-view'), {
+    research, filters: researchFilters, selectedRunId: selectedResearchRunId, step: researchStep, modeLabel,
+    onFiltersChange: filters => { Object.assign(researchFilters, filters); renderResearch(); },
+    onRunSelect: id => { selectedResearchRunId = id; researchStep = 0; renderResearch(); },
+    onStepChange: step => { researchStep = step; },
+    onAction: researchAction
   });
-  if (selectedResearchRunId) { const holder = document.createElement('div'); holder.id = 'research-agent-replay'; $('research-view').append(holder); mountResearchReplay(holder, filtered.find(run => run.runId === selectedResearchRunId)); }
+  selectedResearchRunId = result.selectedRunId; researchStep = result.step;
 }
-function readableEvent(event) {
-  const label = String(event?.type || event?.kind || 'Recorded event').replaceAll('_', ' ');
-  const values = Object.entries(event?.data || event || {}).filter(([key, value]) => !['seq', 'kind', 'type', 'payloadHash'].includes(key) && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || Array.isArray(value) && value.every(item => typeof item === 'string'))).slice(0, 8);
-  return '<strong>' + escapeHtml(label) + '</strong>' + (values.length ? '<small>' + values.map(([key, value]) => escapeHtml(key.replaceAll('_', ' ') + ': ' + (Array.isArray(value) ? value.join(', ') : value))).join(' · ') + '</small>' : '');
-}
-function traceChanges(previous, next) {
-  if (!previous) return '<p class="muted">Initial snapshot · the starting conditions for this recorded run.</p>';
-  const changes = [];
-  for (const role of ['Alice', 'Bob']) {
-    const before = previous[role] || {}, after = next?.[role] || {}, beforeNodes = new Map((before.kg?.nodes || []).map(node => [node.id, node])), afterNodes = new Map((after.kg?.nodes || []).map(node => [node.id, node]));
-    const added = [...afterNodes.values()].filter(node => !beforeNodes.has(node.id)), removed = [...beforeNodes.values()].filter(node => !afterNodes.has(node.id)), changed = [...afterNodes.values()].filter(node => beforeNodes.has(node.id) && JSON.stringify(node) !== JSON.stringify(beforeNodes.get(node.id)));
-    const names = nodes => nodes.slice(0, 8).map(node => node.label || node.id).join(', ') + (nodes.length > 8 ? ' and ' + (nodes.length - 8) + ' more' : '');
-    if (added.length) changes.push([role, 'Added ' + added.length + ' facts', names(added)]);
-    if (removed.length) changes.push([role, 'Removed ' + removed.length + ' facts', names(removed)]);
-    if (changed.length) changes.push([role, 'Updated ' + changed.length + ' facts', names(changed)]);
-    if (JSON.stringify(before.kg?.edges) !== JSON.stringify(after.kg?.edges)) changes.push([role, 'Relationships changed', (after.kg?.edges?.length || 0) + ' current relations']);
-    if (JSON.stringify(before.skills) !== JSON.stringify(after.skills)) changes.push([role, 'Capabilities changed', (after.skills || []).filter(skill => skill.enabled !== false).map(skill => skill.label || skill.id).join(', ') || 'No enabled skills']);
-    if (JSON.stringify(before.authorization) !== JSON.stringify(after.authorization)) changes.push([role, 'Authorization changed', after.authorization?.summary || after.authorization?.status || 'Review the authorization cards below']);
-    if (JSON.stringify(before.data) !== JSON.stringify(after.data)) changes.push([role, 'Data inventory changed', (after.data || []).map(item => (item.label || item.id) + ' · ' + (item.count ?? item.items?.length ?? 0) + ' items').join('; ')]);
-  }
-  return changes.length ? '<div class="table-wrap"><table><thead><tr><th scope="col">Agent</th><th scope="col">Change</th><th scope="col">Details</th></tr></thead><tbody>' + changes.map(([role, label, detail]) => '<tr><td>' + role + '</td><td>' + escapeHtml(label) + '</td><td>' + escapeHtml(detail) + '</td></tr>').join('') + '</tbody></table></div>' : '<p class="muted">No knowledge, data, skills or authorization changes at this step. The event remains part of the recorded timeline.</p>';
-}
-function mountResearchReplay(holder, run) {
-  const trace = run.trace || [];
-  if (!trace.length) { holder.innerHTML = '<section class="panel"><h3>Step-by-step review</h3><p class="empty">This older run has no stored agent snapshots. Its original events remain available in the table above.</p></section>'; return; }
-  researchStep = Math.max(0, Math.min(researchStep, trace.length - 1));
-  holder.innerHTML = '<section class="panel research-replay"><div class="panel-heading"><div><h3>Step-by-step review</h3><small>Run ' + escapeHtml(run.runId) + ' · ' + trace.length + ' stored snapshots</small></div><span class="tag">Read-only historical state</span></div><div class="replay-controls"><button class="button" data-trace-move="-1">Previous</button><label class="field trace-slider"><span data-trace-position></span><input type="range" min="0" max="' + (trace.length - 1) + '" value="' + researchStep + '" step="1" aria-label="Recorded snapshot step" data-trace-slider></label><button class="button" data-trace-move="1">Next</button><button class="button" data-trace-latest>Latest</button></div><div data-trace-event></div><div data-trace-diff></div><details><summary>Recorded initial conditions & complete evidence</summary><pre>' + escapeHtml(JSON.stringify(run.initialConditions || {}, null, 2)) + '</pre><div data-trace-evidence></div></details><div data-trace-states></div></section>';
-  const renderStep = () => {
-    const step = trace[researchStep], previous = trace[researchStep - 1], snapshot = step.snapshot || {};
-    holder.querySelector('[data-trace-position]').textContent = 'Step ' + (researchStep + 1) + ' of ' + trace.length + ' · sequence ' + (step.seq ?? researchStep);
-    holder.querySelector('[data-trace-slider]').value = researchStep;
-    holder.querySelector('[data-trace-move="-1"]').disabled = researchStep === 0;
-    holder.querySelector('[data-trace-move="1"]').disabled = researchStep === trace.length - 1;
-    holder.querySelector('[data-trace-latest]').disabled = researchStep === trace.length - 1;
-    const events = (run.events || []).filter(event => event.seq === step.eventSeq || event.eventSeq === step.eventSeq);
-    holder.querySelector('[data-trace-event]').innerHTML = '<article class="timeline-event"><div class="panel-heading"><strong>' + escapeHtml(String(step.kind || 'State recorded').replaceAll('_', ' ')) + '</strong><small>' + escapeHtml(formatDate(step.at)) + '</small></div>' + (events.length ? '<ul class="timeline-event-list">' + events.map(event => '<li>' + readableEvent(event) + '</li>').join('') + '</ul>' : '<small>Agent snapshot at this point in the recorded run.</small>') + '</article>';
-    holder.querySelector('[data-trace-diff]').innerHTML = '<div class="trace-diff"><h4>Changes since the previous snapshot</h4>' + traceChanges(previous?.snapshot?.agentStates, snapshot.agentStates) + '</div>';
-    holder.querySelector('[data-trace-evidence]').innerHTML = '<pre>' + escapeHtml(JSON.stringify({ step, events }, null, 2)) + '</pre>';
-    mountAgentStates(holder.querySelector('[data-trace-states]'), snapshot.agentStates, { scope: 'research-' + run.runId, heading: 'Alice & Bob at this step', description: 'Exact historical snapshots; use the graph and cards to inspect what each agent knew and could do.' });
-  };
-  holder.addEventListener('input', event => { if (event.target.matches('[data-trace-slider]')) { researchStep = Number(event.target.value); renderStep(); } });
-  holder.addEventListener('click', event => { const move = event.target.closest('[data-trace-move]'); if (move && !move.disabled) { researchStep += Number(move.dataset.traceMove); renderStep(); } if (event.target.closest('[data-trace-latest]')) { researchStep = trace.length - 1; renderStep(); } });
-  renderStep();
-}
-function formatDate(value) { const date = new Date(value); return Number.isNaN(date.getTime()) ? String(value ?? '') : date.toLocaleString(); }
-$('research-view').addEventListener('change', event => { if (event.target.dataset.researchFilter) { researchFilters[event.target.dataset.researchFilter] = event.target.value; renderResearch(); } });
-$('research-view').addEventListener('click', async event => {
-  const runButton = event.target.closest('[data-research-run]'); if (runButton) { selectedResearchRunId = runButton.dataset.researchRun; researchStep = 0; renderResearch(); return; }
-  const button = event.target.closest('[data-research-action]'); if (!button) return;
-  const format = button.dataset.researchAction; if (format === 'refresh') { loadResearch(); return; }
+async function researchAction(format, button) {
+  if (format === 'refresh') { loadResearch(); return; }
+  if (!['csv', 'jsonl'].includes(format)) return;
   button.disabled = true;
   try {
     const response = await fetch('/api/admin/research/export?format=' + format, { headers: { Authorization: 'Bearer ' + adminToken }, cache: 'no-store' });
@@ -483,7 +531,7 @@ $('research-view').addEventListener('click', async event => {
     const url = URL.createObjectURL(await response.blob()), link = document.createElement('a'); link.href = url; link.download = 'agent-on-request-research.' + format; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   } catch (error) { notify(error.message, 'error'); }
   finally { button.disabled = false; }
-});
+}
 
 configController = mountBobConfig($('config-view'), { api, getSessionId: () => selectedSessionId || current?.session.id, onApplied: result => { if (result.state) applyState(result.state); if (activeView === 'console') loadAdminSessions(); } });
 modelController = mountModelConfig($('models-view'), { api, getCurrentRevision: () => current?.session.modelRevision, onApplied: async () => { try { meta = await api('/api/meta', { auth: false }); if (!current || planningNewRound) renderParticipant(); } catch (error) { notify(error.message, 'error'); } } });
@@ -511,4 +559,7 @@ setInterval(async () => {
   try { if (current) await refreshCurrent({ quiet: true }); if (adminToken && activeView === 'console') await loadAdminSessions(); }
   finally { pollBusy = false; }
 }, 2500);
+for (const id of ['participant-view', 'console-view', 'admin-dialog-body']) {
+  const view = $(id); observeDisclosures(view, () => view.dataset.disclosureScope || id);
+}
 boot();

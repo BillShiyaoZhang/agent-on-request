@@ -1,10 +1,32 @@
 import { RuntimeError, invariant } from './runtime-helpers.mjs';
 
-const proposalTool = {
-  type: 'function', function: { name: 'submit_proposal',
-    description: 'Submit one JSON planning proposal. This submits data only; it does not execute or authorize any action.',
-    parameters: { type: 'object', properties: { message: { type: 'string' }, action: { type: 'object' } }, required: ['message'] } }
-};
+const BOB_ACTIONS = new Set(['request_more', 'meeting', 'no_match', 'share_brief']);
+function proposalTool(context) {
+  const actions = Array.isArray(context?.allowedActions) ? context.allowedActions.filter(type => BOB_ACTIONS.has(type)) : [];
+  const parameters = { type: 'object', additionalProperties: false,
+    properties: { message: { type: 'string', minLength: 1, maxLength: 4000, description: 'Short participant-facing message, without private data or reasoning.' } }, required: ['message'] };
+  if (actions.length) {
+    const action = { type: 'object', additionalProperties: false,
+      properties: { type: { type: 'string', enum: actions, description: 'Choose exactly one listed action name.' } }, required: ['type'] };
+    if (actions.includes('meeting')) action.properties.meeting = { type: 'object', additionalProperties: false,
+      properties: { day: { type: 'string', enum: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] },
+        time: { type: 'string', description: 'A 30-minute HH:mm–HH:mm interval inside sharedIntersection.' } }, required: ['day', 'time'] };
+    if (actions.includes('share_brief')) {
+      const fields = Object.keys(context.ownBrief ?? {});
+      action.properties.fields = { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', enum: fields } };
+      action.properties.values = { type: 'object', additionalProperties: false,
+        properties: Object.fromEntries(fields.map(field => [field, { const: context.ownBrief[field], description: 'Copy this field exactly from ownBrief; do not invent or summarize it.' }])) };
+      action.properties.resource = { type: 'string', enum: ['meeting_brief'] };
+      if (actions.length === 1) action.required.push('fields', 'values', 'resource');
+    }
+    action.oneOf = actions.map(type => ({ type: 'object', properties: { type: { enum: [type] } },
+      required: ['type', ...(type === 'meeting' ? ['meeting'] : type === 'share_brief' ? ['fields', 'values', 'resource'] : [])] }));
+    parameters.properties.action = action;
+    parameters.required.push('action');
+  }
+  return { type: 'function', function: { name: 'submit_proposal',
+    description: 'Submit exactly one planning proposal using this schema. Submission proposes data only; the controller separately verifies and authorizes any transfer.', parameters } };
+}
 
 function parseProposal(data) {
   invariant(!data?.error && (!data?.base_resp?.status_code || data.base_resp.status_code === 0),
@@ -49,8 +71,8 @@ export async function callProvider({ connection, settings, system, context, sign
   timer.unref();
   const miniMax = connection.provider === 'minimax_cn_token_plan';
   const input = { model: settings.model, messages: [{ role: 'system', content: system }, { role: 'user', content: JSON.stringify(context) }],
-    stream: false, temperature: settings.temperature, tools: [proposalTool],
-    ...(miniMax ? { max_completion_tokens: settings.maxTokens, thinking: { type: settings.thinking ?? 'disabled' }, reasoning_split: true }
+    stream: false, temperature: settings.temperature, tools: [proposalTool(context)],
+    ...(miniMax ? { max_completion_tokens: settings.maxTokens, thinking: { type: settings.thinking ?? 'disabled' }, reasoning_split: true, tool_choice: 'required' }
       : { max_tokens: settings.maxTokens, response_format: { type: 'json_object' }, store: false }) };
   try {
     const response = await fetch(`${connection.baseUrl.replace(/\/+$/, '')}/chat/completions`, {

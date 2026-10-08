@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { reveal } from './disclosure-helpers.mjs';
 
 // Optional QA dependency: install Playwright locally, expose it through NODE_PATH,
 // or set DEMO_PLAYWRIGHT_MODULE to a runtime-provided module path. No app dependency.
@@ -89,20 +90,21 @@ async function login(approval = false) {
 async function nav(view) {
   await page.locator('[data-view="' + view + '"]').click();
   await page.locator('#' + view + '-view').waitFor();
-  if (view === 'config') await page.locator('[data-config-path="persona"]').waitFor();
-  if (view === 'models') await page.locator('[data-model-path="agents.Alice.model"]').waitFor();
-  if (view === 'research') await page.locator('.summary-item').first().waitFor();
+  if (view === 'config') await reveal(page.locator('[data-config-path="persona"]'));
+  if (view === 'models') await reveal(page.locator('[data-model-path="agents.Alice.model"]'));
+  if (view === 'research') await page.locator('.research-summary-card').first().waitFor();
   if (view === 'console') await page.locator('[data-console-action="reset"]').waitFor();
 }
 async function setJson(value) {
-  await page.locator('summary').filter({ hasText: 'All configuration · JSON' }).click();
-  await page.locator('[data-config-json]').fill(typeof value === 'string' ? value : JSON.stringify(value, null, 2));
+  const raw = await reveal(page.locator('[data-config-json]'));
+  await raw.fill(typeof value === 'string' ? value : JSON.stringify(value, null, 2));
   await configAction('parse-json').click();
 }
 async function applyConfig() {
   const validated = response('/api/admin/config/validate'); await configAction('validate').click();
   assert.equal((await (await validated).json()).valid, true);
   await page.waitForFunction(() => !document.querySelector('[data-config-action="apply"]').disabled);
+  assert.equal(await page.locator('[data-config-section="diff"]').evaluate(node => node.open), true);
   const applied = response('/api/admin/config/apply'); await configAction('apply').click();
   const value = await (await applied).json();
   await page.waitForFunction(() => !document.querySelector('[data-config-action="validate"]').disabled);
@@ -154,9 +156,10 @@ try {
   await page.locator('#admin-dialog').waitFor({ state: 'hidden' });
   actual = await state(); assert.equal(actual.task.outcome, 'arranged');
   for (const [name, value, action] of [['prediction', 'approved_snapshot', 'answer_prediction'], ['revocation', 'future_only', 'answer_revocation']]) {
+    const received = response('/api/sessions/' + actual.session.id + '/actions');
     await page.locator('input[name="' + name + '-answer"][value="' + value + '"]').check();
-    const received = response('/api/sessions/' + actual.session.id + '/actions'); await act(action).click(); await received;
-    await page.waitForFunction(action => document.querySelector('[data-participant-action="' + action + '"]').textContent.includes('received'), action);
+    await received;
+    await page.locator('[data-understanding-received="' + (name === 'prediction' ? 'received_scope' : 'withdrawal') + '"]').waitFor();
   }
   const receiptBeforeStop = (await state()).receipts;
   const stopped = response('/api/sessions/' + actual.session.id + '/actions'); await act('stop_sharing').click(); await stopped;
@@ -165,11 +168,13 @@ try {
   const recorded = await admin('/api/admin/research');
   assert.ok(recorded.summary.taskCompleted >= 1); assert.ok(recorded.summary.completed >= 1);
   for (const format of ['csv', 'jsonl']) {
-    const download = page.waitForEvent('download'); await page.locator('[data-research-action="' + format + '"]').click();
+    const exportButton = await reveal(page.locator('[data-research-action="' + format + '"]'));
+    const download = page.waitForEvent('download'); await exportButton.click();
     const item = await download; assert.equal(await item.failure(), null);
   }
-  await page.locator('[data-research-filter="mode"]').selectOption('controlled');
-  assert.equal(await page.locator('.research-table tbody tr').count(), recorded.runs.filter(run => run.mode === 'controlled').length);
+  const modeFilter = await reveal(page.locator('[data-research-filter="mode"]'));
+  await modeFilter.selectOption('controlled');
+  assert.equal(await page.locator('[data-research-run]').count(), recorded.runs.filter(run => run.mode === 'controlled').length);
   checked.push('Consented real research: optional answers, stop, end, filter, CSV and JSONL');
   await nav('participant'); await start(); await preview('initial', 'free'); await confirm();
   await nav('config');
@@ -178,11 +183,17 @@ try {
   await setJson('{ invalid');
   assert.equal(await page.locator('[data-config-path="persona"]').isDisabled(), true);
   assert.match(await page.locator('[data-config-notice]').textContent(), /parse error/i);
+  await page.locator('input[name="config-target"][value="session"]').check();
+  assert.equal(await page.locator('[data-config-json]').inputValue(), '{ invalid');
+  assert.equal(await page.locator('[data-config-path="persona"]').isDisabled(), true);
+  assert.equal(await page.locator('[data-config-section="json"]').evaluate(node => node.open), true);
+  await page.locator('input[name="config-target"][value="template"]').check();
   await configAction('discard-json').click();
   const changed = structuredClone(baseline); changed.extensions = { ...changed.extensions, browserSmoke: { retained: true } };
   await page.locator('[data-config-json]').fill(JSON.stringify(changed)); await configAction('parse-json').click();
   await page.locator('[data-config-path="persona"]').fill('Bob is a calm browser-smoke collaborator.');
   assert.equal(JSON.parse(await page.locator('[data-config-json]').inputValue()).extensions.browserSmoke.retained, true);
+  await reveal(page.locator('[data-config-profile-name]'));
   await page.locator('[data-config-profile-name]').fill('browser-smoke');
   const profilesSaved = response('/api/admin/profiles'); await configAction('save-profile').click(); await profilesSaved;
   await page.waitForFunction(() => !document.querySelector('[data-config-action="load-profile"]').disabled);
@@ -192,7 +203,18 @@ try {
   assert.equal(templateApplied.activeRevision, configBefore.activeRevision);
   assert.equal(templateApplied.template.extensions.browserSmoke.retained, true);
   const receiptsBefore = (await state()).receipts;
+  const validatedTemplate = response('/api/admin/config/validate');
+  await configAction('validate').click();
+  assert.equal((await (await validatedTemplate).json()).valid, true);
+  await page.waitForFunction(() => !document.querySelector('[data-config-action="apply"]').disabled);
+  const personaBeforeScope = await page.locator('[data-config-path="persona"]').inputValue();
+  const jsonBeforeScope = await page.locator('[data-config-json]').inputValue();
   await page.locator('input[name="config-target"][value="session"]').check();
+  assert.equal(await configAction('apply').isDisabled(), true);
+  assert.equal(await page.locator('[data-config-path="persona"]').inputValue(), personaBeforeScope);
+  assert.equal(await page.locator('[data-config-json]').inputValue(), jsonBeforeScope);
+  assert.equal(await page.locator('[data-config-section="goal"]').evaluate(node => node.open), true);
+  assert.match(await page.locator('[data-config-notice]').textContent(), /scope changed/i);
   await page.locator('[data-config-path="persona"]').fill('Bob is temporarily configured for this round only.');
   const temporary = await applyConfig(); assert.equal(temporary.state.session.paused, true);
   assert.deepEqual(temporary.state.receipts, receiptsBefore);
@@ -211,7 +233,7 @@ try {
   await nav('config'); await setJson(baseline); await applyConfig();
   assert.ok((await admin('/api/admin/config/versions')).versions.length >= 3);
   await page.screenshot({ path: resolve(artifacts, 'bob-config.png'), fullPage: true });
-  checked.push('JSON validation / unknown keys / profile / template vs temporary revision / reset / archive');
+  checked.push('Disclosure, JSON buffer and draft survive scope changes; validation / unknown keys / profile / template vs temporary revision / reset / archive');
   await nav('participant'); await preview('initial', 'free'); await confirm();
   await preview('additional', 'narrow'); await confirm();
   // Exercise every actual panel at all required sizes, with both opaque themes.
@@ -228,6 +250,7 @@ try {
           await page.locator('[data-approval-decision="allow_once"]').first().waitFor();
           const dialog = await page.locator('#admin-dialog').evaluate(node => ({ width: node.clientWidth, scroll: node.scrollWidth }));
           assert.ok(dialog.scroll <= dialog.width + 1, theme + '/' + width + '/approval overflow');
+          await reveal(page.locator('[data-approval-decision="allow_round"]').last());
           await page.locator('[data-approval-decision="allow_round"]').last().focus();
           await page.keyboard.press('Tab');
           assert.equal(await page.evaluate(() => document.activeElement?.closest('dialog')?.id), 'admin-dialog');

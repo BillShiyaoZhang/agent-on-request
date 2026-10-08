@@ -1,0 +1,350 @@
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { resolve } from 'node:path';
+import { createDemoServer } from '../src/server.mjs';
+import { renderParticipantHtml } from '../public/participant-ui.js';
+import { reveal } from './disclosure-helpers.mjs';
+
+const require = createRequire(import.meta.url);
+const playwright = require(process.env.DEMO_PLAYWRIGHT_MODULE || 'playwright');
+const pin = 'operator-smoke-pin';
+const app = await createDemoServer({ host: '127.0.0.1', port: 0, adminPin: pin, persist: false, minimaxApiKey: '' });
+const address = await app.listen();
+const artifacts = resolve('artifacts/operator-browser');
+await mkdir(artifacts, { recursive: true });
+const browser = await playwright.chromium.launch({ headless: true, ...(process.env.DEMO_BROWSER_EXECUTABLE ? { executablePath: process.env.DEMO_BROWSER_EXECUTABLE } : {}) });
+const page = await browser.newPage({ locale: 'zh-CN', viewport: { width: 1280, height: 900 } });
+page.setDefaultTimeout(15000);
+const errors = [], checked = [];
+page.on('pageerror', error => errors.push(error.message));
+const act = name => page.locator('[data-participant-action="' + name + '"]').first();
+const consoleAction = name => page.locator('[data-console-action="' + name + '"]');
+const credentials = () => page.evaluate(() => JSON.parse(sessionStorage.getItem('agent-on-request.session')));
+const state = async () => app.engine.view(app.engine.get((await credentials()).id));
+async function share(stage, choice) {
+  await page.locator('input[name="' + stage + '-choice"][value="' + choice + '"]').check();
+  await act('preview').click(); await act('confirm').waitFor(); await act('confirm').click();
+  await page.waitForFunction(() => !document.querySelector('[data-participant-action="confirm"]'));
+}
+async function noOverflow() {
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false);
+  if (await page.locator('#admin-dialog').evaluate(node => node.open)) assert.equal(await page.locator('#admin-dialog').evaluate(node => node.scrollWidth > node.clientWidth + 1), false);
+}
+try {
+  const unconfirmedFixture = {
+    session: { mode: 'controlled', stage: 'waiting_admin' }, task: {}, messages: [],
+    receipts: { aliceToBob: [{ status: 'received', values: { topic: 'WRONG_DIRECTION_SENTINEL' } }], bobToAlice: [{ status: 'pending', values: { topic: 'PENDING_SENTINEL' } }, { status: 'unknown', values: { agenda: 'UNKNOWN_SENTINEL' } }] },
+    pendingApprovals: [{ status: 'pending', values: { topic: 'UNAPPROVED_SENTINEL' } }]
+  };
+  const unconfirmedHtml = renderParticipantHtml({ state: unconfirmedFixture, heading: 'Test', mode: 'controlled' });
+  assert.equal(unconfirmedHtml.includes('data-alice-received'), false);
+  for (const value of ['WRONG_DIRECTION_SENTINEL', 'PENDING_SENTINEL', 'UNKNOWN_SENTINEL', 'UNAPPROVED_SENTINEL']) assert.equal(unconfirmedHtml.includes(value), false);
+  const nestedAgenda = { '<group&>': ['<b>& "literal"', false, []], notes: { allowed: false, empty: [] } };
+  const nestedFixture = { ...unconfirmedFixture, receipts: { aliceToBob: [], bobToAlice: [{ operationId: 'nested-confirmed', status: 'received', fields: ['topic', 'agenda'], values: { topic: 'Plain <topic> & no mutation', agenda: nestedAgenda } }] } };
+  await page.setContent(renderParticipantHtml({ state: nestedFixture, heading: 'Test', mode: 'controlled' }));
+  const structuredValue = page.locator('[data-alice-received] .received-structured');
+  assert.equal(await structuredValue.count(), 1);
+  assert.equal(await structuredValue.evaluate(node => node.open), false);
+  assert.equal(await page.locator('details[open]').count(), 0);
+  assert.equal(await structuredValue.locator('pre,code,textarea,b').count(), 0);
+  assert.equal((await structuredValue.textContent()).includes(JSON.stringify(nestedAgenda)), false);
+  assert.deepEqual(await structuredValue.locator('dt').allTextContents(), ['<group&>', 'notes', 'allowed', 'empty']);
+  assert.deepEqual(await structuredValue.locator('span[data-i18n-ignore]').allTextContents(), ['<b>& "literal"', 'false', 'false']);
+  assert.deepEqual(await structuredValue.locator('.muted').allTextContents(), ['Empty list', 'Empty list']);
+  assert.equal(await page.locator('[data-alice-received] > dl > dd > span[data-i18n-ignore]').textContent(), 'Plain <topic> & no mutation');
+  checked.push('Nested confirmed objects and lists are readable, safely escaped and collapsed by default; literal strings, false and empty lists retain their values');
+  await page.goto('http://127.0.0.1:' + address.port);
+  await page.locator('#admin-open').click();
+  await page.locator('#admin-pin').waitFor();
+  assert.equal(await page.locator('#admin-dialog-body details[open]').count(), 0);
+  await page.screenshot({ path: resolve(artifacts, 'login-zh.png') });
+  await page.locator('#admin-pin').fill('incorrect-pin');
+  await page.locator('#admin-login-form button[type="submit"]').click();
+  await page.locator('#admin-dialog-body [role="alert"]').waitFor();
+  await page.locator('#admin-pin').fill(pin);
+  await page.locator('#admin-login-form button[type="submit"]').click();
+  await page.locator('#admin-dialog').waitFor({ state: 'hidden' });
+  checked.push('PIN sign-in, visible error and collapsed role details');
+  await page.waitForFunction(() => !document.querySelector('[data-participant-action="start"]')?.disabled);
+  await act('start').click();
+  await share('initial', 'free'); await share('additional', 'narrow');
+  await act('admin_review').click();
+  await page.locator('[data-approval-decision="allow_once"]').waitFor();
+  const before = await state();
+  const pending = app.engine.approvals(before.session.id).find(approval => approval.status === 'pending');
+  assert.equal(await page.locator('[data-alice-received]').count(), 0);
+  for (const value of Object.values(pending.values)) assert.equal((await page.locator('.participant-main-flow').textContent()).includes(String(value)), false);
+  assert.equal(await page.locator('[data-approval-decision="allow_round"]').isVisible(), false);
+  for (const field of pending.fields) assert.equal(await page.locator('[data-approval-value-field="' + field + '"] .operator-exact-value').textContent(), String(pending.values[field]));
+  await page.screenshot({ path: resolve(artifacts, 'approval-zh.png') });
+  await page.locator('input[name="approval-field"][value="agenda"]').uncheck();
+  assert.equal(await page.locator('[data-approval-value-field="agenda"] .operator-exact-value').isVisible(), true);
+  await reveal(page.locator('#approval-max-uses'));
+  await page.locator('#approval-max-uses').fill('101');
+  await page.locator('#approval-expiry').fill('7');
+  await page.locator('[data-approval-decision="allow_round"]').click();
+  await page.locator('#admin-dialog-body [role="alert"]').waitFor();
+  assert.equal(await page.locator('input[name="approval-field"][value="agenda"]').isChecked(), false);
+  assert.equal(await page.locator('#approval-max-uses').inputValue(), '101');
+  assert.equal(await page.locator('#approval-expiry').inputValue(), '7');
+  assert.equal(await page.locator('[data-approval-value-field="agenda"] .operator-exact-value').textContent(), String(pending.values.agenda));
+  await page.locator('#language-toggle').click();
+  await page.waitForFunction(() => document.documentElement.lang === 'en');
+  assert.equal(await page.locator('[data-approval-value-field="agenda"] .operator-exact-value').textContent(), String(pending.values.agenda));
+  await page.locator('#language-toggle').click();
+  await page.waitForFunction(() => document.documentElement.lang === 'zh-CN');
+  for (const width of [320, 736, 1280]) { await page.setViewportSize({ width, height: 900 }); await noOverflow(); }
+  await page.keyboard.press('Escape'); await page.locator('#admin-dialog').waitFor({ state: 'hidden' });
+  assert.deepEqual((await state()).receipts, before.receipts);
+  assert.equal(await page.locator('[data-alice-received]').count(), 0);
+  assert.equal(app.engine.approvals(before.session.id).find(approval => approval.id === pending.id).status, 'pending');
+  checked.push('Exact readable values stay visible when excluded; error preserves fields and grant limits; language, sizes and closing preserve pending request');
+  await act('admin_review').click(); await page.locator('[data-approval-decision="allow_once"]').waitFor();
+  assert.equal(await page.locator('input[name="approval-field"][value="topic"]').isChecked(), true);
+  assert.equal(await page.locator('input[name="approval-field"][value="agenda"]').isChecked(), false);
+  assert.equal(await page.locator('#approval-max-uses').inputValue(), '101');
+  assert.equal(await page.locator('#approval-expiry').inputValue(), '7');
+  await page.locator('#admin-dialog-body [data-close-dialog="admin-dialog"]').click();
+  await page.locator('#admin-dialog').waitFor({ state: 'hidden' });
+  assert.equal(app.engine.approvals(before.session.id).find(approval => approval.id === pending.id).status, 'pending');
+  await act('admin_review').click(); await page.locator('[data-approval-decision="allow_once"]').waitFor();
+  assert.equal(await page.locator('input[name="approval-field"][value="topic"]').isChecked(), true);
+  assert.equal(await page.locator('input[name="approval-field"][value="agenda"]').isChecked(), false);
+  assert.equal(await page.locator('#approval-max-uses').inputValue(), '101');
+  assert.equal(await page.locator('#approval-expiry').inputValue(), '7');
+  checked.push('Esc and Return without deciding preserve the narrowed field selection and use/expiry draft when reopening the same pending approval');
+  await page.locator('[data-approval-decision="allow_once"]').click();
+  await page.locator('#admin-dialog').waitFor({ state: 'hidden' });
+  const approved = await state();
+  assert.deepEqual(approved.receipts.bobToAlice.at(-1).values, { topic: pending.values.topic });
+  const aliceReceived = page.locator('[data-alice-received]');
+  await aliceReceived.waitFor();
+  assert.deepEqual(await aliceReceived.locator('dd').allTextContents(), [pending.values.topic]);
+  assert.equal((await aliceReceived.textContent()).includes(pending.values.agenda), false);
+  await page.screenshot({ path: resolve(artifacts, 'alice-received-zh.png'), fullPage: true });
+  checked.push('Pending, unknown and opposite-direction data never appear as received; one-time narrowing displays only the actual approved topic Alice received');
+  await page.locator('[data-view="console"]').click();
+  await consoleAction('pause').waitFor();
+  assert.equal(await page.locator('#console-view details[open]').count(), 0);
+  assert.equal(await consoleAction('disconnect_bob').isVisible(), false);
+  for (const name of ['pause', 'approvals', 'reset', 'config']) assert.equal(await consoleAction(name).isVisible(), true);
+  await page.screenshot({ path: resolve(artifacts, 'console-zh.png') });
+  await consoleAction('pause').click(); await consoleAction('resume').waitFor();
+  assert.equal((await state()).session.paused, true);
+  await reveal(consoleAction('retry'));
+  assert.equal(await consoleAction('retry').isDisabled(), false);
+  assert.equal(await consoleAction('inject_request').isDisabled(), true);
+  await consoleAction('retry').click(); await consoleAction('pause').waitFor();
+  assert.equal((await state()).session.paused, false);
+  await consoleAction('pause').click(); await consoleAction('resume').waitFor();
+  await consoleAction('resume').click(); await consoleAction('pause').waitFor();
+  await reveal(consoleAction('disconnect_bob'));
+  assert.equal(await consoleAction('retry').isDisabled(), true);
+  await consoleAction('disconnect_bob').click(); await consoleAction('restore_bob').waitFor();
+  assert.equal((await state()).bob.online, false);
+  await consoleAction('restore_bob').click(); await consoleAction('disconnect_bob').waitFor();
+  assert.equal((await state()).bob.online, true);
+  for (const theme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme: theme });
+    for (const width of [320, 736, 1280]) { await page.setViewportSize({ width, height: 900 }); await noOverflow(); }
+  }
+  const oldId = (await state()).session.id;
+  await consoleAction('reset').click();
+  await page.waitForFunction(id => JSON.parse(sessionStorage.getItem('agent-on-request.session')).id !== id, oldId);
+  const reset = await state();
+  assert.equal(reset.session.researchConsent, false);
+  assert.equal(reset.receipts.aliceToBob.length, 0);
+  assert.equal(reset.receipts.bobToAlice.length, 0);
+  checked.push('Console primary controls, collapse state, pause/resume, connection simulation and new-round reset; both themes and all widths');
+
+  await page.locator('[data-view="participant"]').click();
+  await act('end').click(); await page.locator('#end-confirm').click(); await act('fresh').waitFor();
+  await page.locator('[data-view="console"]').click(); await consoleAction('pause').waitFor();
+  await reveal(consoleAction('disconnect_bob'));
+  for (const action of ['pause', 'disconnect_bob', 'retry', 'inject_request']) assert.equal(await consoleAction(action).isDisabled(), true);
+  const replay = await app.engine.create({ mode: 'replay' });
+  await consoleAction('refresh').click();
+  await reveal(page.locator('[data-console-select="' + replay.state.session.id + '"]'));
+  await page.locator('[data-console-select="' + replay.state.session.id + '"]').click();
+  await reveal(consoleAction('disconnect_bob'));
+  for (const action of ['pause', 'disconnect_bob', 'retry', 'inject_request']) assert.equal(await consoleAction(action).isDisabled(), true);
+  assert.equal(await consoleAction('reset').isDisabled(), false);
+  checked.push('Retry is available only when paused; ended rounds and replay disable unsupported interventions before a rejected request can occur');
+
+  let releaseOldState, sawOldState;
+  const oldStateGate = new Promise(resolve => { releaseOldState = resolve; });
+  const oldStateRequested = new Promise(resolve => { sawOldState = resolve; });
+  const oldStatePath = '**/api/sessions/' + reset.session.id;
+  await page.route(oldStatePath, async route => { const response = await route.fetch(); sawOldState(); await oldStateGate; await route.fulfill({ response }); }, { times: 1 });
+  await reveal(page.locator('[data-console-select="' + reset.session.id + '"]'));
+  await page.locator('[data-console-select="' + reset.session.id + '"]').click();
+  await oldStateRequested;
+  await page.locator('#console-view [aria-busy="true"]').waitFor();
+  assert.equal(await consoleAction('pause').count(), 0);
+  assert.equal(await consoleAction('reset').count(), 0);
+  await reveal(page.locator('[data-console-select="' + replay.state.session.id + '"]'));
+  await page.locator('[data-console-select="' + replay.state.session.id + '"]').click();
+  await page.locator('[data-disclosure-id="operator-' + replay.state.session.id + '-identity"]').waitFor();
+  const delayedResponse = page.waitForResponse(response => response.url().endsWith('/api/sessions/' + reset.session.id));
+  releaseOldState(); await (await delayedResponse).finished();
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  assert.equal(await page.locator('[data-disclosure-id="operator-' + replay.state.session.id + '-identity"]').count(), 1, 'A late state response must not replace the selected round.');
+  assert.equal(await page.locator('.session-row.selected [data-console-select]').getAttribute('data-console-select'), replay.state.session.id);
+  await page.unroute(oldStatePath);
+  checked.push('Rapid A→B session inspection rejects a delayed A response, keeping the displayed state and action target on B');
+
+  await page.locator('[data-view="research"]').click();
+  await page.locator('.research-record-picker .empty').waitFor();
+  assert.match(await page.locator('.research-record-picker .empty').innerText(), /尚无研究记录/);
+  assert.equal(await page.locator('[data-research-run]').count(), 0);
+  await page.screenshot({ path: resolve(artifacts, 'research-empty-zh.png'), fullPage: true });
+  await page.locator('[data-view="participant"]').click(); await act('fresh').click();
+  await page.locator('#start-consent').check();
+  await page.waitForFunction(() => !document.querySelector('[data-participant-action="start"]')?.disabled);
+  await act('start').click(); await share('initial', 'free'); await share('additional', 'narrow');
+  await act('admin_review').click(); await page.locator('[data-approval-decision="deny"]').waitFor();
+  await page.locator('[data-approval-decision="deny"]').click(); await page.locator('#admin-dialog').waitFor({ state: 'hidden' });
+  assert.equal((await state()).task.outcome, 'arranged');
+  const consentedEpoch = (await state()).session.epoch;
+  await act('stop_sharing').click();
+  await page.waitForFunction(() => !document.querySelector('[data-participant-action="stop_sharing"]'));
+  await act('end').click(); await page.locator('#end-confirm').click(); await act('fresh').waitFor();
+  const recordedBeforeFixtures = app.research.list();
+  assert.equal(recordedBeforeFixtures.runs.length, 1);
+  assert.equal(recordedBeforeFixtures.runs[0].trace[0].snapshot.epoch, consentedEpoch);
+  assert.equal(recordedBeforeFixtures.summary.completed, 1);
+  assert.equal(recordedBeforeFixtures.summary.runsPendingClose, 0);
+  checked.push('Non-consented and replay rounds leave an actionable empty review; an explicitly consented arranged round survives optional brief denial, withdrawal and end');
+
+  // Add actual disposable server runs to exercise multi-record selection and
+  // mutually exclusive filters. These never enter the existing event service.
+  for (let index = 0; index < 5; index++) {
+    const fixture = await app.engine.create({ mode: 'controlled', researchConsent: true });
+    const session = app.engine.get(fixture.state.session.id);
+    if (index === 0) await app.engine.event(session, 'technical', { code: 'QA_RECOVERABLE_FAULT', stage: session.stage });
+    else {
+      const preview = await app.engine.preview(session, { stage: 'initial', choice: 'none' });
+      await app.engine.action(session, { action: 'share_initial', choice: 'none', previewHash: preview.payloadHash, expectedVersion: session.version, requestId: randomUUID() });
+      await app.engine.action(session, { action: 'end', expectedVersion: session.version, requestId: randomUUID() });
+    }
+  }
+  await page.locator('[data-view="research"]').click(); await page.locator('[data-research-run]').first().waitFor();
+  const recorded = app.research.list();
+  assert.equal(await page.locator('[data-research-run]').count(), 6);
+  const newestRunId = recorded.runs.at(-1).runId;
+  assert.equal(await page.locator('[data-research-run]').first().getAttribute('data-research-run'), newestRunId, 'The most recently created record appears first.');
+  assert.equal(await page.locator('[data-research-run][aria-pressed="true"]').getAttribute('data-research-run'), newestRunId, 'First review entry selects the newest record.');
+  assert.equal(await page.locator('.research-record-picker > .research-disclosure').evaluate(node => node.open), false);
+  const sixth = page.locator('[data-research-run]').nth(5);
+  await reveal(sixth); await sixth.focus(); await sixth.press('Enter');
+  assert.equal(await sixth.getAttribute('aria-pressed'), 'true');
+  assert.equal(await sixth.evaluate(node => document.activeElement === node), true);
+  await page.locator('[data-research-run="' + recorded.runs[0].runId + '"]').click();
+  await page.locator('[data-trace-slider]').waitFor();
+  assert.equal(await page.locator('[data-trace-move="-1"]').isDisabled(), true);
+  assert.equal((await page.locator('.research-flow-counts .alice-to-bob').innerText()).replace(/\s+/g, ' '), '已向 Bob 传递 0 次 →');
+  await page.locator('[data-trace-latest]').click();
+  assert.equal(await page.locator('[data-trace-move="1"]').isDisabled(), true);
+  assert.equal(await page.locator('[data-trace-latest]').isDisabled(), true);
+  assert.match(await page.locator('.research-flow-counts .alice-to-bob').innerText(), /2/);
+  const selectedHistoricalStep = await page.locator('[data-trace-slider]').inputValue();
+  const refreshedRecords = page.waitForResponse(response => response.url().endsWith('/api/admin/research'));
+  await page.locator('[data-research-action="refresh"]').click(); await (await refreshedRecords).finished();
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  assert.equal(await page.locator('[data-research-run][aria-pressed="true"]').getAttribute('data-research-run'), recorded.runs[0].runId, 'Refresh keeps the explicitly selected older record.');
+  assert.equal(await page.locator('[data-trace-slider]').inputValue(), selectedHistoricalStep, 'Refresh keeps the explicitly selected historical step.');
+  await page.locator('[data-trace-slider]').focus(); await page.locator('[data-trace-slider]').press('Home');
+  assert.match(await page.locator('.research-flow-counts .alice-to-bob').innerText(), /0/);
+  await page.locator('[data-trace-move="1"]').click();
+  await page.locator('[data-trace-move="-1"]').click();
+  assert.equal(await page.locator('[data-trace-slider]').inputValue(), '0');
+  checked.push('Newest records appear first and are selected on first entry or when the selection is filtered out; refresh preserves an explicitly selected older record and step; overflow cards retain keyboard focus; the timeline supports button, keyboard range and latest navigation with historical delivery counts');
+
+  const statusFilter = page.locator('[data-research-filter="status"]');
+  await reveal(statusFilter); await statusFilter.focus(); await statusFilter.selectOption('declined');
+  assert.equal(await statusFilter.evaluate(node => document.activeElement === node), true);
+  assert.equal(await page.locator('[data-research-run]').count(), 4);
+  assert.equal(await page.locator('[data-research-run][aria-pressed="true"]').getAttribute('data-research-run'), newestRunId, 'When the selected record is filtered out, choose the newest matching record.');
+  const qualityFilter = page.locator('[data-research-filter="quality"]');
+  await qualityFilter.selectOption('technical issue');
+  assert.equal(await page.locator('[data-research-run]').count(), 0);
+  await page.locator('[data-research-clear-filters]').click();
+  assert.equal(await page.locator('[data-research-run]').count(), 6);
+  assert.equal(await page.locator('[data-research-run]').first().evaluate(node => document.activeElement === node), true);
+  assert.equal(await statusFilter.inputValue(), 'all');
+  assert.equal(await qualityFilter.inputValue(), 'all');
+  await qualityFilter.selectOption('technical issue');
+  assert.equal(await page.locator('[data-research-run]').count(), 1);
+  await page.locator('.research-quality-warning').waitFor();
+  await qualityFilter.selectOption('all');
+  for (const format of ['csv', 'jsonl']) {
+    const download = page.waitForEvent('download');
+    await page.locator('[data-research-action="' + format + '"]').click();
+    const item = await download; assert.equal(await item.failure(), null);
+    await item.saveAs(resolve(artifacts, 'research.' + format));
+  }
+  const exported = (await readFile(resolve(artifacts, 'research.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  assert.deepEqual(exported.map(run => run.runId), recorded.runs.map(run => run.runId));
+  assert.deepEqual(exported[0].trace.at(-1).snapshot.receipts, recorded.runs[0].trace.at(-1).snapshot.receipts);
+  const csv = await readFile(resolve(artifacts, 'research.csv'), 'utf8');
+  assert.match(csv.split('\n')[0], /initialConditions/);
+  assert.match(csv.split('\n')[0], /trace/);
+  for (const secret of ['operator-smoke-pin', 'adminToken', 'apiKey', 'participantToken']) assert.equal((JSON.stringify(exported) + csv).includes(secret), false);
+  await page.locator('[data-trace-latest]').click();
+  for (const theme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme: theme });
+    for (const width of [320, 736, 1280]) {
+      await page.setViewportSize({ width, height: 900 }); await noOverflow();
+      await page.screenshot({ path: resolve(artifacts, 'research-' + width + '-' + theme + '.png'), fullPage: true });
+    }
+  }
+  checked.push('Filters retain keyboard focus, empty combinations clear in one action, quality warnings appear, CSV/JSONL download actual records, and research fits both themes at 320/736/1280px');
+  await page.locator('#language-toggle').click();
+  await page.waitForFunction(() => document.documentElement.lang === 'en');
+  assert.equal(await page.locator('#research-view h2').innerText(), 'Research review');
+  const retainedStep = await page.locator('[data-trace-slider]').inputValue();
+  const retainedRun = await page.locator('[data-research-run][aria-pressed="true"]').getAttribute('data-research-run');
+  await page.locator('#language-toggle').click();
+  await page.waitForFunction(() => document.documentElement.lang === 'zh-CN');
+  assert.equal(await page.locator('[data-trace-slider]').inputValue(), retainedStep);
+  assert.equal(await page.locator('[data-research-run][aria-pressed="true"]').getAttribute('data-research-run'), retainedRun);
+
+  const grantFixture = await app.engine.create({ mode: 'controlled', researchConsent: false });
+  const grantSession = app.engine.get(grantFixture.state.session.id);
+  await page.locator('[data-view="console"]').click();
+  await consoleAction('refresh').click();
+  const grantRound = page.locator('[data-console-select="' + grantSession.id + '"]');
+  await grantRound.waitFor(); await reveal(grantRound); await grantRound.click();
+  await reveal(consoleAction('inject_request')); await consoleAction('inject_request').click();
+  await page.waitForFunction(() => document.querySelector('[data-console-action="inject_request"]')?.disabled);
+  const grantApproval = app.engine.approvals(grantSession.id).find(approval => approval.status === 'pending');
+  assert.ok(grantApproval);
+  await consoleAction('approvals').click(); await page.locator('[data-approval-decision="allow_once"]').waitFor();
+  await reveal(page.locator('#approval-max-uses'));
+  await page.locator('#approval-max-uses').fill('2'); await page.locator('#approval-expiry').fill('5');
+  await page.screenshot({ path: resolve(artifacts, 'round-grant-zh.png') });
+  await page.locator('[data-approval-decision="allow_round"]').click(); await page.locator('#admin-dialog').waitFor({ state: 'hidden' });
+  assert.equal(grantSession.grants[0].uses, 1); assert.equal(grantSession.grants[0].remaining, 1);
+  assert.deepEqual(grantSession.receipts.bobToAlice.at(-1).values, grantApproval.values);
+  await reveal(consoleAction('inject_request')); await consoleAction('inject_request').click();
+  await page.waitForFunction(() => !document.querySelector('[data-console-action="inject_request"]')?.disabled);
+  assert.equal(grantSession.grants[0].uses, 2); assert.equal(grantSession.grants[0].remaining, 0);
+  assert.equal(grantSession.receipts.bobToAlice.length, 2);
+  await consoleAction('inject_request').click();
+  await page.waitForFunction(() => document.querySelector('[data-console-action="inject_request"]')?.disabled);
+  assert.equal(grantSession.receipts.bobToAlice.length, 2);
+  assert.equal(app.engine.approvals(grantSession.id).filter(approval => approval.status === 'pending').length, 1);
+  await consoleAction('approvals').click(); await page.locator('[data-approval-decision="deny"]').waitFor();
+  await page.locator('[data-approval-decision="deny"]').click(); await page.locator('#admin-dialog').waitFor({ state: 'hidden' });
+  assert.equal(app.research.list().runs.length, 6);
+  checked.push('Injected requests require review; an exact two-use round grant permits only two confirmed replies, then requests a new approval without adding a receipt; non-consented intervention saves no research run');
+  assert.deepEqual(errors, []);
+  await rm(resolve(artifacts, 'failure.png'), { force: true });
+  await writeFile(resolve(artifacts, 'operator-browser-report.json'), JSON.stringify({ checked, errors, artifacts }, null, 2));
+  console.log(JSON.stringify({ checked, errors, artifacts }, null, 2));
+} catch (error) {
+  await page.screenshot({ path: resolve(artifacts, 'failure.png'), fullPage: true });
+  console.error(JSON.stringify({ checked, errors }, null, 2)); throw error;
+} finally { await browser.close(); await app.close(); }

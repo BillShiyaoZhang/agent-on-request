@@ -36,7 +36,9 @@ npm start
 
 ## 单次行动提案
 
-每个规划步骤只发起一次模型请求，注册一个函数工具 `submit_proposal`，参数为 `message` 和可选 `action`。它的作用是返回结构化提案数据；工具名称本身不授予读取日程、发消息或调用系统命令的权限。worker 再验证 Alice/Bob 的行动格式，控制器最后检查本轮授权、字段、时间窗口、接收方和操作状态。
+每个规划步骤只发起一次模型请求，注册一个函数工具 `submit_proposal`。Alice 的介绍与连接探针要求 `message`；Bob 的规划还要求当前阶段允许的 `action.type`，会议必须包含日期/时间对象，简报必须包含所选字段及对应原值。MiniMax 请求使用 `tool_choice: required`，提示中提供实际共享交集的完整提案例子；官方兼容性验证清单包含 `required` 工具选择。[MiniMax 官方 M3 验证清单](https://github.com/MiniMax-AI/MiniMax-Provider-Verifier/blob/main/m3_format_check/docs/m3_text_cases.md)
+
+工具只返回结构化提案数据，不授予读取日程、发消息或调用系统命令的权限。worker 仍验证实际共享交集和 Bob 原始资料，控制器最后检查本轮授权、字段、时间窗口、接收方和操作状态。缺字段或非法输出会暂停并显示错误代码和固定的结构诊断；不会把任意模型正文、推理或凭证当作错误信息回显。
 
 ```mermaid
 flowchart LR

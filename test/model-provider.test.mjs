@@ -24,7 +24,7 @@ test('MiniMax M3 uses the China endpoint, subscription key and proposal tool wit
   assert.deepEqual(request.body.thinking, { type: 'disabled' });
   assert.equal(request.body.reasoning_split, true);
   assert.equal(request.body.response_format, undefined);
-  assert.equal(request.body.tool_choice, undefined);
+  assert.equal(request.body.tool_choice, 'required');
   assert.equal(request.body.tools[0].function.name, 'submit_proposal');
   assert.equal(JSON.stringify(request.body).includes(connection.apiKey), false);
 });
@@ -37,6 +37,32 @@ test('final JSON fallback strips think blocks; probes never echo provider text o
   assert.equal(result.role, 'Bob');
   assert.equal(result.response, 'Synthetic connectivity test acknowledged.');
   assert.equal(JSON.stringify(result).includes('SECRET'), false);
+});
+
+test('proposal schemas require stage-specific Bob actions and complete meeting and brief shapes', async t => {
+  let input;
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    input = JSON.parse(options.body);
+    return response({ choices: [{ finish_reason: 'stop', message: { content: '{"message":"ok"}' } }] });
+  });
+  await callProvider({ ...args, context: { allowedActions: ['request_more', 'meeting', 'no_match'] } });
+  const parameters = input.tools[0].function.parameters;
+  assert.deepEqual(parameters.required, ['message', 'action']);
+  assert.equal(parameters.additionalProperties, false);
+  assert.deepEqual(parameters.properties.action.properties.type.enum, ['request_more', 'meeting', 'no_match']);
+  assert.deepEqual(parameters.properties.action.oneOf.find(branch => branch.properties.type.enum[0] === 'meeting').required, ['type', 'meeting']);
+  assert.deepEqual(parameters.properties.action.properties.meeting.required, ['day', 'time']);
+  assert.deepEqual(parameters.properties.action.oneOf.find(branch => branch.properties.type.enum[0] === 'no_match').required, ['type']);
+  await callProvider({ ...args, context: { allowedActions: ['share_brief'], ownBrief: { topic: 'Synthetic topic', agenda: { step: 1 } } } });
+  const action = input.tools[0].function.parameters.properties.action;
+  assert.deepEqual(action.required, ['type', 'fields', 'values', 'resource']);
+  assert.deepEqual(action.properties.fields.items.enum, ['topic', 'agenda']);
+  assert.equal(action.properties.values.additionalProperties, false);
+  assert.deepEqual(Object.keys(action.properties.values.properties), ['topic', 'agenda']);
+  assert.deepEqual(action.properties.resource.enum, ['meeting_brief']);
+  await callProvider({ ...args, context: { purpose: 'intro', ownCalendar: [] } });
+  assert.deepEqual(input.tools[0].function.parameters.required, ['message']);
+  assert.equal(input.tools[0].function.parameters.properties.action, undefined);
 });
 
 test('truncation, refusals, business errors, unregistered tools and unsafe JSON cannot become successful plans', async t => {

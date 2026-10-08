@@ -1,0 +1,31 @@
+// Presentation strings for Bob's progressive configuration hierarchy.
+export const messages = {
+  'Start with three essentials. Open a card when you want to adjust its details.': '先看三个重点方向，想调整时再展开卡片。',
+  'Goal & role': '目标与角色',
+  'What Bob should achieve, and how he should act.': 'Bob 要完成什么，以及以什么角色行动。',
+  'Time & materials': '时间与资料',
+  'The calendar and brief Bob can work with.': 'Bob 可以使用的日历和简报。',
+  'Sharing boundaries': '共享边界',
+  'Who can receive what, and when Bob asks first.': '哪些信息可以共享给谁，以及何时需要先确认。',
+  'Essentials': '基础',
+  'Optional brief': '可选简报',
+  'Permission limits & collaboration': '授权限制与协作',
+  'Fine-tune behavior': '细调行为',
+  'Advanced': '进阶',
+  'Explore these after the essentials feel right.': '基础设置合适后，可以再试试这些选项。',
+  'Reply style': '回复风格',
+  'Prompts & tools': '提示词与工具',
+  'Saved drafts & history': '保存的草稿与历史',
+  'Optional': '可选',
+  'Review & apply': '审阅并应用',
+  'Validated · ready to review': '已验证 · 请审阅',
+  'JSON buffer needs parsing': 'JSON 修改需要解析',
+  'Validation required': '等待验证',
+  'Configuration steps': '配置步骤',
+  'Configure': '调整配置',
+  'Review changes': '审阅变更',
+  'Apply': '应用',
+  'Changes to review': '待审阅的变更',
+  'Apply scope changed. Validate and review this draft for the selected scope.': '应用范围已改变。请针对所选范围重新验证并审阅草稿。'
+};
+export const patterns = [];
