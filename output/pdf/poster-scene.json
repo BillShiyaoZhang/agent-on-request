@@ -1,0 +1,1833 @@
+[
+  {
+    "kind": "rect",
+    "x": 0,
+    "y": 0,
+    "w": 1685.196850393701,
+    "h": 1191.968503937008,
+    "fill": "#FCFDFE",
+    "stroke": null,
+    "radius": 0,
+    "sw": 1
+  },
+  {
+    "kind": "rect",
+    "x": 0,
+    "y": 0,
+    "w": 1685.196850393701,
+    "h": 266,
+    "fill": "#142C40",
+    "stroke": null,
+    "radius": 0,
+    "sw": 1
+  },
+  {
+    "kind": "rect",
+    "x": 54,
+    "y": 31,
+    "w": 5,
+    "h": 15,
+    "fill": "#61D2BB",
+    "stroke": null,
+    "radius": 0,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 70,
+    "y": 31,
+    "text": "CROSS-DOMAIN AGENT COLLABORATION",
+    "size": 13.5,
+    "role": "bold",
+    "color": "#88DCCB",
+    "spacing": 1.2
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 64,
+    "text": "Ontology-Guided Collaboration",
+    "size": 50,
+    "role": "bold",
+    "color": "#FFFFFF",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 122,
+    "text": "Among Personal Assistants",
+    "size": 50,
+    "role": "bold",
+    "color": "#FFFFFF",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 56,
+    "y": 196,
+    "text": "Shiyao Zhang",
+    "size": 23,
+    "role": "bold",
+    "color": "#FFFFFF",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 56,
+    "y": 227,
+    "text": "Xi'an Jiaotong-Liverpool University",
+    "size": 18.5,
+    "role": "regular",
+    "color": "#CDDDE6",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 1260,
+    "y1": 67,
+    "x2": 1260,
+    "y2": 165,
+    "color": "#537184",
+    "sw": 1.5,
+    "dash": null
+  },
+  {
+    "kind": "text",
+    "x": 1287,
+    "y": 73,
+    "text": "Agent on Request",
+    "size": 25,
+    "role": "bold",
+    "color": "#88DCCB",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1287,
+    "y": 112,
+    "text": "An interactive demo of",
+    "size": 18,
+    "role": "regular",
+    "color": "#D6E5ED",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1287,
+    "y": 137,
+    "text": "personal-assistant collaboration",
+    "size": 18,
+    "role": "regular",
+    "color": "#D6E5ED",
+    "spacing": 0
+  },
+  {
+    "kind": "rect",
+    "x": 54,
+    "y": 290,
+    "w": 1577.196850393701,
+    "h": 94,
+    "fill": "#E7F4F1",
+    "stroke": null,
+    "radius": 9,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 76,
+    "y": 312,
+    "text": "RESEARCH",
+    "size": 15,
+    "role": "bold",
+    "color": "#007D79",
+    "spacing": 0.9
+  },
+  {
+    "kind": "text",
+    "x": 76,
+    "y": 335,
+    "text": "QUESTION",
+    "size": 15,
+    "role": "bold",
+    "color": "#007D79",
+    "spacing": 0.9
+  },
+  {
+    "kind": "line",
+    "x1": 230,
+    "y1": 310,
+    "x2": 230,
+    "y2": 365,
+    "color": "#B4D9CF",
+    "sw": 1.5,
+    "dash": null
+  },
+  {
+    "kind": "text",
+    "x": 254,
+    "y": 308,
+    "text": "How can independently owned assistants coordinate a task",
+    "size": 26.5,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 254,
+    "y": 345,
+    "text": "when their concepts and disclosure boundaries differ?",
+    "size": 26.5,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "rect",
+    "x": 54,
+    "y": 424,
+    "w": 29,
+    "h": 29,
+    "fill": "#E7F4F1",
+    "stroke": null,
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 61.826171875,
+    "y": 431,
+    "text": "01",
+    "size": 12,
+    "role": "bold",
+    "color": "#007D79",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 96,
+    "y": 426,
+    "text": "Motivation",
+    "size": 22,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 54,
+    "y1": 466,
+    "x2": 402,
+    "y2": 466,
+    "color": "#CFDBE2",
+    "sw": 1.2,
+    "dash": null
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 482,
+    "text": "A large language model (LLM) can miss",
+    "size": 18.5,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 508,
+    "text": "the user's intended meaning or",
+    "size": 18.5,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 534,
+    "text": "acceptable sharing boundary.",
+    "size": 18.5,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 577,
+    "text": "Across stakeholders, assistants may",
+    "size": 18.5,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 603,
+    "text": "model the same concept differently and",
+    "size": 18.5,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 629,
+    "text": "follow different disclosure policies.",
+    "size": 18.5,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 655,
+    "text": "Collaboration needs coordination of",
+    "size": 18.5,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 681,
+    "text": "meaning and authorization.",
+    "size": 18.5,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "rect",
+    "x": 54,
+    "y": 722,
+    "w": 29,
+    "h": 29,
+    "fill": "#E7F4F1",
+    "stroke": null,
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 61.826171875,
+    "y": 729,
+    "text": "02",
+    "size": 12,
+    "role": "bold",
+    "color": "#007D79",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 96,
+    "y": 724,
+    "text": "Research approach",
+    "size": 22,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 54,
+    "y1": 764,
+    "x2": 402,
+    "y2": 764,
+    "color": "#CFDBE2",
+    "sw": 1.2,
+    "dash": null
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 782,
+    "text": "Ontology as context",
+    "size": 19,
+    "role": "bold",
+    "color": "#007D79",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 813,
+    "text": "Concept relations guide reasoning. A state",
+    "size": 18,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 837,
+    "text": "registry records received facts and",
+    "size": 18,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 861,
+    "text": "provenance.",
+    "size": 18,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 903,
+    "text": "Task-driven modular alignment",
+    "size": 19,
+    "role": "bold",
+    "color": "#007D79",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 934,
+    "text": "Align the concepts needed for the current",
+    "size": 18,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 958,
+    "text": "task while retaining local representations.",
+    "size": 18,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 54,
+    "y1": 1026,
+    "x2": 402,
+    "y2": 1026,
+    "color": "#CFDBE2",
+    "sw": 1,
+    "dash": null
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 1045,
+    "text": "This demo builds on prior work in cross-domain",
+    "size": 15.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 1066,
+    "text": "agent dialogue for ontology alignment and data",
+    "size": 15.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 1087,
+    "text": "exchange.",
+    "size": 15.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "rect",
+    "x": 442,
+    "y": 424,
+    "w": 29,
+    "h": 29,
+    "fill": "#E7F4F1",
+    "stroke": null,
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 449.826171875,
+    "y": 431,
+    "text": "03",
+    "size": 12,
+    "role": "bold",
+    "color": "#007D79",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 484,
+    "y": 426,
+    "text": "Collaboration framework",
+    "size": 22,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 442,
+    "y1": 466,
+    "x2": 1190,
+    "y2": 466,
+    "color": "#CFDBE2",
+    "sw": 1.2,
+    "dash": null
+  },
+  {
+    "kind": "text",
+    "x": 442,
+    "y": 483,
+    "text": "CONCEPTUAL RESEARCH MODEL",
+    "size": 12.5,
+    "role": "bold",
+    "color": "#4B6170",
+    "spacing": 0.8
+  },
+  {
+    "kind": "rect",
+    "x": 442,
+    "y": 518,
+    "w": 220,
+    "h": 239,
+    "fill": "#FFFFFF",
+    "stroke": "#A8CFC9",
+    "radius": 10,
+    "sw": 1.4
+  },
+  {
+    "kind": "rect",
+    "x": 442,
+    "y": 518,
+    "w": 220,
+    "h": 63,
+    "fill": "#E7F4F1",
+    "stroke": null,
+    "radius": 10,
+    "sw": 1
+  },
+  {
+    "kind": "rect",
+    "x": 442,
+    "y": 565,
+    "w": 220,
+    "h": 16,
+    "fill": "#E7F4F1",
+    "stroke": null,
+    "radius": 0,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 462,
+    "y": 532,
+    "text": "ALICE",
+    "size": 21,
+    "role": "bold",
+    "color": "#007D79",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 462,
+    "y": 559,
+    "text": "Stakeholder A",
+    "size": 13.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "rect",
+    "x": 970,
+    "y": 518,
+    "w": 220,
+    "h": 239,
+    "fill": "#FFFFFF",
+    "stroke": "#C8BDD8",
+    "radius": 10,
+    "sw": 1.4
+  },
+  {
+    "kind": "rect",
+    "x": 970,
+    "y": 518,
+    "w": 220,
+    "h": 63,
+    "fill": "#F0ECF6",
+    "stroke": null,
+    "radius": 10,
+    "sw": 1
+  },
+  {
+    "kind": "rect",
+    "x": 970,
+    "y": 565,
+    "w": 220,
+    "h": 16,
+    "fill": "#F0ECF6",
+    "stroke": null,
+    "radius": 0,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 990,
+    "y": 532,
+    "text": "BOB",
+    "size": 21,
+    "role": "bold",
+    "color": "#6B5791",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 990,
+    "y": 559,
+    "text": "Stakeholder B",
+    "size": 13.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 461,
+    "y": 603,
+    "text": "Local ontology",
+    "size": 18,
+    "role": "bold",
+    "color": "#007D79",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 461,
+    "y": 631,
+    "text": "Concepts and relations",
+    "size": 15.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 461,
+    "y1": 665,
+    "x2": 643,
+    "y2": 665,
+    "color": "#CFDBE2",
+    "sw": 1,
+    "dash": null
+  },
+  {
+    "kind": "text",
+    "x": 461,
+    "y": 680,
+    "text": "Own data and skills",
+    "size": 16.5,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 461,
+    "y": 714,
+    "text": "Own disclosure policy",
+    "size": 16.5,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 989,
+    "y": 603,
+    "text": "Local ontology",
+    "size": 18,
+    "role": "bold",
+    "color": "#6B5791",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 989,
+    "y": 631,
+    "text": "Concepts and relations",
+    "size": 15.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 989,
+    "y1": 665,
+    "x2": 1171,
+    "y2": 665,
+    "color": "#CFDBE2",
+    "sw": 1,
+    "dash": null
+  },
+  {
+    "kind": "text",
+    "x": 989,
+    "y": 680,
+    "text": "Own data and skills",
+    "size": 16.5,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 989,
+    "y": 714,
+    "text": "Own disclosure policy",
+    "size": 16.5,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "rect",
+    "x": 704,
+    "y": 566,
+    "w": 224,
+    "h": 146,
+    "fill": "#EAF0F7",
+    "stroke": "#BDCEDF",
+    "radius": 9,
+    "sw": 1.3
+  },
+  {
+    "kind": "text",
+    "x": 767.168701171875,
+    "y": 585,
+    "text": "TASK MODULE",
+    "size": 12.5,
+    "role": "bold",
+    "color": "#3F648D",
+    "spacing": 0.6
+  },
+  {
+    "kind": "text",
+    "x": 731.994140625,
+    "y": 613,
+    "text": "Meeting scheduling",
+    "size": 18,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 750.19140625,
+    "y": 645,
+    "text": "Align task-relevant",
+    "size": 16,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 783.98046875,
+    "y": 670,
+    "text": "concepts",
+    "size": 16,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 674,
+    "y1": 638,
+    "x2": 693,
+    "y2": 638,
+    "color": "#007D79",
+    "sw": 1.6,
+    "dash": null
+  },
+  {
+    "kind": "polygon",
+    "points": [
+      [
+        668,
+        638
+      ],
+      [
+        675,
+        634
+      ],
+      [
+        675,
+        642
+      ]
+    ],
+    "fill": "#007D79"
+  },
+  {
+    "kind": "polygon",
+    "points": [
+      [
+        699,
+        638
+      ],
+      [
+        692,
+        634
+      ],
+      [
+        692,
+        642
+      ]
+    ],
+    "fill": "#007D79"
+  },
+  {
+    "kind": "line",
+    "x1": 939,
+    "y1": 638,
+    "x2": 958,
+    "y2": 638,
+    "color": "#6B5791",
+    "sw": 1.6,
+    "dash": null
+  },
+  {
+    "kind": "polygon",
+    "points": [
+      [
+        933,
+        638
+      ],
+      [
+        940,
+        634
+      ],
+      [
+        940,
+        642
+      ]
+    ],
+    "fill": "#6B5791"
+  },
+  {
+    "kind": "polygon",
+    "points": [
+      [
+        964,
+        638
+      ],
+      [
+        957,
+        634
+      ],
+      [
+        957,
+        642
+      ]
+    ],
+    "fill": "#6B5791"
+  },
+  {
+    "kind": "text",
+    "x": 442,
+    "y": 775,
+    "text": "Research model: align meaning for the task. The prototype implements configurable knowledge graphs and scoped data",
+    "size": 14,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 442,
+    "y": 794,
+    "text": "exchange.",
+    "size": 14,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 442,
+    "y": 835,
+    "text": "PROTOTYPE EXECUTION PATH",
+    "size": 12.5,
+    "role": "bold",
+    "color": "#4B6170",
+    "spacing": 0.8
+  },
+  {
+    "kind": "rect",
+    "x": 442,
+    "y": 864,
+    "w": 172,
+    "h": 72,
+    "fill": "#F2F6F8",
+    "stroke": "#CFDBE2",
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 460.6102294921875,
+    "y": 879,
+    "text": "Planner proposal",
+    "size": 16.5,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 468.9423828125,
+    "y": 907,
+    "text": "Live LLM / Controlled",
+    "size": 12.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 617,
+    "y1": 900,
+    "x2": 625,
+    "y2": 900,
+    "color": "#4B6170",
+    "sw": 1.2,
+    "dash": null
+  },
+  {
+    "kind": "polygon",
+    "points": [
+      [
+        631,
+        900
+      ],
+      [
+        624,
+        896
+      ],
+      [
+        624,
+        904
+      ]
+    ],
+    "fill": "#4B6170"
+  },
+  {
+    "kind": "rect",
+    "x": 634,
+    "y": 864,
+    "w": 172,
+    "h": 72,
+    "fill": "#F2F6F8",
+    "stroke": "#CFDBE2",
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 681.9605712890625,
+    "y": 879,
+    "text": "Authorize",
+    "size": 16.5,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 660.5914306640625,
+    "y": 907,
+    "text": "Owner-defined scope",
+    "size": 12.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 809,
+    "y1": 900,
+    "x2": 817,
+    "y2": 900,
+    "color": "#4B6170",
+    "sw": 1.2,
+    "dash": null
+  },
+  {
+    "kind": "polygon",
+    "points": [
+      [
+        823,
+        900
+      ],
+      [
+        816,
+        896
+      ],
+      [
+        816,
+        904
+      ]
+    ],
+    "fill": "#4B6170"
+  },
+  {
+    "kind": "rect",
+    "x": 826,
+    "y": 864,
+    "w": 172,
+    "h": 72,
+    "fill": "#F2F6F8",
+    "stroke": "#CFDBE2",
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 873.0260009765625,
+    "y": 879,
+    "text": "Exchange",
+    "size": 16.5,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 858.142578125,
+    "y": 907,
+    "text": "Approved snapshot",
+    "size": 12.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 1001,
+    "y1": 900,
+    "x2": 1009,
+    "y2": 900,
+    "color": "#4B6170",
+    "sw": 1.2,
+    "dash": null
+  },
+  {
+    "kind": "polygon",
+    "points": [
+      [
+        1015,
+        900
+      ],
+      [
+        1008,
+        896
+      ],
+      [
+        1008,
+        904
+      ]
+    ],
+    "fill": "#4B6170"
+  },
+  {
+    "kind": "rect",
+    "x": 1018,
+    "y": 864,
+    "w": 172,
+    "h": 72,
+    "fill": "#F2F6F8",
+    "stroke": "#CFDBE2",
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 1054.4879150390625,
+    "y": 879,
+    "text": "Update state",
+    "size": 16.5,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1054.6744384765625,
+    "y": 907,
+    "text": "Confirmed receipt",
+    "size": 12.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "rect",
+    "x": 442,
+    "y": 963,
+    "w": 29,
+    "h": 29,
+    "fill": "#E7F4F1",
+    "stroke": null,
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 449.826171875,
+    "y": 970,
+    "text": "04",
+    "size": 12,
+    "role": "bold",
+    "color": "#007D79",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 484,
+    "y": 965,
+    "text": "Reference demonstration",
+    "size": 22,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 442,
+    "y1": 1005,
+    "x2": 1190,
+    "y2": 1005,
+    "color": "#CFDBE2",
+    "sw": 1.2,
+    "dash": null
+  },
+  {
+    "kind": "rect",
+    "x": 442,
+    "y": 1024,
+    "w": 140,
+    "h": 86,
+    "fill": "#F2F6F8",
+    "stroke": null,
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 454,
+    "y": 1036,
+    "text": "1  Share",
+    "size": 15,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 454,
+    "y": 1062,
+    "text": "Tue-Wed",
+    "size": 14.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 454,
+    "y": 1082,
+    "text": "free slots",
+    "size": 14.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 584,
+    "y1": 1068,
+    "x2": 586,
+    "y2": 1068,
+    "color": "#4B6170",
+    "sw": 1,
+    "dash": null
+  },
+  {
+    "kind": "polygon",
+    "points": [
+      [
+        592,
+        1068
+      ],
+      [
+        585,
+        1064
+      ],
+      [
+        585,
+        1072
+      ]
+    ],
+    "fill": "#4B6170"
+  },
+  {
+    "kind": "rect",
+    "x": 594,
+    "y": 1024,
+    "w": 140,
+    "h": 86,
+    "fill": "#F2F6F8",
+    "stroke": null,
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 606,
+    "y": 1036,
+    "text": "2  Extend",
+    "size": 15,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 606,
+    "y": 1062,
+    "text": "Thu free",
+    "size": 14.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 606,
+    "y": 1082,
+    "text": "slots only",
+    "size": 14.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 736,
+    "y1": 1068,
+    "x2": 738,
+    "y2": 1068,
+    "color": "#4B6170",
+    "sw": 1,
+    "dash": null
+  },
+  {
+    "kind": "polygon",
+    "points": [
+      [
+        744,
+        1068
+      ],
+      [
+        737,
+        1064
+      ],
+      [
+        737,
+        1072
+      ]
+    ],
+    "fill": "#4B6170"
+  },
+  {
+    "kind": "rect",
+    "x": 746,
+    "y": 1024,
+    "w": 140,
+    "h": 86,
+    "fill": "#E7F4F1",
+    "stroke": null,
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 758,
+    "y": 1036,
+    "text": "3  Match",
+    "size": 15,
+    "role": "bold",
+    "color": "#007D79",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 758,
+    "y": 1062,
+    "text": "Thu",
+    "size": 14.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 758,
+    "y": 1082,
+    "text": "15:00-15:30",
+    "size": 14.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 888,
+    "y1": 1068,
+    "x2": 890,
+    "y2": 1068,
+    "color": "#4B6170",
+    "sw": 1,
+    "dash": null
+  },
+  {
+    "kind": "polygon",
+    "points": [
+      [
+        896,
+        1068
+      ],
+      [
+        889,
+        1064
+      ],
+      [
+        889,
+        1072
+      ]
+    ],
+    "fill": "#4B6170"
+  },
+  {
+    "kind": "rect",
+    "x": 898,
+    "y": 1024,
+    "w": 140,
+    "h": 86,
+    "fill": "#F2F6F8",
+    "stroke": null,
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 910,
+    "y": 1036,
+    "text": "4  Approve",
+    "size": 15,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 910,
+    "y": 1062,
+    "text": "Bob's owner:",
+    "size": 14.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 910,
+    "y": 1082,
+    "text": "topic only",
+    "size": 14.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 1040,
+    "y1": 1068,
+    "x2": 1042,
+    "y2": 1068,
+    "color": "#4B6170",
+    "sw": 1,
+    "dash": null
+  },
+  {
+    "kind": "polygon",
+    "points": [
+      [
+        1048,
+        1068
+      ],
+      [
+        1041,
+        1064
+      ],
+      [
+        1041,
+        1072
+      ]
+    ],
+    "fill": "#4B6170"
+  },
+  {
+    "kind": "rect",
+    "x": 1050,
+    "y": 1024,
+    "w": 140,
+    "h": 86,
+    "fill": "#F2F6F8",
+    "stroke": null,
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 1062,
+    "y": 1036,
+    "text": "5  Inspect",
+    "size": 15,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1062,
+    "y": 1062,
+    "text": "Confirmed",
+    "size": 14.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1062,
+    "y": 1082,
+    "text": "received state",
+    "size": 14.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 442,
+    "y": 1122,
+    "text": "No initial overlap. Adding Thursday enables a match. Keeping a boundary or declining remain valid.",
+    "size": 12.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "rect",
+    "x": 1230,
+    "y": 424,
+    "w": 29,
+    "h": 29,
+    "fill": "#E7F4F1",
+    "stroke": null,
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 1237.826171875,
+    "y": 431,
+    "text": "05",
+    "size": 12,
+    "role": "bold",
+    "color": "#007D79",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1272,
+    "y": 426,
+    "text": "Disclosure control",
+    "size": 22,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 1230,
+    "y1": 466,
+    "x2": 1631.196850393701,
+    "y2": 466,
+    "color": "#CFDBE2",
+    "sw": 1.2,
+    "dash": null
+  },
+  {
+    "kind": "text",
+    "x": 1230,
+    "y": 481,
+    "text": "The model proposes.",
+    "size": 21,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1230,
+    "y": 512,
+    "text": "Permissions govern execution.",
+    "size": 21,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1230,
+    "y": 551,
+    "text": "Example calendar projection",
+    "size": 13.5,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "rect",
+    "x": 1230,
+    "y": 577,
+    "w": 401.19685039370097,
+    "h": 145,
+    "fill": "#FFFFFF",
+    "stroke": "#CFDBE2",
+    "radius": 7,
+    "sw": 1
+  },
+  {
+    "kind": "rect",
+    "x": 1230,
+    "y": 577,
+    "w": 200.59842519685049,
+    "h": 145,
+    "fill": "#E7F4F1",
+    "stroke": null,
+    "radius": 7,
+    "sw": 1
+  },
+  {
+    "kind": "rect",
+    "x": 1423.5984251968505,
+    "y": 577,
+    "w": 7,
+    "h": 145,
+    "fill": "#E7F4F1",
+    "stroke": null,
+    "radius": 0,
+    "sw": 1
+  },
+  {
+    "kind": "rect",
+    "x": 1430.5984251968505,
+    "y": 577,
+    "w": 200.59842519685049,
+    "h": 145,
+    "fill": "#FAEEE9",
+    "stroke": null,
+    "radius": 7,
+    "sw": 1
+  },
+  {
+    "kind": "rect",
+    "x": 1430.5984251968505,
+    "y": 577,
+    "w": 7,
+    "h": 145,
+    "fill": "#FAEEE9",
+    "stroke": null,
+    "radius": 0,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 1249,
+    "y": 593,
+    "text": "SHARED",
+    "size": 13.5,
+    "role": "bold",
+    "color": "#007D79",
+    "spacing": 0.6
+  },
+  {
+    "kind": "text",
+    "x": 1449.5984251968505,
+    "y": 593,
+    "text": "WITHHELD",
+    "size": 13.5,
+    "role": "bold",
+    "color": "#9D5140",
+    "spacing": 0.6
+  },
+  {
+    "kind": "text",
+    "x": 1249,
+    "y": 623,
+    "text": "day",
+    "size": 18,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1249,
+    "y": 650,
+    "text": "time",
+    "size": 18,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1249,
+    "y": 677,
+    "text": "status",
+    "size": 18,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1449.5984251968505,
+    "y": 623,
+    "text": "title",
+    "size": 18,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1449.5984251968505,
+    "y": 650,
+    "text": "note",
+    "size": 18,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1230,
+    "y": 746,
+    "text": "Exact previews and scoped permissions restrict",
+    "size": 18,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1230,
+    "y": 771,
+    "text": "fields, dates, uses and expiry. Confirmed receipts",
+    "size": 18,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1230,
+    "y": 796,
+    "text": "determine what enters the recipient's knowledge.",
+    "size": 18,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "rect",
+    "x": 1230,
+    "y": 856,
+    "w": 401.19685039370097,
+    "h": 63,
+    "fill": "#EAF0F7",
+    "stroke": null,
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 1246,
+    "y": 868,
+    "text": "Stopping sharing blocks future disclosure. Already",
+    "size": 16,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1246,
+    "y": 890,
+    "text": "received copies remain.",
+    "size": 16,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "rect",
+    "x": 1230,
+    "y": 952,
+    "w": 29,
+    "h": 29,
+    "fill": "#E7F4F1",
+    "stroke": null,
+    "radius": 6,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 1237.826171875,
+    "y": 959,
+    "text": "06",
+    "size": 12,
+    "role": "bold",
+    "color": "#007D79",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1272,
+    "y": 954,
+    "text": "Research instrument",
+    "size": 22,
+    "role": "bold",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "line",
+    "x1": 1230,
+    "y1": 994,
+    "x2": 1631.196850393701,
+    "y2": 994,
+    "color": "#CFDBE2",
+    "sw": 1.2,
+    "dash": null
+  },
+  {
+    "kind": "text",
+    "x": 1230,
+    "y": 1009,
+    "text": "An exploratory demo with synthetic data and",
+    "size": 17,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1230,
+    "y": 1032,
+    "text": "optional, separately consented state traces.",
+    "size": 17,
+    "role": "regular",
+    "color": "#193345",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1230,
+    "y": 1084,
+    "text": "Next: semantic conflicts, module selection and users'",
+    "size": 16,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1230,
+    "y": 1105,
+    "text": "understanding of disclosure boundaries.",
+    "size": 16,
+    "role": "regular",
+    "color": "#4B6170",
+    "spacing": 0
+  },
+  {
+    "kind": "rect",
+    "x": 0,
+    "y": 1163,
+    "w": 1685.196850393701,
+    "h": 28.96850393700811,
+    "fill": "#142C40",
+    "stroke": null,
+    "radius": 0,
+    "sw": 1
+  },
+  {
+    "kind": "text",
+    "x": 54,
+    "y": 1172,
+    "text": "Exploratory prototype. User studies and quantitative alignment evaluation remain future work.",
+    "size": 13.5,
+    "role": "regular",
+    "color": "#D6E5ED",
+    "spacing": 0
+  },
+  {
+    "kind": "text",
+    "x": 1502.880932424951,
+    "y": 1172,
+    "text": "A0  /  1189 x 841 mm",
+    "size": 13.5,
+    "role": "regular",
+    "color": "#88DCCB",
+    "spacing": 0
+  }
+]
