@@ -3,6 +3,18 @@ import { RuntimeError, invariant } from './runtime-helpers.mjs';
 const BOB_ACTIONS = new Set(['request_more', 'meeting', 'no_match', 'share_brief']);
 const CONNECTIVITY_ACK = 'Synthetic connectivity test acknowledged.';
 function proposalTool(context) {
+  if (context?.purpose === 'ontology_alignment') {
+    const ids = (context.candidates || []).map(candidate => candidate.id).filter(id => typeof id === 'string');
+    return { type: 'function', function: { name: 'submit_proposal',
+      description: 'Select only supplied semantic correspondences or choose none. This does not authorize data sharing.',
+      parameters: { type: 'object', additionalProperties: false, required: ['message', 'decision', 'selectedMappingIds'],
+        properties: {
+          message: { type: 'string', minLength: 1, maxLength: 1000, description: 'Brief explanation using only supplied definitions.' },
+          decision: { type: 'string', enum: ['accept', 'reject', 'none'] },
+          selectedMappingIds: { type: 'array', uniqueItems: true, maxItems: ids.length,
+            items: ids.length ? { type: 'string', enum: ids } : { type: 'string', enum: ['none'] } },
+        } } } };
+  }
   const actions = Array.isArray(context?.allowedActions) ? context.allowedActions.filter(type => BOB_ACTIONS.has(type)) : [];
   const parameters = { type: 'object', additionalProperties: false,
     properties: { message: { type: 'string', minLength: 1, maxLength: 4000, description: 'Short participant-facing message, without private data or reasoning.' } }, required: ['message'] };
@@ -15,7 +27,7 @@ function proposalTool(context) {
       properties: { type: { type: 'string', enum: actions, description: 'Choose exactly one listed action name.' } }, required: ['type'] };
     if (actions.includes('meeting')) action.properties.meeting = { type: 'object', additionalProperties: false,
       properties: { day: { type: 'string', enum: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] },
-        time: { type: 'string', description: 'A 30-minute HH:mm–HH:mm interval inside sharedIntersection.' } }, required: ['day', 'time'] };
+        time: { type: 'string', description: `A ${context?.task?.durationMinutes || 30}-minute HH:mm–HH:mm interval inside sharedIntersection.` } }, required: ['day', 'time'] };
     if (actions.includes('share_brief')) {
       const fields = Object.keys(context.ownBrief ?? {});
       action.properties.fields = { type: 'array', minItems: 1, uniqueItems: true, items: { type: 'string', enum: fields } };

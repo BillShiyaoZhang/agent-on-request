@@ -30,6 +30,34 @@ export const UNDERSTANDING_QUESTIONS = Object.freeze([
       delete_received: 'Stopping prevents new sharing; it does not remove snapshots already delivered. Starting a new round resets the demo and is a different action.',
       not_sure: 'Compare the boundary and the receipts: new sharing is stopped, while confirmed deliveries remain.'
     })
+  }),
+  Object.freeze({
+    id: 'ontology_alignment', action: 'answer_alignment', localKey: 'alignmentAnswer', inputName: 'alignment-answer', requiresOntology: true,
+    title: 'What does accepting a concept mapping authorize?', shortTitle: 'Meaning and permission', expected: 'mapping_not_permission',
+    options: Object.freeze([
+      Object.freeze({ value: 'mapping_not_permission', label: 'A task-scoped interpretation; sharing still needs approval' }),
+      Object.freeze({ value: 'mapping_grants_access', label: 'Access to the other agent’s private data' }),
+      Object.freeze({ value: 'not_sure', label: 'I am not sure' })
+    ]),
+    explanations: Object.freeze({
+      mapping_not_permission: 'A mapping explains how to interpret a confirmed payload for this task. Each owner still controls the fields and scope that may be sent.',
+      mapping_grants_access: 'A semantic agreement is not a data grant. The mapping cannot bypass either owner’s disclosure decision.',
+      not_sure: 'Compare the alignment registry with the receipts: accepted meanings and actual deliveries are separate states.'
+    })
+  }),
+  Object.freeze({
+    id: 'task_module', action: 'answer_module', localKey: 'moduleAnswer', inputName: 'module-answer', requiresOntology: true,
+    title: 'Which ontology concepts were selected to arrange the discussion time?', shortTitle: 'Why select a module?', expected: 'task_subset',
+    options: Object.freeze([
+      Object.freeze({ value: 'task_subset', label: 'Only the time and booking concepts needed for this discussion' }),
+      Object.freeze({ value: 'whole_ontology', label: 'Both agents’ entire ontologies and private data' }),
+      Object.freeze({ value: 'not_sure', label: 'I am not sure' })
+    ]),
+    explanations: Object.freeze({
+      task_subset: 'The scheduling task selects interval, weekday and booking-status modules. Calendar details and the meeting brief remain outside that alignment.',
+      whole_ontology: 'The agents selected a relevant subset. A task module limits the alignment scope; it does not export an entire ontology or store.',
+      not_sure: 'The selected-modules card shows the actual concepts. The excluded-modules list shows what was not included in this alignment.'
+    })
   })
 ]);
 
@@ -61,7 +89,7 @@ export function renderUnderstandingHtml({ state, local = {}, busy = false, inter
   const answers = state.answers || {};
   if (ended && !UNDERSTANDING_QUESTIONS.some(question => hasAnswer(answers, question.id))) return '';
   const blocked = Boolean(busy || interruptBusy || pending);
-  return '<section class="panel understanding-panel"><div class="panel-heading"><div><h3>Check your understanding</h3><small>Choose once. Your answer is saved before its explanation appears.</small></div><span class="tag">Optional</span></div><p class="muted understanding-consent-note">' + (state.session.researchConsent ? 'Research consent is on. Your first answers are recorded for this round.' : 'Research consent is off. You still get feedback; no research answer is stored.') + '</p><div class="understanding-question-grid">' + UNDERSTANDING_QUESTIONS.filter(question => !ended || hasAnswer(answers, question.id)).map((question, index) => {
+  return '<section class="panel understanding-panel"><div class="panel-heading"><div><h3>Check your understanding</h3><small>Choose once. Your answer is saved before its explanation appears.</small></div><span class="tag">Optional</span></div><p class="muted understanding-consent-note">' + (state.session.researchConsent ? 'Research consent is on. Your first answers are recorded for this round.' : 'Research consent is off. You still get feedback; no research answer is stored.') + '</p><div class="understanding-question-grid">' + UNDERSTANDING_QUESTIONS.filter(question => (!question.requiresOntology || state.ontology) && (!ended || hasAnswer(answers, question.id))).map((question, index) => {
     const confirmed = hasAnswer(answers, question.id);
     const pendingAnswer = pendingAnswerFor(pending, state.session.id, question.action);
     const answer = confirmed ? answers[question.id] : typeof pendingAnswer === 'string' && pendingAnswer ? pendingAnswer : local[question.localKey];

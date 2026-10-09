@@ -387,6 +387,16 @@ export function createInitialConditions({ api, isResearcher, isOpenControls = ()
     load,
     attach(next) { if (container !== next) { rememberDisclosures(); container = next; bind(); } render(); },
     ready,
+    canSelectPreset(id) { return Boolean(catalog?.presets.some(preset => preset.id === id) && !busy); },
+    async selectPreset(id) {
+      if (!catalog || busy) throw new Error('Wait until the starting states are available.');
+      const preset = catalog.presets.find(item => item.id === id);
+      if (!preset) throw new Error('The recommended scenario is unavailable.');
+      draft = { presetId: preset.id, componentIds: clone(preset.componentIds || { Alice: [], Bob: [] }), custom: {} };
+      rawDirty = false; rawCompleteMode = false; resolved = null; editor = {}; invalidate(); render();
+      await resolve();
+      if (!ready()) throw new Error('Validate the recommended starting states before beginning.');
+    },
     async submission() { if (!resolved || reviewedStamp !== stamp() || rawDirty || busy) throw new Error('Validate and review your initial conditions before starting.'); if (resolved.requiresResearcher && !isResearcher()) throw new Error('Researcher sign-in is required for the selected Bob initial conditions.'); return { initialConditions: clone(draft), expectedConditionsHash: resolved.hash }; },
     authorizationChanged() { if (!isResearcher()) { bundles = []; bundleName = ''; selectedBundleId = ''; } render(); if (isResearcher()) refreshBundles(); },
     async refresh() { await resolve({ quiet: true }); }

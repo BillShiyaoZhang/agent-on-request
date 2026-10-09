@@ -8,15 +8,15 @@ import { buildTraceSnapshot, sanitizeTraceSnapshot } from './agent-observability
 const IDENTIFIER = /^[A-Za-z0-9_.:\/-]{1,128}$/;
 const SAFE_KINDS = /^[a-z][a-z0-9_]{0,63}$/;
 const WINDOWS = new Set(['none', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'Tue–Wed', 'Tue-Wed', 'Mon–Sun', 'Mon-Sun', 'Thursday', 'week', 'initial', 'narrow', 'full_week']);
-const CHOICES = new Set(['free', 'busy', 'full', 'none', 'keep', 'narrow', 'week', 'allow', 'deny', 'revoke', 'stop', 'allow_once', 'allow_round']);
-const ANSWERS = new Set(['approved_snapshot', 'outside_scope', 'not_sure', 'future_only', 'delete_received']);
-const QUESTIONS = new Set(['received_scope', 'withdrawal']);
+const CHOICES = new Set(['free', 'busy', 'full', 'none', 'keep', 'narrow', 'week', 'allow', 'deny', 'revoke', 'stop', 'allow_once', 'allow_round', 'accept', 'clarify', 'reject']);
+const ANSWERS = new Set(['approved_snapshot', 'outside_scope', 'not_sure', 'future_only', 'delete_received', 'mapping_not_permission', 'mapping_grants_access', 'task_subset', 'whole_ontology']);
+const QUESTIONS = new Set(['received_scope', 'withdrawal', 'ontology_alignment', 'task_module']);
 const ACTORS = new Set(['Alice', 'Bob', 'researcher', 'admin', 'system', 'runtime']);
 const STATUSES = new Set(['active', 'completed', 'stopped', 'technical', 'arranged', 'boundary_kept', 'declined', 'ended', 'technical_abort', 'incomplete', 'withdrawn']);
 const COMPLETED = new Set(['completed', 'arranged', 'boundary_kept', 'declined']);
 const STOPPED = new Set(['stopped', 'ended', 'incomplete', 'withdrawn']);
 const NUMERIC_KEYS = new Set(['configRevision', 'policyRevision', 'adminWaitMs', 'decisionMs']);
-const IDENTIFIER_KEYS = new Set(['operationId', 'code', 'reason', 'grantRevision', 'fieldSet', 'field_set', 'scenarioVersion', 'requestId', 'action']);
+const IDENTIFIER_KEYS = new Set(['operationId', 'code', 'reason', 'grantRevision', 'fieldSet', 'field_set', 'scenarioVersion', 'requestId', 'action', 'mappingVersion']);
 const ALIASES = { sharing_choice: 'choice', scope_requested: 'request', delivered: 'delivery', receipt: 'delivery', configuration: 'config_changed', configuration_changed: 'config_changed', config_change: 'config_changed' };
 // Research records contain many validated snapshots, so the per-configuration
 // JSON complexity limit must not be applied to the accumulated run collection.
@@ -77,9 +77,10 @@ function whitelistEvent(event, run) {
   const elapsedMs = Number.isFinite(suppliedElapsed) && suppliedElapsed >= 0 && suppliedElapsed <= 86_400_000 ? Math.round(suppliedElapsed) : Math.max(0, Date.now() - Date.parse(run.startedAt));
   const output = { seq: run.events.length + 1, elapsedMs, kind };
   for (const [key, value] of Object.entries(input)) {
-    if (key === 'stage' && ['initial', 'additional', 'waiting_admin', 'paused', 'complete', 'replay', 'post_explanation'].includes(value)) output[key] = value;
+    if (key === 'stage' && ['alignment', 'initial', 'additional', 'waiting_admin', 'paused', 'complete', 'replay', 'post_explanation'].includes(value)) output[key] = value;
     else if (key === 'choice' && CHOICES.has(value)) output[key] = value;
     else if (key === 'fields' && Array.isArray(value) && value.length <= 100 && value.every(safeId)) output[key] = [...value];
+    else if (key === 'moduleIds' && Array.isArray(value) && value.length <= 8 && value.every(safeId)) output[key] = [...value];
     else if (key === 'window' || key === 'timeWindow' || key === 'time_window') { const window = safeWindow(value); if (window !== undefined) output[key] = window; }
     else if (key === 'payloadHash' && typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value)) output[key] = value.toLowerCase();
     else if ((key === 'actor' || key === 'recipient') && ACTORS.has(value)) output[key] = value;

@@ -125,7 +125,9 @@ export async function createDemoServer(options = {}) {
           const token = req.headers['x-researcher-token'] ?? bearer(req);
           requireThat(typeof token === 'string' && adminTokens.get(token) > Date.now(), 'BOB_CONDITIONS_AUTH', 'Sign in as researcher to initialize Bob with different knowledge, data, skills or authorization.', 401);
         }
-        return json(res, await engine.create(input), 201);
+        const created = await engine.create(input);
+        created.state = engine.view(engine.get(created.state.session.id), { perspective: 'owner' });
+        return json(res, created, 201);
       }
       if (route === '/api/admin/login' && req.method === 'POST') {
         limit(loginAttempts, req.socket.remoteAddress, 10, 60_000, 'LOGIN_LIMIT');
@@ -192,12 +194,19 @@ export async function createDemoServer(options = {}) {
       const match = /^\/api\/sessions\/([^/]+)(?:\/(preview|actions))?$/.exec(route);
       if (match) {
         const session = participant(req, match[1]);
-        if (!match[2] && req.method === 'GET') return json(res, engine.view(session));
+        if (!match[2] && req.method === 'GET') {
+          const perspective = url.searchParams.get('perspective') ?? 'owner';
+          requireThat(['owner', 'observer'].includes(perspective), 'PERSPECTIVE', 'Choose owner or observer view.');
+          if (perspective === 'observer') requireAdmin(req);
+          return json(res, engine.view(session, { perspective }));
+        }
         if (match[2] === 'preview' && req.method === 'POST') return json(res, await engine.preview(session, await body(req)));
         if (match[2] === 'actions' && req.method === 'POST') {
           // Administrators never impersonate Alice to authorize participant sharing.
           engine.authorize(match[1], bearer(req));
-          return json(res, await engine.action(session, await body(req)));
+          const result = await engine.action(session, await body(req));
+          result.state = engine.view(session, { perspective: 'owner' });
+          return json(res, result);
         }
       }
       if (route.startsWith('/api/')) throw new AppError('NOT_FOUND', 'The API route does not exist.', 404);

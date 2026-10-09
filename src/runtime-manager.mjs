@@ -1,6 +1,7 @@
 import { WorkerClient, RemoteBobClient } from './runtime-client.mjs';
 import { RuntimeError, invariant, canonical, hashPayload, verifyObject, validateSessionRef } from './runtime-helpers.mjs';
 import { callProvider } from './model-provider.mjs';
+import { ontologyDefinitions, createOntologyDialogue, startOntologyDialogue, resolveOntologyDialogue } from './ontology-dialogue.mjs';
 
 export { RuntimeError, hashPayload } from './runtime-helpers.mjs';
 
@@ -83,8 +84,10 @@ export function createRuntimeManager(options = {}) {
       && proof.sender === envelope.body.from && proof.receiver === recipient
       && proof.operationId === envelope.body.operationId && proof.payloadHash === envelope.body.payload.payloadHash
       && proof.payloadDigest === hashPayload(envelope.body.payload) && proof.status === 'received'
+      && (!envelope.body.ontology || proof.mappingVersion === envelope.body.ontology.mappingVersion && proof.ontologyTask === envelope.body.ontology.task)
       && canonical(receipt) === canonical({ operationId: proof.operationId, payloadHash: proof.payloadHash,
-        status: proof.status, receivedAt: proof.receivedAt }),
+        status: proof.status, receivedAt: proof.receivedAt,
+        ...(proof.mappingVersion ? { mappingVersion: proof.mappingVersion, ontologyTask: proof.ontologyTask } : {}) }),
     'INVALID_PEER_RECEIPT', 'The peer receipt could not be verified against the exact signed operation.', 401);
     return { receipt: structuredClone(receipt) };
   }
@@ -139,19 +142,28 @@ export function createRuntimeManager(options = {}) {
       if (existing) {
         invariant(existing.epoch === args.epoch && existing.digest === digest,
           'INITIALIZATION_CONFLICT', 'The session already has different initialized data.', 409);
-        return { ready: true, alice: { ready: true }, bob: { ready: true } };
+        return { ready: true, alice: { ready: true }, bob: { ready: true }, ontologyDialogue: structuredClone(existing.ontologyDialogue),
+          protocol: [...existing.ontologyResults.values()].at(-1)?.protocol || [] };
       }
       const snapshot = structuredClone(models);
+      const ontologyDialogue = args.mode === 'replay' ? null : args.ontologyDialogue ?? createOntologyDialogue({ mode: args.mode });
+      const definitions = ontologyDefinitions({ scenario: ontologyDialogue?.scenario ?? 'distinct' });
+      const ontologyContext = { scenario: ontologyDialogue?.scenario ?? 'distinct', task: ontologyDialogue?.task ?? { type: 'schedule', durationMinutes: 30 } };
       const common = { sessionId: args.sessionId, epoch: args.epoch, mode: args.mode, configRevision: args.configRevision,
         modelRevision: snapshot.revision, modelAvailable: available(snapshot) };
       try {
         const [a, b] = await Promise.all([
-          alice.call('initialize', { ...common, ...(!legacyMode ? { modelSettings: snapshot.config.agents.Alice } : {}), aliceData: args.aliceData, ...(args.aliceProfile ? { agentProfile: args.aliceProfile } : {}), peerPublicKey: bob.identity }),
-          bob.call('initialize', { ...common, ...(!legacyMode ? { modelSettings: snapshot.config.agents.Bob } : {}), bobConfig: args.bobConfig, ...(args.bobProfile ? { agentProfile: args.bobProfile } : {}), peerPublicKey: alice.identity }),
+          alice.call('initialize', { ...common, ontologyContext, ownOntology: args.ownOntology?.Alice ?? definitions.Alice,
+            ...(!legacyMode ? { modelSettings: snapshot.config.agents.Alice } : {}), aliceData: args.aliceData, ...(args.aliceProfile ? { agentProfile: args.aliceProfile } : {}), peerPublicKey: bob.identity }),
+          bob.call('initialize', { ...common, ontologyContext, ownOntology: args.ownOntology?.Bob ?? definitions.Bob,
+            ...(!legacyMode ? { modelSettings: snapshot.config.agents.Bob } : {}), bobConfig: args.bobConfig, ...(args.bobProfile ? { agentProfile: args.bobProfile } : {}), peerPublicKey: alice.identity }),
         ]);
         sessions.set(args.sessionId, { epoch: args.epoch, mode: args.mode, digest,
-          configRevision: args.configRevision, runtime: structuredClone(args.bobConfig?.runtime || {}), models: snapshot, legacyMode });
-        return { ready: true, alice: a, bob: b, models: modelInfo(snapshot) };
+          configRevision: args.configRevision, runtime: structuredClone(args.bobConfig?.runtime || {}), models: snapshot, legacyMode,
+          negotiationRevision: 0, ontologyResults: new Map(), ontologyDialogue });
+        const negotiated = args.mode === 'replay' || args.alignReview ? { dialogue: ontologyDialogue, protocol: [] }
+          : await manager.negotiateOntology({ ...common, dialogue: ontologyDialogue, liveProposal: false });
+        return { ready: true, alice: a, bob: b, models: modelInfo(snapshot), ontologyDialogue: negotiated.dialogue, protocol: negotiated.protocol };
       } catch (error) {
         await Promise.allSettled([alice.call('clear', common), bob.call('clear', common)]);
         retired.add(key(args));
@@ -161,6 +173,82 @@ export function createRuntimeManager(options = {}) {
     async projectAlice(args) {
       session(args);
       return alice.call('projectAlice', args);
+    },
+    async negotiateOntology(args) {
+      const state = session(args);
+      requireBob();
+      const dialogue = args.dialogue;
+      invariant(dialogue && ['accepted', 'rejected'].includes(dialogue.status), 'ONTOLOGY_CLARIFICATION_REQUIRED', 'Resolve the owner interpretation before publishing the working ontology.', 409);
+      const roundId = hashPayload({ scenario: dialogue.scenario, task: dialogue.task, ontologyVersions: dialogue.ontologyVersions,
+        interpretation: dialogue.interpretation, status: dialogue.status, mappings: dialogue.proposal.mappings,
+        selector: args.liveProposal === true && state.mode === 'live' ? 'live' : 'guided' });
+      if (state.ontologyResults.has(roundId)) return structuredClone(state.ontologyResults.get(roundId));
+      invariant(!state.negotiating, 'ONTOLOGY_PROTOCOL_BUSY', 'An ontology dialogue is already running for this round.', 409);
+      state.negotiating = true;
+      const roundRevision = ++state.negotiationRevision;
+      const context = { scenario: dialogue.scenario, task: dialogue.task };
+      const ref = { sessionId: args.sessionId, epoch: args.epoch, roundId, roundRevision, ontologyContext: context };
+      const protocol = [];
+      let sequence = 0, previousHash = null;
+      async function exchange(sender, recipient, method, extra = {}) {
+        const expectedSequence = ++sequence;
+        const result = await sender.call(method, { ...ref, sequence: expectedSequence, previousHash, ...extra }, rpcTimeout(args, sender.role));
+        session(args);
+        const envelope = result?.envelope, body = envelope?.body;
+        invariant(body && verifyObject(body, envelope.signature, sender.identity) && body.channel === 'ontology'
+          && body.from === sender.role && body.to === recipient.role && body.sessionId === args.sessionId && body.epoch === args.epoch
+          && body.roundId === roundId && body.roundRevision === roundRevision && body.sequence === expectedSequence
+          && body.previousHash === previousHash && body.payloadHash === hashPayload(body.payload),
+          'ONTOLOGY_PROTOCOL', 'The isolated worker did not sign the expected ordered ontology move.', 401);
+        const receipt = await recipient.call('receiveOntology', { ...ref, envelope });
+        session(args);
+        const proof = receipt?.proof?.body;
+        invariant(proof && verifyObject(proof, receipt.proof.signature, recipient.identity)
+          && proof.channel === 'ontology_receipt' && proof.from === recipient.role && proof.to === sender.role
+          && proof.sessionId === args.sessionId && proof.epoch === args.epoch && proof.roundId === roundId
+          && proof.roundRevision === roundRevision && proof.sequence === expectedSequence && proof.envelopeHash === hashPayload(body)
+          && proof.status === 'received', 'ONTOLOGY_PROTOCOL', 'The recipient did not acknowledge the signed ontology move.', 401);
+        protocol.push({ ...structuredClone(body), signature: envelope.signature, publicKey: sender.identity,
+          receipt: structuredClone(receipt.proof), recipientPublicKey: recipient.identity, verified: true });
+        previousHash = hashPayload(body);
+        return result;
+      }
+      try {
+        await exchange(alice, bob, 'ontologyModule', { authorized: true });
+        await exchange(bob, alice, 'ontologyModule', { authorized: true });
+        await exchange(alice, bob, 'proposeOntology', { interpretation: dialogue.interpretation, decision: dialogue.status,
+          liveProposal: args.liveProposal === true && state.mode === 'live' });
+        const decision = await exchange(bob, alice, 'decideOntology', { liveProposal: args.liveProposal === true && state.mode === 'live' });
+        await exchange(alice, bob, 'acknowledgeOntology');
+        await exchange(bob, alice, 'acknowledgeOntology');
+        const resultDialogue = decision.selection.decision === 'accepted' ? structuredClone(dialogue)
+          : dialogue.status === 'rejected' ? structuredClone(dialogue)
+            : resolveOntologyDialogue(startOntologyDialogue({ ...context, mode: state.mode }), { decision: 'reject' });
+        resultDialogue.proposal.source = protocol[2].payload.selector === 'live' ? 'model' : 'guided';
+        await Promise.all([alice.call('updateOntology', { ...ref, dialogue: resultDialogue }), bob.call('updateOntology', { ...ref, dialogue: resultDialogue })]);
+        session(args);
+        const result = { dialogue: resultDialogue, protocol,
+          selection: { proposer: protocol[2].payload.selector, decider: protocol[3].payload.selector, decision: resultDialogue.status } };
+        state.ontologyResults.set(roundId, structuredClone(result));
+        state.ontologyDialogue = resultDialogue;
+        return result;
+      } finally { state.negotiating = false; }
+    },
+    async updateOntology(args) {
+      const state = session(args);
+      const registered = [...state.ontologyResults.values()].find(result => result.dialogue.registry.mappingVersion === args.dialogue?.registry.mappingVersion
+        && result.dialogue.task.id === args.dialogue?.task.id && result.dialogue.status === args.dialogue?.status);
+      invariant(registered, 'ONTOLOGY_NOT_ACKNOWLEDGED', 'Only a dialogue actually acknowledged by both workers can be updated.', 409);
+      const move = registered.protocol.at(-1);
+      const ref = { sessionId: args.sessionId, epoch: args.epoch, roundId: move.roundId, roundRevision: move.roundRevision, dialogue: args.dialogue };
+      const result = await Promise.all([alice.call('updateOntology', ref), bob.call('updateOntology', ref)]);
+      session(args);
+      return { ready: true, alice: result[0], bob: result[1] };
+    },
+    async ontologyStatus(args) {
+      session(args);
+      const [a, b] = await Promise.all([alice.call('ontologyStatus', args), bob.call('ontologyStatus', args)]);
+      return { Alice: a, Bob: b };
     },
     async deliverToBob(args) {
       session(args);
@@ -206,6 +294,13 @@ export function createRuntimeManager(options = {}) {
         : { fields: args.fields, values: args.values, payloadHash: args.payloadHash };
       const expected = { body: { sessionId: args.sessionId, epoch: args.epoch, operationId: args.operationId,
         from: toBob ? 'Alice' : 'Bob', to: toBob ? 'Bob' : 'Alice', payload } };
+      if (result.proof?.body?.mappingVersion) {
+        const state = session(args), proof = result.proof.body;
+        invariant([...state.ontologyResults.values()].some(item => item.dialogue.status === 'accepted'
+          && item.dialogue.task.type === proof.ontologyTask && item.dialogue.registry.mappingVersion === proof.mappingVersion),
+          'ONTOLOGY_STALE_VERSION', 'The receipt names a semantic mapping not accepted by this manager.', 409);
+        expected.body.ontology = { task: proof.ontologyTask, mappingVersion: proof.mappingVersion };
+      }
       return checkedReceipt(result, expected, toBob ? 'Bob' : 'Alice', recipient.identity);
     },
     async updateBob(args) {

@@ -278,7 +278,7 @@ test('remote response authentication alone cannot replace the Bob signed receipt
     const result = await fetch(`${actual}/rpc`, { method: 'POST', headers: {
       'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify(envelope) });
     const output = await result.json();
-    if (output.body?.result?.proof) output.body.result.proof.signature = 'invalid-receipt-signature';
+    if (envelope.body.method === 'receive' && output.body?.result?.proof) output.body.result.proof.signature = 'invalid-receipt-signature';
     output.signature = macObject(output.body, token);
     response.writeHead(200, { 'Content-Type': 'application/json' });
     response.end(JSON.stringify(output));

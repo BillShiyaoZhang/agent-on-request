@@ -11,6 +11,7 @@ import {
 
 const workerFile = new URL('./agent-worker.mjs', import.meta.url);
 const helperFile = new URL('./runtime-helpers.mjs', import.meta.url);
+const ontologyFile = new URL('./ontology-dialogue.mjs', import.meta.url);
 
 function isolationFlags(codeFiles) {
   invariant(process.allowedNodeEnvironmentFlags.has('--permission')
@@ -31,7 +32,7 @@ export class WorkerClient {
     this.online = false;
     this.closed = false;
     const entrypoint = realpathSync(options.workerFile ? fileURLToPath(new URL(options.workerFile, import.meta.url)) : fileURLToPath(workerFile));
-    const codeFiles = [...new Set([entrypoint, realpathSync(fileURLToPath(helperFile)),
+    const codeFiles = [...new Set([entrypoint, realpathSync(fileURLToPath(helperFile)), realpathSync(fileURLToPath(ontologyFile)),
       ...(options.codeFiles || []).map(path => realpathSync(path))])];
     const execArgv = isolationFlags(codeFiles);
     const env = {};
@@ -163,6 +164,7 @@ export class WorkerClient {
 
 export class RemoteBobClient {
   constructor(url, token) {
+    this.role = 'Bob';
     invariant(typeof token === 'string' && token.length >= 16, 'BOB_AUTH_CONFIGURATION', 'Remote Bob requires a dedicated peer secret of at least 16 characters.');
     this.url = new URL(url);
     invariant(['http:', 'https:'].includes(this.url.protocol) && !this.url.username && !this.url.password

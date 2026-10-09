@@ -8,6 +8,7 @@ import { renderUnderstandingHtml, understandingQuestionForInput } from './unders
 import { renderLoginHtml, renderApprovalHtml, renderConsoleHtml } from './operator-ui.js';
 import { rememberDisclosures, restoreDisclosures, observeDisclosures } from './disclosure-state.js';
 import { mountResearchReview } from './research-ui.js';
+import { renderPerspectiveHtml, renderOntologyHtml, renderContributionHtml } from './ontology-ui.js';
 
 initLanguageSwitcher();
 
@@ -20,9 +21,10 @@ const pendingKey = 'agent-on-request.pending';
 // local open-controls mode accepts unauthenticated control requests.
 const openControlsMarker = 'local-demo-open-controls-access';
 let meta, current, participantToken, adminToken, adminState, selectedSessionId, activeView = 'participant', configController, modelController, conditionsController;
+let perspective = 'owner', perspectiveBusy = false;
 let adminSessions = [], research = null, dialogContext = null, dialogOpener = null, requestBusy = false, interruptBusy = false, requestSequence = 0, interruptSequence = 0, pollBusy = false, planningNewRound = false;
 let pending = readStorage(pendingKey);
-const local = { mode: 'controlled', consent: false, initial: null, additional: null, preview: null, previewStage: null, previewChoice: null, prediction: null, revocation: null, predictionSubmitted: false, revocationSubmitted: false };
+const local = { mode: 'controlled', ontologyScenario: 'distinct', durationMinutes: 30, consent: false, initial: null, additional: null, preview: null, previewStage: null, previewChoice: null, prediction: null, revocation: null, alignmentAnswer: null, moduleAnswer: null, predictionSubmitted: false, revocationSubmitted: false };
 const researchFilters = { mode: 'all', status: 'all', quality: 'all' };
 const approvalDrafts = new Map();
 let selectedResearchRunId, researchStep = 0;
@@ -118,6 +120,7 @@ function clearAdmin() {
   adminLoadSequence++;
   approvalDrafts.clear();
   adminToken = null; adminState = null; adminSessions = []; research = null;
+  perspective = 'owner';
   enableControls(null);
   configController?.clear();
   modelController?.clear();
@@ -145,7 +148,12 @@ function stateCanAdvance(next, previous) {
 }
 function applyState(state) {
   if (!state?.session) return;
-  if (current && state.session.id === current.session.id && stateCanAdvance(state, current)) { current = state; renderParticipant(); }
+  if (current && state.session.id === current.session.id && stateCanAdvance(state, current)) {
+    // Administrative mutations may return the full observer state. Only the
+    // explicit perspective request may replace this participant view with it.
+    if ((state.perspective || 'owner') === perspective) { current = state; renderParticipant(); }
+    else refreshCurrent({ quiet: true });
+  }
   if (state.session.id === selectedSessionId && stateCanAdvance(state, adminState)) { adminState = state; if (activeView === 'console') renderConsole(); }
 }
 function clearPreview() { local.preview = null; local.previewStage = null; local.previewChoice = null; participantPreviewFocusPending = false; }
@@ -168,6 +176,8 @@ function calendarHtml() {
 }
 function renderStart() {
   const focus = participantFocusSnapshot($('participant-view'));
+  rememberDisclosures($('participant-view'), $('participant-view').dataset.disclosureScope || 'start');
+  $('participant-view').dataset.disclosureScope = 'start';
   $('participant-view').setAttribute('aria-busy', String(requestBusy || interruptBusy));
   const modes = meta?.modes || [];
   const selected = modes.find(mode => mode.id === local.mode);
@@ -176,32 +186,39 @@ function renderStart() {
   const modeCopy = { controlled: ['Guided experience', 'A predictable first round'], live: ['Live models', 'Try model-driven collaboration'], replay: ['Watch a replay', 'Explore a reference example'] };
   const modeShapes = { controlled: '<rect x="7" y="8" width="22" height="22" rx="6"/><path d="m13 19 4 4 7-8"/>', live: '<path d="m18 4 3.8 9.2L31 17l-9.2 3.8L18 30l-3.8-9.2L5 17l9.2-3.8Z"/><path d="M29 3v6m-3-3h6"/>', replay: '<circle cx="18" cy="18" r="13"/><path d="m15 12 9 6-9 6Z"/>' };
   $('participant-view').innerHTML = `<section class="start-hero">
-    <div><p class="eyebrow">A short, fictional collaboration</p><h1>What may your agent share?</h1><p class="lead">Help Alice arrange a meeting with Bob. You decide what crosses the boundary.</p><small>About 3–5 minutes · no personal calendar access</small></div>
+    <div><p class="eyebrow">Two owners · different meanings · one task</p><h1>Can your agents understand each other?</h1><p class="lead">Help Alice and Bob arrange a discussion. Review how their concepts align, then decide what information may cross each owner’s boundary.</p><small>About 3–5 minutes · fictional calendars</small></div>
     <div class="boundary-illustration" role="img" aria-label="Alice and Bob have separate data. You control the sharing boundary.">
       <svg viewBox="0 0 360 106" aria-hidden="true"><path d="M82 49h60m76 0h60" class="boundary-path"/><circle cx="52" cy="49" r="30" class="boundary-alice"/><circle cx="308" cy="49" r="30" class="boundary-bob"/><g class="boundary-avatar"><rect x="37" y="38" width="30" height="23" rx="8"/><path d="M52 32v6m-7 10h1m12 0h1m-12 7h10"/><rect x="293" y="38" width="30" height="23" rx="8"/><path d="M308 32v6m-7 10h1m12 0h1m-12 7h10"/></g><rect x="150" y="20" width="60" height="58" rx="16" class="boundary-gate"/><g class="boundary-lock"><rect x="169" y="43" width="22" height="19" rx="4"/><path d="M174 43v-6a6 6 0 0 1 12 0v6m-6 7v5"/></g></svg>
       <div class="boundary-captions"><span><strong>Alice</strong><small>Your agent</small></span><span><strong>Your choice</strong><small>Sharing boundary</small></span><span><strong>Bob</strong><small>Peer agent</small></span></div>
     </div>
-  </section><section class="panel start-preferences"><fieldset><legend><span class="setup-step">1</span>Choose your experience</legend><div class="mode-grid">${modes.map(mode => `<label class="choice mode-card ${!mode.available ? 'dimmed' : ''}" data-mode="${escapeHtml(mode.id)}"><input type="radio" name="start-mode" value="${escapeHtml(mode.id)}" ${local.mode === mode.id ? 'checked ' : ''}${!mode.available ? 'disabled ' : ''}><span class="mode-icon"><svg viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${modeShapes[mode.id] || modeShapes.controlled}</svg></span><span><strong>${modeCopy[mode.id]?.[0] || escapeHtml(mode.label)}</strong><small>${modeCopy[mode.id]?.[1] || escapeHtml(mode.description)}</small><span class="mode-status">${!mode.available ? 'Unavailable' : mode.id === 'controlled' ? 'Recommended to start' : escapeHtml(mode.label)}</span></span></label>`).join('')}</div></fieldset>
+  </section><section class="panel start-ontology-story"><div class="panel-heading"><div><p class="eyebrow">Recommended conference experience</p><h3>Calendar availability and booking eligibility differ</h3></div><span class="tag">A task-scoped alignment</span></div><p>Alice describes calendar entries. Bob describes booking slots. The agents must agree on the relevant meanings before interpreting a shared snapshot.</p><div class="ontology-story-grid"><label class="choice"><input type="radio" name="ontology-scenario" value="distinct" ${local.ontologyScenario === 'distinct' ? 'checked' : ''}><span><strong>Different models · guided alignment</strong><small>Review interval, weekday and booking rules, then approve an exact snapshot.</small></span></label><label class="choice"><input type="radio" name="ontology-scenario" value="ambiguous" ${local.ontologyScenario === 'ambiguous' ? 'checked' : ''}><span><strong>Same word · ambiguous meaning</strong><small>Does “free” mean only no event, or permission to consider a meeting? Clarify before proceeding.</small></span></label></div><label class="field section-actions"><span>Discussion duration</span><select id="task-duration">${[30,45,60].map(minutes => '<option value="' + minutes + '" ' + (local.durationMinutes === minutes ? 'selected' : '') + '>' + minutes + ' minutes</option>').join('')}</select></label><div class="recommended-launch"><button class="button primary" data-participant-action="recommended" ${!ready || requestBusy ? 'disabled' : ''}>Start recommended guided demo</button><small>Uses the conference kit in guided mode. Your selected story, duration and research choice apply. No sharing is preapproved.</small></div></section><section class="panel start-preferences"><fieldset><legend><span class="setup-step">1</span>Choose your experience</legend><div class="mode-grid">${modes.map(mode => `<label class="choice mode-card ${!mode.available ? 'dimmed' : ''}" data-mode="${escapeHtml(mode.id)}"><input type="radio" name="start-mode" value="${escapeHtml(mode.id)}" ${local.mode === mode.id ? 'checked ' : ''}${!mode.available ? 'disabled ' : ''}><span class="mode-icon"><svg viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${modeShapes[mode.id] || modeShapes.controlled}</svg></span><span><strong>${modeCopy[mode.id]?.[0] || escapeHtml(mode.label)}</strong><small>${modeCopy[mode.id]?.[1] || escapeHtml(mode.description)}</small><span class="mode-status">${!mode.available ? 'Unavailable' : mode.id === 'controlled' ? 'Recommended to start' : escapeHtml(mode.label)}</span></span></label>`).join('')}</div></fieldset>
     ${local.mode === 'live' ? '<div class="notice live-disclosure">' + escapeHtml(modeDisclosure(local.mode)) + '</div>' : ''}
     <div class="recording-option"><span class="recording-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="8" y="6" width="17" height="22" rx="4"/><path d="M12 4h9v5h-9zM12 15h9m-9 5h6"/></svg></span><div><label class="check"><input id="start-consent" type="checkbox" ${local.consent ? 'checked ' : ''}${local.mode === 'replay' ? 'disabled ' : ''}><span><strong>Record this fictional round for research</strong><small>Optional. Records fictional data and agent states; sharing permission is separate.</small></span></label><details class="consent-details" ${consentDetailsOpen ? 'open' : ''}><summary>What gets recorded?</summary><p class="muted">Researchers can review the fictional KG, data, skills, authorization, changes and understanding answers. Model secrets and raw provider conversations are excluded. No name or account is requested. Sharing permission is a separate decision. Without consent, no research record is written. Session state remains in memory until replacement, reset or expiry.</p><small>Consent version: ${escapeHtml(meta?.consentVersion || 'Loading')}</small></details></div></div></section>`;
+  const conditionsAccess = document.createElement('details'); conditionsAccess.className = 'initial-conditions-access'; conditionsAccess.dataset.disclosureId = 'start-initial-conditions';
+  conditionsAccess.innerHTML = '<summary><span>Explore or customize the starting states</span><small>Optional · calendars, skills, knowledge and permission limits</small></summary><p class="muted">Experiment setup · observer preview of fictional starting states. This view is separate from Alice’s owner view during the collaboration.</p>';
   const holder = document.createElement('div'); holder.id = 'initial-conditions-builder';
-  $('participant-view').append(holder);
+  conditionsAccess.append(holder); $('participant-view').append(conditionsAccess);
   conditionsController?.attach(holder);
   const actionPanel = document.createElement('section'); actionPanel.className = 'panel start-round-panel';
   actionPanel.innerHTML = '<div class="toolbar section-actions"><button class="button primary" data-participant-action="start" ' + (!ready || requestBusy ? 'disabled' : '') + '>' + (requestBusy ? 'Starting isolated agents…' : 'Start the demo') + '</button><span class="muted">' + (!ready ? 'Waiting for an available mode and both agents.' : 'Ready · creates the exact reviewed initial states.') + '</span></div>';
   $('participant-view').append(actionPanel);
   updateStartControls();
+  restoreDisclosures($('participant-view'), 'start');
   restoreParticipantPosition($('participant-view'), 'start', focus);
 }
 function updateStartControls() {
   const button = $('participant-view').querySelector('[data-participant-action="start"]'); if (!button) return;
   const modeReady = meta?.modes?.find(mode => mode.id === local.mode)?.available && meta.runtime?.alice?.online !== false && meta.runtime?.bob?.online !== false;
   button.disabled = !modeReady || requestBusy || !conditionsController?.ready();
+  const recommended = $('participant-view').querySelector('[data-participant-action="recommended"]');
+  if (recommended) recommended.disabled = requestBusy || !meta?.modes?.find(mode => mode.id === 'controlled')?.available || !conditionsController?.canSelectPreset('conference');
   const note = button.parentElement.querySelector('.muted');
   if (note) note.textContent = !modeReady ? 'Waiting for an available mode and both agents.' : conditionsController?.ready() ? 'Ready · creates the exact reviewed initial states.' : meta?.openControls ? 'Resolve and validate your initial conditions before starting.' : 'Resolve and validate your initial conditions; Bob changes need researcher sign-in.';
 }
 function choicesHtml(stage) {
   const initial = stage === 'initial';
+  const additionalDays = current.additionalRequest?.days || ['Thu'];
+  const requestWindow = additionalDays.join(', ');
   const choices = initial ? [
     ['free', 'Free times only', 'Only free time intervals on Tuesday and Wednesday.'],
     ['busy', 'Free / busy status', 'Time intervals and their free or busy status on Tuesday and Wednesday.'],
@@ -209,7 +226,7 @@ function choicesHtml(stage) {
     ['none', 'Share nothing', 'Decline calendar sharing and end this collaboration.']
   ] : [
     ['keep', 'Keep the current scope', 'Send no new calendar information. Bob will respect this boundary.'],
-    ['narrow', 'Thursday free times only', 'Add only free intervals on Thursday.'],
+    ['narrow', 'Free times on ' + requestWindow, 'Add only free intervals on ' + requestWindow + '.'],
     ['week', 'Full weekly calendar', 'Share event titles, notes and time intervals for the full week.']
   ];
   const profile = current.initialConditions?.agents?.Alice;
@@ -218,7 +235,7 @@ function choicesHtml(stage) {
   const enabledSkills = ['read_synthetic_calendar', 'preview_scoped_calendar'].every(id => profileSkills.includes(id));
   const allowedFields = profile?.authorization?.fields || ['day', 'time', 'status', 'title', 'note'];
   const allowedDays = profile?.authorization?.windows || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const requestedDays = initial ? ['Tue', 'Wed'] : ['Thu'];
+  const requestedDays = initial ? ['Tue', 'Wed'] : additionalDays;
   const choiceEnabled = value => ['none', 'keep'].includes(value) || enabledSkills && allowedFields.length && (value === 'week' ? allowedDays.length : requestedDays.some(day => allowedDays.includes(day)));
   if (profile) {
     for (const choice of choices) {
@@ -245,7 +262,8 @@ function receiptsHtml() {
   return '<section class="panel"><div class="panel-heading"><h3>Approved → actually received</h3><span class="tag">Server receipts</span></div>' + incoming.map(receipt => '<article class="receipt"><div class="receipt-header"><strong>Alice → Bob</strong><span class="tag ' + (receipt.status === 'received' ? 'good' : 'warn') + '">' + escapeHtml(receipt.status) + '</span></div><dl class="definition-list"><dt>Approved fields</dt><dd>' + escapeHtml(receipt.fields?.join(', ') || 'None') + '</dd><dt>Approved window</dt><dd>' + escapeHtml(textValue(receipt.window)) + '</dd><dt>Received payload</dt><dd>' + (receipt.status === 'received' ? 'Exact snapshot below' : 'Not confirmed received') + '</dd></dl>' + (receipt.status === 'received' ? tableRows(receipt.rows) : '') + '<details><summary>Receipt identity and exact content</summary><pre>' + escapeHtml(JSON.stringify(receipt, null, 2)) + '</pre></details></article>').join('') + outgoing.map(receipt => '<article class="receipt"><div class="receipt-header"><strong>Bob → Alice</strong><span class="tag ' + (receipt.status === 'received' ? 'good' : 'warn') + '">' + escapeHtml(receipt.status) + '</span></div><p>Fields: ' + escapeHtml(receipt.fields?.join(', ') || 'None') + '</p><dl class="definition-list">' + Object.entries(receipt.values || {}).map(([key, value]) => '<dt>' + escapeHtml(key) + '</dt><dd>' + escapeHtml(textValue(value)) + '</dd>').join('') + '</dl><details><summary>Exact receipt</summary><pre>' + escapeHtml(JSON.stringify(receipt, null, 2)) + '</pre></details></article>').join('') + '</section>';
 }
 function questionsHtml() {
-  return renderUnderstandingHtml({ state: current, local, busy: requestBusy, interruptBusy, pending });
+  const questions = renderUnderstandingHtml({ state: current, local, busy: requestBusy, interruptBusy, pending });
+  return questions ? '<details class="understanding-access" data-disclosure-id="understanding-checks"><summary><span>Check your understanding</span><small>Optional · sharing, withdrawal, meanings and modules</small></summary>' + questions + '</details>' : '';
 }
 
 function renderParticipant() {
@@ -268,22 +286,34 @@ function renderParticipant() {
   else if (session.ended) outcome = '<h2>This demo has ended</h2><p class="lead">No further information will be sent. The receipts show what had already been delivered.</p>';
   else if (session.mode === 'replay' && current.task?.outcome) outcome = '<h2>Replay complete</h2><p class="lead">This saved trace illustrates a collaboration. It did not send a new payload or arrange a live meeting.</p>';
   else if (current.task?.outcome === 'arranged') outcome = '<h2>Discussion arranged</h2><p class="lead">' + escapeHtml(current.task.meeting?.day || '') + ' · ' + escapeHtml(current.task.meeting?.time || '') + '. Review what each agent actually received.</p>';
-  else if (current.task?.outcome === 'boundary_kept') outcome = '<h2>Your boundary was kept</h2><p class="lead">No meeting was arranged with the information available. The wider sharing request was declined.</p>';
+  else if (current.task?.outcome === 'alignment_rejected') outcome = '<h2>Meaning left unresolved</h2><p class="lead">The proposed interpretation was declined. The agents did not use it to exchange or interpret calendar data.</p>';
+  else if (current.task?.outcome === 'boundary_kept') {
+    const reasons = {
+      scope_kept: 'You kept the current scope. No meeting was arranged from the information available.',
+      no_common_time: 'The available information has no common slot long enough for this task.',
+      bob_permission_denied: 'Bob’s owner did not authorize the reply needed to complete this task.',
+      confirmation_incomplete: 'The required confirmation was not completed. No meeting is recorded as arranged.',
+      alignment_rejected: 'The concept interpretation remains unresolved. Calendar data cannot be used as booking permission.'
+    };
+    outcome = '<h2>Your boundary was kept</h2><p class="lead">' + escapeHtml(reasons[current.task.reason] || 'No meeting was arranged from the information available. Review the recorded reason and receipts below.') + '</p>';
+  }
   else if (current.task?.outcome === 'declined') outcome = '<h2>Calendar sharing declined</h2><p class="lead">Your decision completed this collaboration. No calendar information was authorized.</p>';
   else if (current.task?.outcome === 'ended') outcome = '<h2>This demo has ended</h2><p class="lead">No further information will be sent. The receipts show what had already been delivered.</p>';
   const waiting = current.waiting;
   const approvalPending = current.pendingApprovals?.some(item => item.status === 'pending');
-  const heading = session.stage === 'initial' ? 'Choose Alice’s sharing boundary' : session.stage === 'additional' ? 'Review Bob’s additional request' : session.stage === 'replay' ? 'Labelled replay' : 'Your collaboration';
+  const heading = session.stage === 'alignment' ? 'Align the concepts for this task' : session.stage === 'initial' ? 'Choose Alice’s sharing boundary' : session.stage === 'additional' ? 'Review Bob’s additional request' : session.stage === 'replay' ? 'Labelled replay' : 'Your collaboration';
   const controls = (endingPending ? '<span class="tag warn">End needs confirmation</span>' : !session.ended ? '<button class="button quiet" data-participant-action="end" ' + (interruptBusy ? 'disabled' : '') + '>End this demo</button>' + (!current.alice.stopped && session.mode !== 'replay' ? '<button class="button" data-participant-action="stop_sharing" ' + (interruptBusy ? 'disabled' : '') + '>Stop future sharing</button>' : '') : '<button class="button" data-participant-action="fresh" ' + (requestBusy || interruptBusy || pending ? 'disabled' : '') + '>New demo</button>');
   const warnings = (hasPending && (isInterrupt(pending?.body?.action) ? interruptBusy : requestBusy) ? '<div class="notice" role="status" data-processing-choice><strong>Processing your choice</strong><p>Your original choice is being confirmed. You can stop future sharing or end this round.</p><button class="button" data-participant-action="refresh">Check session state</button></div>' : hasPending ? '<div class="notice warning" role="status"><strong>Submission outcome needs verification</strong><p>The same request ID and intent are retained. No changed sharing choice will be resubmitted automatically.</p><div class="toolbar"><button class="button" data-participant-action="verify_pending">Verify the same submission</button><button class="button" data-participant-action="refresh">Check session state</button></div></div>' : '')
     + (current.alice?.stopped ? '<div class="notice">' + (stoppingPending ? 'Waiting for Stop confirmation. ' : 'Future Alice sharing is stopped. ') + 'Previously received snapshots remain in the receipt history.</div>' : '')
-    + (waiting || session.paused ? '<div class="notice warning" role="status"><strong>' + (session.paused ? 'Collaboration paused' : 'Waiting') + '</strong><p>' + escapeHtml(waiting?.message || 'The researcher paused this round. Your current step and received information are preserved.') + '</p>' + (approvalPending || waiting?.reason === 'admin' || waiting?.reason === 'configuration_changed' ? '<div class="toolbar"><button class="button" data-participant-action="admin_review">Open researcher review window</button><span class="muted">Closing it leaves the request pending.</span></div>' : '') + '</div>' : '');
+    + (waiting || session.paused ? '<div class="notice warning" role="status"><strong>' + (session.paused ? 'Collaboration paused' : 'Waiting') + '</strong><p>' + escapeHtml(waiting?.message || 'The researcher paused this round. Your current step and received information are preserved.') + '</p>' + (approvalPending || waiting?.reason === 'admin' || waiting?.reason === 'configuration_changed' ? '<div class="toolbar"><button class="button" data-participant-action="admin_review">Open Bob owner review window</button><span class="muted">Closing it leaves the request pending.</span></div>' : '') + '</div>' : '');
   const replay = session.stage === 'replay' ? '<section class="panel"><h3>Saved trace · replay</h3><p class="muted">Source: ' + escapeHtml(current.replay?.source || 'Saved replay') + ' · step ' + escapeHtml(current.replay?.index ?? 0) + ' / ' + escapeHtml(current.replay?.total ?? 0) + '</p><button class="button primary section-actions" data-participant-action="replay_next" ' + (requestBusy || interruptBusy || pending || session.ended || (current.replay?.index ?? 0) >= (current.replay?.total ?? 0) ? 'disabled' : '') + '>Next replay step</button></section>' : '';
-  view.innerHTML = renderParticipantHtml({ state: current, heading, mode: modeLabel(session.mode), warnings, controls, outcome, choices: !session.ended && !session.paused && !waiting && ['initial', 'additional'].includes(session.stage) ? choicesHtml(session.stage) : '', questions: questionsHtml(), receipts: receiptsHtml(), calendar: calendarHtml(), replay, modeDisclosure: modeDisclosure(session.mode) });
+  const ontologyCard = renderOntologyHtml(current, { busy: requestBusy || interruptBusy || Boolean(pending) || session.paused || Boolean(waiting) });
+  const ontology = session.stage === 'alignment' || !ontologyCard ? ontologyCard : '<details class="ontology-aligned-access" data-disclosure-id="ontology-accepted-summary"><summary><span>' + (current.ontology?.status === 'accepted' ? 'Meaning aligned for this task' : 'Alignment decision & evidence') + '</span><small>Definitions, mappings and confirmed agent dialogue</small></summary>' + ontologyCard + '</details>';
+  view.innerHTML = renderParticipantHtml({ state: current, heading, mode: modeLabel(session.mode), warnings, controls, outcome, choices: !session.ended && !session.paused && !waiting && ['initial', 'additional'].includes(session.stage) ? choicesHtml(session.stage) : '', questions: questionsHtml(), receipts: receiptsHtml(), calendar: calendarHtml(), replay, modeDisclosure: modeDisclosure(session.mode), perspective: renderPerspectiveHtml(current, { busy: perspectiveBusy || requestBusy || interruptBusy }), ontology, contribution: renderContributionHtml(current) });
   mountAgentStates($('live-alice-state'), { Alice: current.agentStates?.Alice }, { scope: 'participant-live:' + session.id });
   mountAgentStates($('live-bob-state'), { Bob: current.agentStates?.Bob }, { scope: 'participant-live:' + session.id });
   restoreDisclosures(view, view.dataset.disclosureScope);
-  restoreParticipantPosition(view, [session.id, session.stage, session.paused, session.ended, current.alice?.stopped, current.task?.outcome].join(':'), focus);
+  restoreParticipantPosition(view, [session.id, session.stage, current.ontology?.status, session.paused, session.ended, current.alice?.stopped, current.task?.outcome].join(':'), focus);
 }
 
 async function startSession() {
@@ -292,8 +322,9 @@ async function startSession() {
   try {
     const initialConditions = await conditionsController.submission();
     const previous = current ? { previousSessionId: current.session.id, previousToken: participantToken } : {};
-    const result = await api('/api/sessions', { method: 'POST', auth: false, researcher: true, body: { mode: local.mode, researchConsent: local.mode !== 'replay' && local.consent, ...initialConditions, ...previous } });
-    rememberPending(null); rememberSession(result.token, result.state); planningNewRound = false; clearPreview(); local.initial = null; local.additional = null; local.prediction = null; local.revocation = null; local.predictionSubmitted = false; local.revocationSubmitted = false;
+    const result = await api('/api/sessions', { method: 'POST', auth: false, researcher: true, body: { mode: local.mode, ontologyScenario: local.ontologyScenario, alignmentReview: true, task: { type: 'schedule', durationMinutes: local.durationMinutes }, researchConsent: local.mode !== 'replay' && local.consent, ...initialConditions, ...previous } });
+    perspective = 'owner';
+    rememberPending(null); rememberSession(result.token, result.state); planningNewRound = false; clearPreview(); local.initial = null; local.additional = null; local.prediction = null; local.revocation = null; local.alignmentAnswer = null; local.moduleAnswer = null; local.predictionSubmitted = false; local.revocationSubmitted = false;
     if (!selectedSessionId || selectedSessionId === previous.previousSessionId) selectedSessionId = current.session.id; notify('');
   } catch (error) { notify(error.message, 'error'); }
   finally { requestBusy = false; renderParticipant(); }
@@ -301,14 +332,20 @@ async function startSession() {
 async function refreshCurrent({ quiet = false } = {}) {
   if (!current || !participantToken) return;
   const sessionId = current.session.id, token = participantToken;
+  const observer = perspective === 'observer' && Boolean(adminToken);
+  const requestedPerspective = observer ? 'observer' : 'owner';
   try {
-    const next = await api('/api/sessions/' + encodeURIComponent(sessionId), { token });
+    const next = await api('/api/sessions/' + encodeURIComponent(sessionId) + (observer ? '?perspective=observer' : ''), { token: observer ? adminToken : token, admin: observer });
     if (current?.session.id !== sessionId || participantToken !== token) return;
+    if (perspective !== requestedPerspective || observer && !adminToken) return false;
     if (JSON.stringify(next) !== JSON.stringify(current)) applyState(next);
+    return true;
   } catch (error) {
     if (current?.session.id !== sessionId || participantToken !== token) return;
+    if (observer && [401, 403].includes(error.status)) { perspective = 'owner'; await refreshCurrent({ quiet: true }); if (!quiet) notify('Observer access is unavailable. You remain in Alice owner view.', 'warning'); return false; }
     if ([401, 404, 410].includes(error.status)) { current = null; participantToken = null; local.consent = false; planningNewRound = false; rememberPending(null); writeStorage(sessionKey, null); clearPreview(); notify('This in-memory session is no longer available. A server restart or round reset ends the old round; start a new demo.', 'warning'); renderParticipant(); }
     else if (!quiet) notify(error.message, 'warning');
+    return false;
   }
 }
 async function previewChoice(stage) {
@@ -370,6 +407,8 @@ async function performAction(actionName, extra = {}, { repeat = false } = {}) {
 $('participant-view').addEventListener('change', event => {
   const input = event.target;
   if (input.name === 'start-mode') { local.mode = input.value; if (local.mode === 'replay') local.consent = false; renderStart(); }
+  if (input.name === 'ontology-scenario') local.ontologyScenario = input.value;
+  if (input.id === 'task-duration') local.durationMinutes = Number(input.value);
   if (input.id === 'start-consent') local.consent = input.checked;
   if (input.name === 'initial-choice' || input.name === 'additional-choice') { local[input.name.split('-')[0]] = input.value; clearPreview(); renderParticipant(); }
   const question = understandingQuestionForInput(input.name);
@@ -382,6 +421,9 @@ $('participant-view').addEventListener('click', event => {
   const button = event.target.closest('[data-participant-action]'); if (!button || button.disabled) return;
   const actionName = button.dataset.participantAction;
   if (actionName === 'start') startSession();
+  else if (actionName === 'recommended') startRecommended();
+  else if (actionName === 'perspective') switchPerspective(button.dataset.perspective);
+  else if (actionName.startsWith('alignment_')) performAction('alignment_decision', { decision: actionName.slice('alignment_'.length), expectedAlignmentVersion: current.ontology?.revision, ...(button.dataset.bookable !== undefined ? { calendarFreeMeansBookable: button.dataset.bookable === 'true' } : {}) });
   else if (actionName === 'fresh') { if (requestBusy || interruptBusy || pending) return; local.mode = current?.session.mode || 'controlled'; local.consent = false; planningNewRound = true; rememberPending(null); clearPreview(); renderParticipant(); }
   else if (actionName === 'preview') previewChoice(button.dataset.stage);
   else if (actionName === 'confirm') { const stage = button.dataset.stage; if (local.preview && local.previewStage === stage) performAction(stage === 'initial' ? 'share_initial' : 'respond_additional', { choice: local[stage], previewHash: local.preview.payloadHash }); }
@@ -403,6 +445,23 @@ function rememberApprovalDraft() {
   const approval = dialogContext?.selected, body = $('admin-dialog-body');
   if (!approval || !body.querySelector('input[name="approval-field"]')) return;
   approvalDrafts.set(approval.id, { selectedFields: [...body.querySelectorAll('input[name="approval-field"]:checked')].map(node => node.value), maxUses: $('approval-max-uses')?.value, expiryMinutes: $('approval-expiry')?.value });
+}
+async function switchPerspective(next) {
+  if (!current || perspectiveBusy || requestBusy || interruptBusy) return;
+  if (next === 'observer' && !adminToken) { openAdminDialog({ kind: 'perspective', perspective: next }); return; }
+  perspectiveBusy = true;
+  const previous = perspective;
+  perspective = next;
+  renderParticipant();
+  try { if (!await refreshCurrent()) perspective = previous === 'observer' && !adminToken ? 'owner' : previous; }
+  catch { perspective = previous; }
+  finally { perspectiveBusy = false; renderParticipant(); }
+}
+async function startRecommended() {
+  if (requestBusy || interruptBusy || pending) return;
+  local.mode = 'controlled';
+  try { await conditionsController.selectPreset('conference'); await startSession(); }
+  catch (error) { notify(error.message, 'error'); }
 }
 function closeDialog(id) { if (id === 'admin-dialog') rememberApprovalDraft(); const dialog = $(id); if (dialog.open) dialog.close(); if (dialogOpener?.isConnected) dialogOpener.focus(); else ($('admin-open').hidden ? document.querySelector('[data-view="' + activeView + '"]') : $('admin-open'))?.focus(); if (id === 'admin-dialog') dialogContext = null; }
 for (const dialog of document.querySelectorAll('dialog')) {
@@ -441,7 +500,9 @@ $('admin-dialog-body').addEventListener('submit', async event => {
   event.target.querySelectorAll('button,input').forEach(node => { node.disabled = true; });
   try {
     const result = await api('/api/admin/login', { method: 'POST', auth: false, body: { pin } }); enableControls(result.token);
-    if (context?.kind === 'approval') await loadApprovals(context.sessionId); else closeDialog('admin-dialog');
+    if (context?.kind === 'approval') await loadApprovals(context.sessionId);
+    else if (context?.kind === 'perspective') { closeDialog('admin-dialog'); await switchPerspective(context.perspective); }
+    else closeDialog('admin-dialog');
   } catch (error) { renderLogin(error.message); }
 });
 async function loadApprovals(sessionId) {
@@ -491,7 +552,7 @@ async function loadAdminSessions() {
     if (!selectedSessionId || !adminSessions.some(session => session.id === selectedSessionId)) selectedSessionId = current && adminSessions.some(session => session.id === current.session.id) ? current.session.id : adminSessions[0]?.id;
     const id = selectedSessionId;
     if (adminState?.session.id !== id) { adminState = null; if (activeView === 'console') renderConsole(); }
-    const state = id ? await api('/api/sessions/' + encodeURIComponent(id), { admin: true }) : null;
+    const state = id ? await api('/api/sessions/' + encodeURIComponent(id) + '?perspective=observer', { admin: true }) : null;
     if (sequence !== adminLoadSequence || token !== adminToken || id !== selectedSessionId) return;
     adminState = state;
     renderConsole();
@@ -516,7 +577,10 @@ $('console-view').addEventListener('click', async event => {
   try {
     const oldId = selectedSessionId;
     const result = await api('/api/admin/sessions/' + encodeURIComponent(oldId) + '/intervene', { method: 'POST', body: { action: actionName } });
-    if (result.token && current?.session.id === oldId) { rememberSession(result.token, result.state); rememberPending(null); clearPreview(); local.initial = null; local.additional = null; local.prediction = null; local.revocation = null; local.predictionSubmitted = false; local.revocationSubmitted = false; renderParticipant(); }
+    if (result.token && current?.session.id === oldId) {
+      const ownerState = result.state?.perspective === 'owner' ? result.state : await api('/api/sessions/' + encodeURIComponent(result.state.session.id), { token: result.token, admin: false });
+      perspective = 'owner'; rememberSession(result.token, ownerState); rememberPending(null); clearPreview(); local.initial = null; local.additional = null; local.prediction = null; local.revocation = null; local.alignmentAnswer = null; local.moduleAnswer = null; local.predictionSubmitted = false; local.revocationSubmitted = false; renderParticipant();
+    }
     else applyState(result.state);
     selectedSessionId = result.state?.session.id || oldId; await loadAdminSessions(); notify('');
   } catch (error) { notify(error.message, 'error'); renderConsole(); }

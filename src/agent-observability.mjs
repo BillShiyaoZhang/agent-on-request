@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { ALICE_CALENDAR } from './scenario.mjs';
+import { sanitizeOntologyDialogue } from './ontology-dialogue.mjs';
 
 const ROLES = ['Alice', 'Bob'];
 const FIELD_LABELS = { day: '日期', time: '时间', status: '状态', title: '事件标题', note: '备注', topic: '讨论主题', agenda: '议程' };
@@ -145,6 +146,10 @@ function receipt(input, direction) {
   const operationId = text(read(input, 'operationId'), 256), fields = strings(read(input, 'fields'));
   if (!operationId) return null;
   const output = { operationId, fields, status: text(read(input, 'status'), 128), receivedAt: iso(read(input, 'receivedAt')), payloadHash: text(read(input, 'payloadHash'), 128) };
+  const mappingVersion = read(input, 'mappingVersion'), ontologyTask = read(input, 'ontologyTask');
+  if (typeof mappingVersion === 'string' && /^[a-f0-9]{64}$/.test(mappingVersion) && ['schedule', 'brief'].includes(ontologyTask)) {
+    output.mappingVersion = mappingVersion; output.ontologyTask = ontologyTask;
+  }
   if (direction === 'aliceToBob') {
     output.window = windowValue(read(input, 'window'));
     output.rows = list(read(input, 'rows')).filter(object).map(row => scalars(row, fields));
@@ -196,7 +201,8 @@ function baseSnapshot(input) {
     configRevision: number(read(input, 'configRevision')), templateRevision: number(read(input, 'templateRevision')),
     stage: text(read(input, 'stage'), 128), savedStage: text(read(input, 'savedStage'), 128), version: number(read(input, 'version')),
     stopped: read(input, 'stopped') === true, ended: read(input, 'ended') === true, paused: read(input, 'paused') === true,
-    task: { outcome: text(read(task, 'outcome'), 128), meeting: object(read(task, 'meeting')) ? scalars(read(task, 'meeting'), ['day', 'time']) : null },
+    task: { outcome: text(read(task, 'outcome'), 128), meeting: object(read(task, 'meeting')) ? scalars(read(task, 'meeting'), ['day', 'time']) : null,
+      ...(read(task, 'reason') !== undefined ? { reason: text(read(task, 'reason'), 128) } : {}) },
     preparedMeeting: object(read(input, 'preparedMeeting')) ? scalars(read(input, 'preparedMeeting'), ['day', 'time']) : null,
     choices: { initial: text(read(choices, 'initial'), 128), additional: text(read(choices, 'additional'), 128) },
     waiting: object(waiting) ? { reason: text(read(waiting, 'reason'), 128), message: text(read(waiting, 'message')) } : null,
@@ -204,7 +210,13 @@ function baseSnapshot(input) {
     policyUses: number(read(input, 'policyUses')) ?? 0, aliceUses: number(read(input, 'aliceUses')),
     aliceCalendar: calendar(read(input, 'aliceCalendar')),
     pendingDelivery: pending(read(input, 'pendingDelivery')), continuation: text(read(input, 'continuation'), 128),
-    requestSequence: number(read(input, 'requestSequence')), interruptGeneration: number(read(input, 'interruptGeneration')) };
+    requestSequence: number(read(input, 'requestSequence')), interruptGeneration: number(read(input, 'interruptGeneration')),
+    ...(read(input, 'ontology') ? { ontology: sanitizeOntologyDialogue(read(input, 'ontology')) } : {}),
+    ...(read(input, 'briefOntology') ? { briefOntology: sanitizeOntologyDialogue(read(input, 'briefOntology')) } : {}),
+    ...(read(input, 'additionalRequest') ? { additionalRequest: {
+      days: strings(read(read(input, 'additionalRequest'), 'days')).filter(day => ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].includes(day)),
+      fields: strings(read(read(input, 'additionalRequest'), 'fields')).filter(field => ['day','time','status'].includes(field)), reason: 'no_match'
+    } } : {}) };
 }
 
 const readableValue = (value, depth = 0) => {
@@ -354,7 +366,12 @@ export function buildTraceSnapshot(session, at = Date.now()) {
 /** Reapply the whitelist on disk reload and derive views rather than trusting saved graph content. */
 export function sanitizeTraceSnapshot(input) {
   if (!object(input) || read(input, 'schemaVersion') !== 'agent-trace-v1' || !iso(read(input, 'capturedAt')) || !conditions(read(input, 'conditions'))) return null;
-  const snapshot = baseSnapshot(input);
-  snapshot.agentStates = buildAgentStates(snapshot, Date.parse(snapshot.capturedAt));
-  return snapshot;
+  try {
+    const snapshot = baseSnapshot(input);
+    snapshot.agentStates = buildAgentStates(snapshot, Date.parse(snapshot.capturedAt));
+    return snapshot;
+  } catch {
+    // Invalid semantic evidence marks this trace entry invalid on reload.
+    return null;
+  }
 }

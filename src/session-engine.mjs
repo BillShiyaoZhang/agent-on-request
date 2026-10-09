@@ -4,6 +4,7 @@ import { AppError, requireThat } from './errors.mjs';
 import { ALICE_CALENDAR, REPLAY_STEPS, SCENARIO_VERSION } from './scenario.mjs';
 import { resolveConditions, conditionBobConfig } from './condition-service.mjs';
 import { buildAgentStates, buildTraceSnapshot } from './agent-observability.mjs';
+import { createOntologyDialogue, startOntologyDialogue, resolveOntologyDialogue, registerOntologyReceipt, sanitizeOntologyDialogue } from './ontology-dialogue.mjs';
 
 const tokenHash = token => createHash('sha256').update(String(token)).digest();
 const now = () => new Date().toISOString();
@@ -106,9 +107,9 @@ export class SessionEngine {
   }
   async event(session, kind, data = {}) { await this.research.append(session, { kind, ...data }, buildTraceSnapshot(session)); }
   async checkpoint(session, kind) { await this.research.checkpoint?.(session, kind, buildTraceSnapshot(session)); }
-  view(session) {
+  view(session, { perspective = 'observer' } = {}) {
     const status = this.runtime.status();
-    return structuredClone({
+    const result = structuredClone({
       session: { id: session.id, epoch: session.epoch, version: session.version, stage: session.stage, mode: session.mode, modelRevision: session.models?.revision ?? null, researchConsent: session.researchConsent, consentVersion: session.consentVersion, startedAt: session.startedAt, ended: session.ended, paused: session.paused },
       alice: { calendar: session.aliceCalendar ?? ALICE_CALENDAR, stopped: session.stopped },
       bob: { name: 'Bob', configRevision: session.configRevision, templateRevision: session.templateRevision, online: status.bob.online },
@@ -116,12 +117,28 @@ export class SessionEngine {
       pendingApprovals: session.approvals.filter(item => item.status === 'pending').map(item => ({ id: item.id, owner: 'Bob', summary: item.summary, status: item.status, resource: item.resource, purpose: item.purpose })),
       waiting: session.waiting, task: session.task, runtime: { alice: status.alice, bob: status.bob }, replay: session.replay,
       answers: session.answers, models: session.models ?? null,
-      initialConditions: session.conditions, conditionsHash: session.conditionsHash, agentStates: buildAgentStates(session)
+      initialConditions: session.conditions, conditionsHash: session.conditionsHash, agentStates: buildAgentStates(session),
+      ontology: session.ontology ?? null, briefOntology: session.briefOntology ?? null, additionalRequest: session.additionalRequest ?? null, perspective
     });
+    if (perspective === 'owner') {
+      // The owner endpoint never returns the peer's unshared starting data or policies.
+      result.initialConditions = { schemaVersion: session.conditions.schemaVersion, presetId: session.conditions.presetId,
+        agents: { Alice: clone(session.conditions.agents.Alice) } };
+      result.agentStates.Bob = null;
+      if (result.ontology) result.ontology = sanitizeOntologyDialogue(result.ontology);
+      if (result.briefOntology) result.briefOntology = sanitizeOntologyDialogue(result.briefOntology);
+    }
+    return result;
   }
-  async create({ mode = 'controlled', researchConsent = false, previousSessionId, previousToken, initialConditions, expectedConditionsHash } = {}) {
+  async create({ mode = 'controlled', researchConsent = false, previousSessionId, previousToken, initialConditions, expectedConditionsHash,
+    ontologyScenario = 'distinct', alignmentReview = false, task = { type: 'schedule', durationMinutes: 30 } } = {}) {
     requireThat(['controlled', 'live', 'replay'].includes(mode), 'MODE', 'Choose a valid run mode.');
     requireThat(typeof researchConsent === 'boolean', 'CONSENT', 'Research consent must be an explicit boolean.');
+    requireThat(typeof alignmentReview === 'boolean', 'ALIGNMENT_REVIEW', 'Choose whether to review the ontology dialogue.');
+    requireThat(['distinct', 'ambiguous'].includes(ontologyScenario), 'ONTOLOGY_SCENARIO', 'Choose a supported ontology scenario.');
+    requireThat(task && task.type === 'schedule' && [15, 30, 45, 60].includes(task.durationMinutes)
+      && Object.keys(task).every(key => ['type', 'durationMinutes'].includes(key)), 'TASK', 'Choose a scheduling duration of 15, 30, 45 or 60 minutes.');
+    const ontology = mode === 'replay' ? null : (alignmentReview || ontologyScenario === 'ambiguous' ? startOntologyDialogue : createOntologyDialogue)({ scenario: ontologyScenario, task, mode });
     const ownerTemplate = clone(this.profiles.template);
     const templateRevision = this.profiles.templateRevision;
     const conditions = resolveConditions(initialConditions, ownerTemplate);
@@ -144,7 +161,8 @@ export class SessionEngine {
     const session = {
       id: randomUUID(), epoch: ++this.epoch, tokenHash: tokenHash(token), version: 1,
       mode, researchConsent: mode === 'replay' ? false : researchConsent, consentVersion: 'research-v2', scenarioVersion: SCENARIO_VERSION,
-      startedAt: now(), ended: false, paused: false, stopped: false, stage: mode === 'replay' ? 'replay' : 'initial',
+      startedAt: now(), ended: false, paused: false, stopped: false, stage: mode === 'replay' ? 'replay' : ontology.status === 'accepted' ? 'initial' : 'alignment',
+      ontology, briefOntology: null, alignmentReview, alignmentCandidate: null, additionalRequest: null,
       config: bobConfig, configRevision: hashValue(bobConfig) === hashValue(ownerTemplate) ? templateRevision : await this.profiles.nextRevision(bobConfig), templateRevision,
       conditions, conditionsHash, aliceCalendar: clone(conditions.agents.Alice.data.calendar), aliceUses: 0,
       choices: { initial: null, additional: null }, receipts: { aliceToBob: [], bobToAlice: [] }, messages: [], waiting: null,
@@ -153,7 +171,10 @@ export class SessionEngine {
       pendingDelivery: null, continuation: null, savedStage: null, preparedMeeting: null, requestSequence: 0,
       replay: mode === 'replay' ? { source: 'synthetic-reference-v1', index: 0, total: REPLAY_STEPS.length, steps: REPLAY_STEPS } : null
     };
-    const initialized = await this.runtime.initialize({ sessionId: session.id, epoch: session.epoch, mode, aliceData: session.aliceCalendar, aliceProfile: conditions.agents.Alice, bobProfile: conditions.agents.Bob, bobConfig: session.config, configRevision: session.configRevision });
+    const initialized = await this.runtime.initialize({ sessionId: session.id, epoch: session.epoch, mode, aliceData: session.aliceCalendar, aliceProfile: conditions.agents.Alice, bobProfile: conditions.agents.Bob, bobConfig: session.config, configRevision: session.configRevision,
+      ontologyDialogue: session.ontology, alignReview: session.stage === 'alignment' });
+    if (initialized?.ontologyDialogue) session.ontology = initialized.ontologyDialogue;
+    if (initialized?.protocol && session.ontology) session.ontology.protocol = initialized.protocol;
     session.models = initialized?.models ?? this.runtime.modelInfo?.({ sessionId: session.id, epoch: session.epoch }) ?? null;
     this.sessions.set(session.id, session);
     try {
@@ -251,7 +272,8 @@ export class SessionEngine {
       requireThat(session.aliceUses < profile.authorization.maxUses, 'ALICE_AUTH_LIMIT', 'Alice initial sharing budget is exhausted. Keeping the current boundary remains available.', 403);
       requireThat(Date.now() < Date.parse(session.startedAt) + profile.authorization.expiryMinutes * 60_000, 'ALICE_AUTH_EXPIRED', 'Alice initial authorization has expired. Keeping the current boundary remains available.', 403);
     }
-    return this.runtime.projectAlice({ sessionId: session.id, epoch: session.epoch, stage, choice });
+    return this.runtime.projectAlice({ sessionId: session.id, epoch: session.epoch, stage, choice,
+      ...(stage === 'additional' && choice === 'narrow' && session.additionalRequest ? { days: session.additionalRequest.days } : {}) });
   }
   async preview(session, { stage, choice }) {
     return this.lock(session, async () => {
@@ -295,14 +317,37 @@ export class SessionEngine {
         session.inflightRequests.set(input.requestId, inflight);
       }
       const generation = session.interruptGeneration;
-      if (['answer_prediction', 'answer_revocation'].includes(type)) {
+      if (type === 'alignment_decision') {
+        requireThat(session.stage === 'alignment' && !session.paused && !session.stopped && session.ontology,
+          'ALIGNMENT_STAGE', 'Review the current ontology dialogue before sharing.', 409);
+        requireThat(input.expectedAlignmentVersion === session.ontology.revision, 'STALE_ALIGNMENT', 'The ontology proposal changed. Review it again.', 409);
+        requireThat(['accept', 'clarify', 'reject'].includes(input.decision), 'ALIGNMENT_DECISION', 'Choose accept, clarify or reject.');
+        const candidate = resolveOntologyDialogue(session.ontology, { decision: input.decision,
+          ...(Object.hasOwn(input, 'calendarFreeMeansBookable') ? { calendarFreeMeansBookable: input.calendarFreeMeansBookable } : {}) });
+        if (candidate.status === 'accepted') {
+          // Only this explicit decision permits the selected concept definitions to cross owners.
+          session.alignmentCandidate = candidate;
+          session.continuation = 'alignment';
+          await this.continuePlan(session);
+        } else {
+          session.ontology = candidate;
+          await this.event(session, 'ontology_decision', { actor: 'Alice', choice: input.decision, reason: candidate.status });
+          if (candidate.status === 'rejected') await this.complete(session, 'boundary_kept', null, 'alignment_rejected');
+        }
+      } else if (['answer_prediction', 'answer_revocation', 'answer_alignment', 'answer_module'].includes(type)) {
         requireThat(Boolean(session.task.outcome), 'ANSWER_STAGE', 'Understanding checks follow the round’s result.', 409);
-        const valid = type === 'answer_prediction' ? ['approved_snapshot', 'outside_scope', 'not_sure'] : ['future_only', 'delete_received', 'not_sure'];
+        const questions = {
+          answer_prediction: ['received_scope', 'approved_snapshot', 'outside_scope'],
+          answer_revocation: ['withdrawal', 'future_only', 'delete_received'],
+          answer_alignment: ['ontology_alignment', 'mapping_not_permission', 'mapping_grants_access'],
+          answer_module: ['task_module', 'task_subset', 'whole_ontology']
+        };
+        const [questionId, expected, wrong] = questions[type];
+        const valid = [expected, wrong, 'not_sure'];
         requireThat(valid.includes(input.answer) && session.mode !== 'replay', 'ANSWER', 'Choose a valid answer.');
-        const questionId = type === 'answer_prediction' ? 'received_scope' : 'withdrawal';
         requireThat(!session.answers[questionId], 'ANSWERED', 'This question has already been submitted.', 409);
         session.answers[questionId] = input.answer;
-        await this.event(session, 'prediction', { questionId, answer: input.answer, correct: input.answer === (type === 'answer_prediction' ? 'approved_snapshot' : 'future_only'), stage: session.stage });
+        await this.event(session, 'prediction', { questionId, answer: input.answer, correct: input.answer === expected, stage: session.stage });
       } else if (type === 'end') {
         session.ended = true; session.stopped = true; session.paused = false; session.stage = 'complete'; session.waiting = null;
         session.approvals.forEach(item => { if (item.status === 'pending') item.status = 'cancelled'; });
@@ -329,7 +374,7 @@ export class SessionEngine {
         session.approvals.forEach(item => { if (item.status === 'pending') item.status = 'cancelled'; });
         if (!session.task.outcome) {
           const meeting = this.confirmedMeeting(session);
-          await this.complete(session, meeting ? 'arranged' : 'boundary_kept', meeting);
+          await this.complete(session, meeting ? 'arranged' : 'boundary_kept', meeting, 'sharing_stopped');
         }
       } else if (type === 'replay_next') {
         requireThat(session.mode === 'replay', 'REPLAY', 'This is not replay mode.');
@@ -350,7 +395,7 @@ export class SessionEngine {
         requireThat(this.planningCurrent(session, generation) && !session.stopped, 'INTERRUPTED', 'Sharing was interrupted before transmission.', 409);
         if (input.choice === 'none' || input.choice === 'keep') {
           this.message(session, 'Alice', 'The participant kept their sharing boundary. This is a valid outcome.');
-          await this.complete(session, input.choice === 'none' ? 'declined' : 'boundary_kept');
+          await this.complete(session, input.choice === 'none' ? 'declined' : 'boundary_kept', null, input.choice === 'none' ? 'sharing_declined' : 'scope_kept');
         } else {
           session.aliceUses++;
           session.pendingDelivery = { direction: 'bob', operationId: `${session.id}:alice:${++session.requestSequence}`, ...payload, payloadHash: input.previewHash, next: stage, expiresAt: Date.parse(session.startedAt) + session.conditions.agents.Alice.authorization.expiryMinutes * 60_000 };
@@ -366,11 +411,11 @@ export class SessionEngine {
     try { return await result; }
     finally { if (inflight && session.inflightRequests.get(input.requestId) === inflight) session.inflightRequests.delete(input.requestId); }
   }
-  async complete(session, outcome, meeting = session.preparedMeeting) {
+  async complete(session, outcome, meeting = session.preparedMeeting, reason = outcome === 'arranged' ? 'meeting_confirmed' : 'no_common_time') {
     session.stage = 'complete'; session.waiting = null; session.paused = false; session.continuation = null; session.savedStage = null;
-    session.task = { outcome, meeting: meeting ? clone(meeting) : null };
+    session.task = { outcome, meeting: meeting ? clone(meeting) : null, reason };
     session.preparedMeeting = outcome === 'arranged' && meeting ? clone(meeting) : null;
-    await this.event(session, 'stage', { stage: 'complete', status: outcome });
+    await this.event(session, 'stage', { stage: 'complete', status: outcome, reason });
     this.message(session, 'system', outcome === 'arranged' ? `Both agents confirmed the fictional meeting: ${meeting.day} ${meeting.time}.` : 'The round completed within the participant’s chosen sharing boundary.');
   }
   async suspend(session, error) {
@@ -394,6 +439,30 @@ export class SessionEngine {
     if (!operation || !this.planningCurrent(session, generation)) return;
     try {
       requireThat(operation.direction !== 'bob' || !session.stopped, 'SHARING_STOPPED', 'Alice stopped future sharing. This operation cannot be transmitted.', 409);
+      // A second task extends alignment only after its concrete outbound fields have been authorized.
+      const recognizedBrief = operation.direction === 'alice' && operation.resource === 'meeting_brief'
+        && operation.fields.length && operation.fields.every(field => ['topic', 'agenda'].includes(field) && typeof operation.values[field] === 'string');
+      if (recognizedBrief && operation.expiresAt > Date.now() && operation.policyRevision === session.configRevision
+        && (!session.briefOntology || session.briefOntology.status !== 'accepted' || operation.fields.some(field => !session.briefOntology.task.fields.includes(field)))) {
+        const candidate = createOntologyDialogue({ scenario: session.ontology.scenario, task: { type: 'brief', fields: operation.fields }, mode: session.mode });
+        const aligned = await this.runtime.negotiateOntology({ sessionId: session.id, epoch: session.epoch, dialogue: candidate,
+          liveProposal: session.mode === 'live' && session.alignmentReview });
+        if (!this.planningCurrent(session, generation)) return;
+        session.briefOntology = aligned.dialogue;
+        if (aligned.protocol) session.briefOntology.protocol = aligned.protocol;
+        await this.event(session, 'ontology_negotiated', { actor: 'Alice', reason: 'optional_brief_module',
+          mappingVersion: session.briefOntology.registry.mappingVersion, moduleIds: session.briefOntology.selectedModules.map(item => item.id) });
+        if (session.briefOntology.status === 'rejected') {
+          session.pendingDelivery = null;
+          this.message(session, 'system', 'The agents declined the optional brief alignment. No brief was sent; the confirmed meeting is retained.');
+          session.continuation = operation.next;
+          await this.continuePlan(session);
+          return;
+        }
+      }
+      if (recognizedBrief && operation.expiresAt > Date.now() && operation.policyRevision === session.configRevision) requireThat(session.briefOntology?.status === 'accepted'
+        && operation.fields.every(field => session.briefOntology.task.fields.includes(field)),
+      'ONTOLOGY_NOT_ALIGNED', 'The optional brief cannot be interpreted without its accepted module.', 409);
       const request = { sessionId: session.id, epoch: session.epoch, ...operation };
       let result;
       if (operation.direction === 'bob' && operation.expiresAt <= Date.now()) {
@@ -412,9 +481,26 @@ export class SessionEngine {
         }
       } else result = operation.direction === 'bob' ? await this.runtime.deliverToBob(request) : await this.runtime.deliverToAlice(request);
       requireThat(result.receipt?.status === 'received' && result.receipt.payloadHash === operation.payloadHash, 'RECEIPT_INVALID', 'The recipient confirmation does not match the payload.', 502);
+      if (result.receipt.mappingVersion !== undefined) {
+        const aligned = result.receipt.ontologyTask === 'brief' ? session.briefOntology : session.ontology;
+        requireThat(['schedule', 'brief'].includes(result.receipt.ontologyTask) && aligned?.status === 'accepted'
+          && aligned.registry.mappingVersion === result.receipt.mappingVersion,
+        'RECEIPT_INVALID', 'The recipient confirmation does not match the accepted semantic mapping.', 502);
+      }
       const list = operation.direction === 'bob' ? session.receipts.aliceToBob : session.receipts.bobToAlice;
       if (!list.some(receipt => receipt.operationId === operation.operationId)) {
-        list.push({ operationId: operation.operationId, fields: operation.fields, ...(operation.direction === 'bob' ? { rows: operation.rows, window: operation.window } : { values: operation.values }), payloadHash: operation.payloadHash, status: 'received', receivedAt: result.receipt.receivedAt });
+        list.push({ operationId: operation.operationId, fields: operation.fields, ...(operation.direction === 'bob' ? { rows: operation.rows, window: operation.window } : { values: operation.values }), payloadHash: operation.payloadHash, status: 'received', receivedAt: result.receipt.receivedAt,
+          ...(result.receipt.mappingVersion ? { mappingVersion: result.receipt.mappingVersion, ontologyTask: result.receipt.ontologyTask } : {}) });
+        if (session.ontology) session.ontology = registerOntologyReceipt(session.ontology, {
+          receiptId: operation.operationId, payloadHash: operation.payloadHash,
+          direction: operation.direction === 'bob' ? 'aliceToBob' : 'bobToAlice',
+          fields: operation.fields, rows: operation.rows ?? [], values: operation.values ?? {}
+        });
+        if (session.briefOntology && operation.direction === 'alice' && operation.resource === 'meeting_brief'
+          && operation.fields.every(field => session.briefOntology.task.fields.includes(field))) {
+          session.briefOntology = registerOntologyReceipt(session.briefOntology, { receiptId: operation.operationId,
+            payloadHash: operation.payloadHash, direction: 'bobToAlice', fields: operation.fields, values: operation.values });
+        }
         await this.event(session, 'delivery', { fields: operation.fields, window: operation.window, recipient: operation.direction === 'bob' ? 'Bob' : 'Alice', operationId: operation.operationId, payloadHash: operation.payloadHash });
       }
       if (session.pendingDelivery === operation) session.pendingDelivery = null;
@@ -433,15 +519,28 @@ export class SessionEngine {
     const generation = session.interruptGeneration;
     if (!next || !this.planningCurrent(session, generation)) return;
     try {
+      if (next === 'alignment') {
+        const result = await this.runtime.negotiateOntology({ sessionId: session.id, epoch: session.epoch,
+          dialogue: session.alignmentCandidate, liveProposal: session.mode === 'live' });
+        if (!this.planningCurrent(session, generation) || session.stopped) return;
+        session.ontology = result.dialogue;
+        if (result.protocol) session.ontology.protocol = result.protocol;
+        session.alignmentCandidate = null; session.continuation = null;
+        await this.event(session, 'ontology_negotiated', { actor: 'Bob', reason: session.ontology.status,
+          mappingVersion: session.ontology.registry.mappingVersion, moduleIds: session.ontology.selectedModules.map(item => item.id) });
+        if (session.ontology.status === 'rejected') await this.complete(session, 'boundary_kept', null, 'alignment_rejected');
+        else { session.stage = 'initial'; session.savedStage = null; this.message(session, 'system', 'The task-scoped ontology mappings were accepted by both agents. Choose a separate information-sharing scope.'); }
+        return;
+      }
       if (next === 'intro') {
         const result = await this.runtime.planAlice({ sessionId: session.id, epoch: session.epoch, purpose: 'intro', mode: session.mode });
         if (!this.planningCurrent(session, generation)) return;
         this.message(session, 'Alice', result.message, 'agent');
-        session.continuation = null; session.stage = 'initial'; session.savedStage = null;
+        session.continuation = null; session.stage = session.ontology?.status === 'accepted' ? 'initial' : 'alignment'; session.savedStage = null;
         return;
       }
       if (next === 'done') { await this.complete(session, session.preparedMeeting ? 'arranged' : 'boundary_kept'); return; }
-      if (next === 'boundary') { await this.complete(session, 'boundary_kept', null); return; }
+      if (next === 'boundary') { await this.complete(session, 'boundary_kept', null, 'confirmation_incomplete'); return; }
       if (next === 'after_availability') {
         if (!session.config.response.offerBrief || !session.config.tools.capabilities.includes('share_brief')) { await this.complete(session, 'arranged'); return; }
         const fields = Object.keys(session.config.data.brief);
@@ -462,12 +561,16 @@ export class SessionEngine {
       const action = result.action;
       requireThat(action && ['request_more', 'meeting', 'no_match'].includes(action.type), 'INVALID_OUTPUT', 'Bob proposed an invalid action.', 502);
       if (action.type === 'request_more') {
+        const covered = new Set(session.receipts.aliceToBob.flatMap(receipt => Array.isArray(receipt.window) ? receipt.window : policyDays(receipt.window ?? 'none')));
+        const days = [...new Set(session.config.data.availableTimes.map(slot => slot.day))].filter(day => DAYS.includes(day) && !covered.has(day));
+        if (!days.length) { await this.complete(session, 'boundary_kept', null, 'no_common_time'); return; }
+        session.additionalRequest = { days, fields: ['day', 'time', 'status'], reason: 'no_match' };
         session.stage = 'additional'; session.savedStage = null; session.continuation = null;
-        this.message(session, 'Bob', 'There is no common time in the received scope. Would you share Thursday free times, or a full-week snapshot? Keeping the current boundary is also valid.', 'request');
+        this.message(session, 'Bob', `There is no common time in the received scope. Would you share free times for ${days.join(', ')}, or a full-week snapshot? Keeping the current boundary is also valid.`, 'request');
         await this.event(session, 'request', { actor: 'Bob', stage: 'additional', reason: 'no_match' });
       } else if (action.type === 'no_match') {
         this.message(session, 'Bob', 'There is still no common time in the received scope.');
-        await this.complete(session, 'boundary_kept', null);
+        await this.complete(session, 'boundary_kept', null, 'no_common_time');
       } else {
         requireThat(session.config.tools.capabilities.includes('send_scoped_reply'), 'TOOL_DISABLED', 'Bob’s scoped reply tool is disabled.', 409);
         session.preparedMeeting = clone(action.meeting);
@@ -497,7 +600,7 @@ export class SessionEngine {
     if (!session.config.permissions.askAdminForNewScope) {
       this.message(session, 'Bob', 'Bob’s current policy does not allow this sharing.');
       session.continuation = proposal.next;
-      if (proposal.resource === 'availability') await this.complete(session, 'boundary_kept', null); else await this.continuePlan(session);
+      if (proposal.resource === 'availability') await this.complete(session, 'boundary_kept', null, 'bob_permission_denied'); else await this.continuePlan(session);
       return;
     }
     const approval = { id: randomUUID(), owner: 'Bob', sessionId: session.id, epoch: session.epoch, actionId: `${session.id}:bob:${++session.requestSequence}`, kind: proposal.resource, summary: proposal.summary, recipient: 'Alice', purpose: proposal.purpose, resource: proposal.resource, fields: clone(proposal.fields), values: clone(proposal.values), payloadHash, policyRevision: session.configRevision, status: 'pending', expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(), reason: 'scope_not_pre_authorized', next: proposal.next, requestedAt: Date.now() };
@@ -529,7 +632,7 @@ export class SessionEngine {
       if (input.decision === 'deny') {
         approval.status = 'denied'; session.waiting = null;
         this.message(session, 'system', 'Bob’s owner declined this sharing.');
-        if (approval.resource === 'availability') await this.complete(session, 'boundary_kept', null);
+        if (approval.resource === 'availability') await this.complete(session, 'boundary_kept', null, 'bob_permission_denied');
         else { session.continuation = approval.next; await this.continuePlan(session); }
       } else {
         const fields = input.fields ?? approval.fields;
@@ -558,7 +661,9 @@ export class SessionEngine {
       const cancelled = this.interruptPlanning(session, 'reset');
       const result = (async () => {
         await this.lock(session, async () => { await cancelled; await this.event(session, 'admin_intervention', { action: 'reset', actor: 'admin' }); await this.remove(session); });
-        return this.create({ mode, researchConsent: false });
+        return this.create({ mode, researchConsent: false, alignmentReview: session.alignmentReview,
+          ontologyScenario: session.ontology?.scenario ?? 'distinct',
+          task: { type: 'schedule', durationMinutes: session.ontology?.task.durationMinutes ?? 30 } });
       })();
       session.resetPromise = result;
       return result;

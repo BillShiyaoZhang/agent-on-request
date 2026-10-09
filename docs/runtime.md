@@ -4,15 +4,17 @@ Node.js 26 or newer is required. `npm start` always creates two local child proc
 
 ## Isolation boundary
 
-Workers start with Node's permission model and exact read allowlists for `agent-worker.mjs` and `runtime-helpers.mjs`. They have no filesystem write, network, child-process, worker-thread, native-addon or Inspector permissions. String code generation, experimental SQLite/FFI and global module search are disabled. Only a small platform/locale environment whitelist and Agent-specific IPC credentials are passed; provider keys and endpoint URLs are never passed to Workers. Missing network permission support fails startup explicitly.
+Workers start with Node's permission model and exact read allowlists for `agent-worker.mjs`, `runtime-helpers.mjs` and `ontology-dialogue.mjs`. They have no filesystem write, network, child-process, worker-thread, native-addon or Inspector permissions. String code generation, experimental SQLite/FFI and global module search are disabled. Only a small platform/locale environment whitelist and Agent-specific IPC credentials are passed; provider keys and endpoint URLs are never passed to Workers. Missing network permission support fails startup explicitly.
 
 These controls restrict the trusted, fixed Worker implementation. They are not an OS container or a hostile-code sandbox: [Node's permission documentation](https://nodejs.org/api/permissions.html) explicitly limits that guarantee. The harness does not run model-produced code or arbitrary user tools.
 
 Alice receives her own initialized KG, fictional calendar, skills and authorization profile. Bob receives his own initialized KG, profile and synthetic configuration. Neither receives the other's initial private profile. Alice rows enter Bob's context through an exact authorized projection and confirmed delivery. Both Agents use real local IPC and separate processes in Controlled and Live modes.
 
+Each worker starts with its own versioned ontology profile. Peer task modules are delivered through the signed ontology protocol rather than injecting a complete shared private profile during initialization. The worker code knows the supported fictional schema families so it can validate disclosed modules; this is a bounded demonstration, not unknown-ontology discovery.
+
 ## Purpose-built harness
 
-The harness consists of the session controller, isolated Agent planners, typed proposals, registered operations, permission gates and receipt checks. It is a bounded event workflow. Each planning stage makes one model request (plus its configured retry budget), obtains one structured proposal, and returns to the controller. The `submit_proposal` function describes proposal data; calling it does not execute an operation. No tool-results continuation history is needed by this single-call design.
+The harness consists of the session controller, isolated Agent planners, task working ontologies, accepted mapping/received-fact registries, typed proposals, registered operations, permission gates and receipt checks. It is a bounded event workflow. Each planning stage makes one model request (plus its configured retry budget), obtains one structured proposal, and returns to the controller. The `submit_proposal` function describes proposal data; calling it does not execute an operation. No tool-results continuation history is needed by this single-call design.
 
 ```mermaid
 flowchart TD
@@ -36,6 +38,16 @@ flowchart TD
 
 Every Agent has an ephemeral Ed25519 identity. The source signs the exact outgoing operation; the receiver verifies the paired identity and signs its immutable receipt. The manager checks the session, epoch, roles, operation ID, payload hash and payload digest. Controller/Worker RPC and model request/response/cancel envelopes are HMAC authenticated; model envelopes also bind request ID and model revision. The parent accepts the role assigned to its Worker connection, never a role selected by a model payload.
 
+## Signed task ontology exchange
+
+The ontology channel exchanges six actual signed messages: Alice's working modules, Bob's working modules, Alice's mapping proposal, Bob's decision and both agents' acknowledgements. Each recipient verifies the paired signature and signs a receipt. The protocol binds session, epoch, round identifier/revision, ordered sequence, preceding message hash and exact payload digest. Repeated identical steps are idempotent; stale rounds, conflicting content, invalid order, altered modules and unsupported candidates fail explicitly.
+
+The conceptual transcript uses join/pick/propose/decide/end/close and records the owner clarification separately from signed execution evidence. Workers register an alignment only after both acknowledgements and a matching task/schema/version. Data messages name their accepted task and mapping version; recipients reject unsupported or stale mappings. A verified Alice data receipt is converted into Bob's numeric-weekday/minute/eligibility facts, and meeting queries consume that registry. Pending or rejected alignment cannot support calendar interpretation.
+
+Guided/Controlled uses deterministic candidate selection with this same signed protocol. Every browser-started Controlled/Live round requests alignment review. In Live, Alice's model selects candidate IDs or none, then Bob's model makes an independent decision. The only model result fields are `message`, `decision` and `selectedMappingIds`; arbitrary transformation code, out-of-module correspondences and grant fields are invalid. Compatibility API callers that omit `alignmentReview` retain a known Guided mapping for an unambiguous quick start, including in a Live scheduling session. A separate briefing task selects its own module after an actual outbound field scope has been authorized. Replay performs no actual ontology exchange.
+
+The paper-inspired working subset is not a data authorization. Conditional mapping and owner clarification extend the papers' equivalence scope. Publishing selected fictional definitions, interpreting received values, approving disclosure and confirming receipt remain separate operations. See [ontology-dialogue.md](ontology-dialogue.md) for the O/W/AL/N/K correspondence and adaptation boundaries.
+
 ## Model broker and fixed rounds
 
 The administrator configures both Agents from Model configuration. The default is China Token Plan with `MiniMax-M3`, using the subscription Key entered there. Only the parent service performs provider HTTP requests. Each round captures the current provider, model revision, per-role settings and Key in parent memory; Workers receive only sanitized availability, model name, timeout and role settings. Saving global models does not mutate existing rounds or cancel their planning. A new round captures the new revision.
@@ -44,7 +56,7 @@ The model broker makes exactly one attempt per request. A Worker controls its ti
 
 MiniMax uses function proposals, `max_completion_tokens`, optional M3 `thinking`, and separated reasoning. The parser accepts a single registered function call or final JSON, rejects truncated/refused/invalid outputs and drops reasoning. The advanced compatible-provider option retains JSON-object mode for test services. See [MiniMax integration](minimax.md) for the exact defaults and official sources.
 
-Initial/additional Bob planning cannot see his private brief body. Brief planning sees Bob's own configured brief; public Bob messages remain fixed safe summaries until actual fields are authorized. Meeting proposals must be a 30-minute interval within both a received Alice free interval and Bob's own availability. Invalid proposals never execute or silently become Controlled success.
+Initial/additional Bob planning cannot see his private brief body. Brief planning sees Bob's own configured brief; public Bob messages remain fixed safe summaries until actual fields are authorized. Meeting proposals must fit the registered task duration within both a mapped received Alice interval and Bob's own availability. The interface offers 30, 45 or 60 minutes; the API additionally supports 15 minutes. The default task is 30 minutes. Missing day/time/status does not imply availability. Invalid proposals never execute or silently become Controlled success.
 
 Controlled uses rules and never contacts a provider, even if a Key is configured. Replay displays a labeled synthetic trajectory and creates no real delivery or research record. Choosing Live discloses model traffic separately from optional research consent.
 
@@ -57,6 +69,8 @@ Identical operation IDs and exact payloads return the original immutable receipt
 End, stop sharing, pause, current-round configuration changes, reset and shutdown preempt in-flight planning before waiting for the session queue. Restrictive participant intents first validate authentication, request ID, exact intent digest and current version. The controller advances an interruption generation, cancels Worker model calls, and ignores results from older generations. Cleanup or the new configuration then enters the queue. Real receipts arriving from an already-authorized delivery remain historical facts; cancellation never claims they were deleted. Pause preserves its continuation for an explicit resume. The browser keeps unresolved operation IDs and ignores older state responses, so a late sharing response cannot revive an ended round.
 
 `status()` reports local transport and permission metadata. `close()` clears active contexts, terminates both processes and removes temporary directories. The old authenticated HTTP peer adapter remains for library compatibility tests; the event server ignores remote-Bob settings and Live remote operation is not supported.
+
+The central controller is trusted and still manages both local stakeholders. Process separation, exact message scopes and signatures demonstrate implementation boundaries, not a formal privacy guarantee or independently administered cross-machine deployment. HTTP owner views exclude peer private state; authenticated observer views intentionally inspect synthetic state for research. The open-controls local demo is not a multi-tenant security configuration.
 
 ## Verification
 

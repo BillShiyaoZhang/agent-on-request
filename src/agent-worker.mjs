@@ -5,6 +5,8 @@ import {
   RuntimeError, invariant, canonical, hashPayload, signObject, verifyObject,
   macObject, verifyMac, errorJSON, fromErrorJSON, validateSessionRef, validateOperation, WORKER_RPC_METHODS,
 } from './runtime-helpers.mjs';
+import { ontologyDefinitions, createOntologyDialogue, startOntologyDialogue, defaultOntologyProposal, validateOntologyProposal,
+  resolveOntologyDialogue, registerOntologyReceipt, queryRegisteredMeetingSlots } from './ontology-dialogue.mjs';
 
 // Windows may inject PATH into a child even when fork receives an explicit
 // environment allowlist. Remove it inside the paired worker as well.
@@ -16,6 +18,11 @@ const clone = value => structuredClone(value);
 const isFree = row => String(row.status).toLowerCase() === 'free';
 const normalizedTime = value => String(value).replace(/[–—−]/g, '-').replace(/\s/g, '');
 const formatMinute = minute => `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
+const ontologyMove = (kind, sender) => kind === 'module' ? sender === 'Alice' ? 'join' : 'pick'
+  : kind === 'proposal' ? 'propose' : kind === 'decision' ? 'decide' : kind === 'acknowledgment' ? sender === 'Alice' ? 'end' : 'close' : null;
+const ontologyStep = (kind, sender) => kind === 'module' ? sender === 'Alice' ? 1 : 2
+  : kind === 'proposal' && sender === 'Alice' ? 3 : kind === 'decision' && sender === 'Bob' ? 4
+    : kind === 'acknowledgment' ? sender === 'Alice' ? 5 : 6 : null;
 
 function interval(value) {
   const match = /^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/.exec(normalizedTime(value));
@@ -27,14 +34,14 @@ function interval(value) {
   return end > start ? { start, end } : null;
 }
 
-function withinTime(proposed, available, requireThirtyMinutes = false) {
+function withinTime(proposed, available, requiredMinutes = null) {
   const part = interval(proposed);
   const whole = interval(available);
   return Boolean(part && whole && part.start >= whole.start && part.end <= whole.end
-    && (!requireThirtyMinutes || part.end - part.start === 30));
+    && (!requiredMinutes || part.end - part.start === (requiredMinutes === true ? 30 : requiredMinutes)));
 }
 
-function projectedCalendar(calendar, stage, choice, profile) {
+function projectedCalendar(calendar, stage, choice, profile, requestedScope) {
   const initial = stage === 'initial';
   invariant(initial || stage === 'additional', 'INVALID_STAGE', 'Unknown projection stage.');
   invariant((initial ? ['free', 'busy', 'full', 'none'] : ['keep', 'narrow', 'week']).includes(choice),
@@ -42,9 +49,11 @@ function projectedCalendar(calendar, stage, choice, profile) {
   if (choice === 'none' || choice === 'keep') return { rows: [], fields: [], window: 'none' };
   const requestedFields = choice === 'full' || choice === 'week' ? FULL_FIELDS : SHARED_FIELDS;
   const fields = profile ? requestedFields.filter(field => profile.authorization.fields.includes(field)) : requestedFields;
-  const requestedDays = initial ? ['Tue', 'Wed'] : choice === 'narrow' ? ['Thu'] : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const requestedDays = requestedScope ?? (initial ? ['Tue', 'Wed'] : choice === 'narrow' ? ['Thu'] : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
+  invariant(Array.isArray(requestedDays) && requestedDays.length <= 7 && new Set(requestedDays).size === requestedDays.length
+    && requestedDays.every(day => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].includes(day)), 'INVALID_DAYS', 'Calendar projection days must be unique weekdays.');
   const days = profile ? requestedDays.filter(day => profile.authorization.windows.includes(day)) : requestedDays;
-  const window = days.length === requestedDays.length ? (initial ? 'Tue–Wed' : choice === 'narrow' ? 'Thu' : 'Mon–Sun') : days.length ? days : 'none';
+  const window = days.length === requestedDays.length ? (requestedScope ? days.length === 1 ? days[0] : days : initial ? 'Tue–Wed' : choice === 'narrow' ? 'Thu' : 'Mon–Sun') : days.length ? days : 'none';
   invariant(!profile || profile.skills.includes('read_synthetic_calendar') && profile.skills.includes('preview_scoped_calendar'), 'TOOL_DISABLED', 'Alice calendar reading and preview skills are required.', 403);
   const rows = calendar.filter(row => {
     if (!days.includes(row.day) || !fields.length) return false;
@@ -79,25 +88,73 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
   }
 
   function intersections(state) {
-    const rows = [...state.received.values()].flatMap(item => item.payload.rows || []).filter(isFree);
-    const own = state.bobConfig?.data?.availableTimes || [];
-    const seen = new Set();
-    const matches = [];
-    for (const row of rows) for (const slot of own) {
-      if (slot.day !== row.day) continue;
-      const a = interval(row.time);
-      const b = interval(slot.time);
-      if (!a || !b) continue;
-      const start = Math.max(a.start, b.start);
-      const end = Math.min(a.end, b.end);
-      if (end - start < 30) continue;
-      const time = `${formatMinute(start)}–${formatMinute(end)}`;
-      const key = canonical([row.day, time]);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      matches.push({ day: row.day, time });
+    const dialogue = state.ontologies.get('schedule');
+    invariant(dialogue?.status === 'accepted', 'ONTOLOGY_NOT_ALIGNED', 'Bob must receive and accept a task mapping before planning a meeting.', 409);
+    return queryRegisteredMeetingSlots({ dialogue, availableTimes: state.bobConfig?.data?.availableTimes || [] });
+  }
+
+  function selectedOwnModule(state) {
+    const suffixes = state.ontologyContext.task.type === 'brief' ? [':brief'] : [':time', ':status'];
+    return state.ownOntology.modules.filter(item => suffixes.some(suffix => item.id.endsWith(suffix)));
+  }
+
+  function ontologyRound(state, args) {
+    invariant(typeof args.roundId === 'string' && /^[a-f0-9]{64}$/.test(args.roundId)
+      && Number.isSafeInteger(args.roundRevision) && args.roundRevision > 0, 'ONTOLOGY_PROTOCOL', 'The dialogue must identify a bounded versioned round.');
+    if (!state.ontologyRound || args.roundRevision > state.ontologyRound.revision) {
+      if (args.ontologyContext) {
+        invariant(args.ontologyContext.scenario === state.ontologyContext.scenario, 'ONTOLOGY_STALE_VERSION', 'An ontology scenario cannot change during a session.', 409);
+        const validated = startOntologyDialogue({ ...args.ontologyContext, mode: state.mode });
+        state.ontologyContext = { scenario: validated.scenario, task: validated.task };
+      }
+      state.ontologyRound = { id: args.roundId, revision: args.roundRevision, sequence: 0, lastHash: null,
+        messages: new Map(), peerModules: null, proposal: null, decision: null, ownAcknowledged: false, peerAcknowledged: false };
     }
-    return matches;
+    invariant(state.ontologyRound.id === args.roundId && state.ontologyRound.revision === args.roundRevision,
+      'ONTOLOGY_STALE_VERSION', 'This ontology message belongs to an old or conflicting dialogue.', 409);
+    return state.ontologyRound;
+  }
+
+  function signOntology(state, args, kind, payload) {
+    const round = ontologyRound(state, args);
+    invariant(args.sequence === ontologyStep(kind, role), 'ONTOLOGY_PROTOCOL_ORDER', 'This agent may not perform that dialogue move at this sequence.', 409);
+    const previous = round.messages.get(args.sequence);
+    if (previous) {
+      invariant(previous.envelope.body.from === role && previous.envelope.body.kind === kind
+        && canonical(previous.envelope.body.payload) === canonical(payload), 'ONTOLOGY_PROTOCOL_CONFLICT', 'This dialogue step already records different content.', 409);
+      return clone(previous.envelope);
+    }
+    invariant(Number.isSafeInteger(args.sequence) && args.sequence === round.sequence + 1 && args.sequence <= 100
+      && args.previousHash === round.lastHash, 'ONTOLOGY_PROTOCOL_ORDER', 'The signed dialogue sequence or preceding hash is invalid.', 409);
+    const body = { version: 1, channel: 'ontology', from: role, to: peerRole, sessionId: state.sessionId, epoch: state.epoch,
+      roundId: round.id, roundRevision: round.revision, sequence: args.sequence, previousHash: round.lastHash,
+      kind, move: ontologyMove(kind, role), payload: clone(payload), payloadHash: hashPayload(payload) };
+    const envelope = { body, signature: signObject(body, privateKey) };
+    round.sequence = body.sequence; round.lastHash = hashPayload(body);
+    round.messages.set(body.sequence, { envelope: clone(envelope) });
+    return envelope;
+  }
+
+  function modelSelection(output, candidates) {
+    invariant(output && ['accept', 'reject', 'none'].includes(output.decision)
+      && Array.isArray(output.selectedMappingIds) && new Set(output.selectedMappingIds).size === output.selectedMappingIds.length
+      && output.selectedMappingIds.every(id => candidates.some(item => item.id === id))
+      && Object.keys(output).every(key => ['message', 'decision', 'selectedMappingIds'].includes(key)),
+      'MODEL_INVALID_OUTPUT', 'The model must select registered mapping identifiers or explicitly choose none.', 502);
+    const message = messageFrom(output);
+    invariant(output.decision === 'accept' || output.selectedMappingIds.length === 0,
+      'MODEL_INVALID_OUTPUT', 'A rejected or none proposal cannot include accepted mappings.', 502);
+    const accepted = output.decision === 'accept' && output.selectedMappingIds.length === candidates.length;
+    return { decision: accepted ? 'accepted' : 'rejected', message,
+      selectedMappingIds: accepted ? candidates.map(item => item.id) : [],
+      reasonCode: accepted ? 'MODEL_ACCEPTED_REGISTERED_MAPPING' : output.decision === 'none' ? 'MODEL_CHOSE_NONE' : 'MODEL_REJECTED_OR_INCOMPLETE_MAPPING' };
+  }
+
+  function agreementDialogue(state, round) {
+    const pending = startOntologyDialogue({ ...state.ontologyContext, mode: state.mode });
+    return resolveOntologyDialogue(pending, { decision: round.decision.decision === 'accepted' ? 'accept' : 'reject',
+      ...(state.ontologyContext.task.type === 'schedule' && round.decision.decision === 'accepted'
+        ? { calendarFreeMeansBookable: round.proposal.interpretation.calendarFreeMeansBookable } : {}) });
   }
 
   async function oneModelCall(state, system, context, runtime = {}) {
@@ -184,20 +241,161 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
       if (args.mode === 'live') invariant(modelSnapshot.available, 'MODEL_UNAVAILABLE', `${role} has no configured live provider.`, 503);
       const calendar = role === 'Alice' ? (Array.isArray(args.aliceData) ? args.aliceData : args.aliceData?.calendar) : [];
       invariant(role !== 'Alice' || Array.isArray(calendar), 'INVALID_FIXTURE', 'Alice requires a synthetic calendar array.');
+      const ontologyContext = { scenario: args.ontologyContext?.scenario ?? 'distinct', task: args.ontologyContext?.task ?? { type: 'schedule', durationMinutes: 30 } };
+      const ownOntology = ontologyDefinitions({ scenario: ontologyContext.scenario })[role];
+      invariant(!args.ownOntology || canonical(args.ownOntology) === canonical(ownOntology), 'ISOLATION_VIOLATION', 'Initialize each worker with exactly its own versioned ontology profile.');
+      invariant(args.ontologyDialogue === undefined, 'ISOLATION_VIOLATION', 'A worker receives the peer working ontology only through signed dialogue messages.');
       const state = { sessionId: args.sessionId, epoch: args.epoch, mode: args.mode,
         modelRevision: args.modelRevision ?? 1, modelSnapshot,
         modelSettings: args.modelSettings ? clone(args.modelSettings) : null,
         peerPublicKey: args.peerPublicKey, initialHash,
         calendar: clone(calendar), bobConfig: role === 'Bob' ? clone(args.bobConfig) : undefined,
         agentProfile: args.agentProfile ? clone(args.agentProfile) : null, initializedAt: Date.now(),
-        configRevision: args.configRevision, received: new Map(), outgoing: new Map(), modelCalls: new Set() };
+        configRevision: args.configRevision, received: new Map(), outgoing: new Map(), modelCalls: new Set(), projections: new Map(),
+        ownOntology: clone(ownOntology), ontologyContext,
+        // Direct library callers predate the dialogue API. Product managers always supply
+        // ontologyContext and execute the signed two-worker negotiation before any query.
+        ontologies: new Map(args.ontologyContext ? [] : [['schedule', createOntologyDialogue({ mode: args.mode })]]),
+        legacyLocalMapping: !args.ontologyContext, ontologyHistory: new Map(), ontologyRound: null };
+      for (const dialogue of state.ontologies.values()) state.ontologyHistory.set(dialogue.task.id, dialogue);
       sessions.set(args.sessionId, state);
       return { ready: true, role, epoch: args.epoch };
+    },
+    ontologyModule(args) {
+      const state = current(args);
+      const round = ontologyRound(state, args);
+      invariant(args.authorized === true, 'ONTOLOGY_DISCLOSURE_NOT_AUTHORIZED', 'Publishing a working ontology needs a separate explicit decision.', 403);
+      return { envelope: signOntology(state, args, 'module', { ontologyId: state.ownOntology.id, ontologyVersion: state.ownOntology.version,
+        task: clone(state.ontologyContext.task), modules: clone(selectedOwnModule(state)) }) };
+    },
+    receiveOntology(args) {
+      const state = current(args);
+      const { body, signature } = args.envelope || {};
+      invariant(body && verifyObject(body, signature, state.peerPublicKey), 'INVALID_PEER_SIGNATURE', 'The ontology message signature is invalid.', 401);
+      invariant(body.version === 1 && body.channel === 'ontology' && body.from === peerRole && body.to === role
+        && body.sessionId === state.sessionId && body.epoch === state.epoch && body.payloadHash === hashPayload(body.payload),
+        'ONTOLOGY_PROTOCOL', 'The ontology message has the wrong identity, epoch or content digest.', 409);
+      invariant(body.move === ontologyMove(body.kind, body.from), 'ONTOLOGY_PROTOCOL', 'The signed dialogue move does not match its sender and protocol kind.', 409);
+      invariant(body.sequence === ontologyStep(body.kind, body.from), 'ONTOLOGY_PROTOCOL_ORDER', 'The signed dialogue move appears in the wrong protocol stage.', 409);
+      const round = ontologyRound(state, { ...body, ontologyContext: args.ontologyContext });
+      const previous = round.messages.get(body.sequence);
+      if (previous) {
+        invariant(canonical(previous.envelope) === canonical(args.envelope), 'ONTOLOGY_PROTOCOL_CONFLICT', 'A signed dialogue step was reused with different content.', 409);
+        return clone(previous.receipt);
+      }
+      invariant(body.sequence === round.sequence + 1 && body.previousHash === round.lastHash, 'ONTOLOGY_PROTOCOL_ORDER', 'The ontology message arrived out of order.', 409);
+      if (body.kind === 'module') {
+        invariant(canonical(body.payload.task) === canonical(state.ontologyContext.task), 'ONTOLOGY_TASK_MISMATCH', 'Working ontologies must refer to the same registered task.', 409);
+        const peerDefinition = ontologyDefinitions({ scenario: state.ontologyContext.scenario })[peerRole];
+        invariant(body.payload.ontologyId === peerDefinition.id && body.payload.ontologyVersion === peerDefinition.version,
+          'ONTOLOGY_MODULE_CHANGED', 'The working ontology names a different published version.', 409);
+        const expected = startOntologyDialogue({ ...state.ontologyContext, mode: state.mode }).selectedModules.filter(item => item.owner === peerRole);
+        invariant(canonical(body.payload.modules) === canonical(expected), 'ONTOLOGY_MODULE_CHANGED', 'The published working ontology does not match its versioned task subset.', 409);
+        round.peerModules = clone(body.payload.modules);
+      } else if (body.kind === 'proposal') {
+        invariant(role === 'Bob' && round.peerModules && body.sequence === 3, 'ONTOLOGY_PROTOCOL_ORDER', 'Bob needs the signed working ontology before receiving a proposal.', 409);
+        const verified = validateOntologyProposal({ mappings: body.payload.candidates.map(({ source, target, relation, transform }) => ({ source, target, relation, transform })) }, state.ontologyContext);
+        invariant(canonical(verified) === canonical(body.payload.candidates), 'ONTOLOGY_INVALID_PROPOSAL', 'Mapping explanations and identifiers must match the disclosed ontology definitions.', 409);
+        invariant(['accepted', 'rejected'].includes(body.payload.decision)
+          && typeof body.payload.interpretation?.authorizesDisclosure === 'boolean' && body.payload.interpretation.authorizesDisclosure === false,
+          'ONTOLOGY_PROTOCOL', 'A semantic proposal cannot grant disclosure permission.');
+        round.proposal = clone(body.payload);
+      } else if (body.kind === 'decision') {
+        invariant(role === 'Alice' && round.proposal && body.sequence === 4, 'ONTOLOGY_PROTOCOL_ORDER', 'Alice needs her original signed proposal before a decision.', 409);
+        invariant(['accepted', 'rejected'].includes(body.payload.decision)
+          && canonical(body.payload.selectedMappingIds) === canonical(body.payload.decision === 'accepted' ? round.proposal.candidates.map(item => item.id) : []),
+          'ONTOLOGY_INVALID_PROPOSAL', 'Bob accepted unsupported or incomplete semantic mappings.', 409);
+        round.decision = clone(body.payload);
+      } else if (body.kind === 'acknowledgment') {
+        invariant(round.decision && body.payload.agreementHash === hashPayload({ decision: round.decision.decision,
+          mappingVersion: agreementDialogue(state, round).registry.mappingVersion }), 'ONTOLOGY_PROTOCOL', 'The peer acknowledgment does not match the agreed mapping version.', 409);
+        round.peerAcknowledged = true;
+      } else invariant(false, 'ONTOLOGY_PROTOCOL', 'Unsupported ontology dialogue move.');
+      round.sequence = body.sequence; round.lastHash = hashPayload(body);
+      const proof = { version: 1, channel: 'ontology_receipt', sessionId: state.sessionId, epoch: state.epoch, roundId: round.id,
+        roundRevision: round.revision, sequence: body.sequence, from: role, to: peerRole, envelopeHash: hashPayload(body), status: 'received' };
+      const receipt = { proof: { body: proof, signature: signObject(proof, privateKey) } };
+      round.messages.set(body.sequence, { envelope: clone(args.envelope), receipt: clone(receipt) });
+      return receipt;
+    },
+    async proposeOntology(args) {
+      invariant(role === 'Alice', 'WRONG_AGENT', 'Alice proposes the correspondences for this dialogue.', 403);
+      const state = current(args), round = ontologyRound(state, args);
+      invariant(round.peerModules, 'ONTOLOGY_PROTOCOL_ORDER', 'Alice must receive Bob’s task subset before proposing correspondences.', 409);
+      const candidates = validateOntologyProposal(defaultOntologyProposal(state.ontologyContext), state.ontologyContext);
+      let selection = { decision: args.decision === 'rejected' ? 'rejected' : 'accepted', selectedMappingIds: args.decision === 'rejected' ? [] : candidates.map(item => item.id),
+        message: 'Rule selector proposes registered correspondences inside the disclosed task modules.' };
+      if (args.liveProposal && selection.decision === 'accepted') {
+        const revision = state.configRevision;
+        const output = await callModel(state, 'You are Alice selecting task-scoped ontology correspondences. Choose only supplied candidate identifiers or none. '
+          + 'Return message, decision and selectedMappingIds. Accept only a complete semantically sound task mapping. A mapping never authorizes data disclosure.',
+        { purpose: 'ontology_alignment', stage: 'propose', task: clone(state.ontologyContext.task),
+          ownWorkingOntology: clone(selectedOwnModule(state)), receivedWorkingOntology: clone(round.peerModules), candidates: clone(candidates), interpretation: clone(args.interpretation) });
+        assertStillCurrent(args, state, revision);
+        invariant(state.ontologyRound === round, 'ONTOLOGY_STALE_VERSION', 'The ontology dialogue changed while its model was selecting.', 409);
+        selection = modelSelection(output, candidates);
+      }
+      if (selection.decision === 'rejected') selection.selectedMappingIds = [];
+      const payload = { candidates, interpretation: clone(args.interpretation), ...selection, selector: args.liveProposal ? 'live' : 'guided' };
+      round.proposal = clone(payload);
+      return { envelope: signOntology(state, args, 'proposal', payload), selection };
+    },
+    async decideOntology(args) {
+      invariant(role === 'Bob', 'WRONG_AGENT', 'Bob independently decides the received correspondence proposal.', 403);
+      const state = current(args), round = ontologyRound(state, args);
+      invariant(round.proposal && round.peerModules, 'ONTOLOGY_PROTOCOL_ORDER', 'Bob must receive the signed proposal and working subset before deciding.', 409);
+      const interpretationValid = state.ontologyContext.task.type !== 'schedule' || round.proposal.interpretation.calendarFreeMeansBookable === true;
+      let selection = { decision: round.proposal.decision === 'accepted' && interpretationValid ? 'accepted' : 'rejected',
+        selectedMappingIds: round.proposal.candidates.map(item => item.id), message: 'Bob verifies the definitions, registered transforms and task-scoped owner interpretation.', selector: 'guided' };
+      if (args.liveProposal && selection.decision === 'accepted') {
+        const revision = state.configRevision;
+        const output = await callModel(state, 'You are Bob independently reviewing Alice’s signed correspondence proposal. '
+          + 'Choose only supplied candidate identifiers or none. Return message, decision and selectedMappingIds. '
+          + 'Calendar occupancy does not imply invitation permission without the supplied explicit task-scoped interpretation. Mapping acceptance never permits data disclosure.',
+        { purpose: 'ontology_alignment', stage: 'decide', task: clone(state.ontologyContext.task), ownWorkingOntology: clone(selectedOwnModule(state)),
+          receivedWorkingOntology: clone(round.peerModules), candidates: clone(round.proposal.candidates), interpretation: clone(round.proposal.interpretation) });
+        assertStillCurrent(args, state, revision);
+        invariant(state.ontologyRound === round, 'ONTOLOGY_STALE_VERSION', 'The ontology dialogue changed while Bob was reviewing.', 409);
+        selection = { ...modelSelection(output, round.proposal.candidates), selector: 'live' };
+      }
+      if (selection.decision === 'rejected') selection.selectedMappingIds = [];
+      round.decision = clone(selection);
+      return { envelope: signOntology(state, args, 'decision', selection), selection };
+    },
+    acknowledgeOntology(args) {
+      const state = current(args), round = ontologyRound(state, args);
+      invariant(round.decision, 'ONTOLOGY_PROTOCOL_ORDER', 'A semantic decision is required before acknowledgment.', 409);
+      const dialogue = agreementDialogue(state, round);
+      const payload = { decision: dialogue.status, mappingVersion: dialogue.registry.mappingVersion,
+        agreementHash: hashPayload({ decision: dialogue.status, mappingVersion: dialogue.registry.mappingVersion }) };
+      round.ownAcknowledged = true;
+      return { envelope: signOntology(state, args, 'acknowledgment', payload) };
+    },
+    updateOntology(args) {
+      const state = current(args), round = ontologyRound(state, args);
+      invariant(round.ownAcknowledged && round.peerAcknowledged, 'ONTOLOGY_NOT_ACKNOWLEDGED', 'Both agents must independently acknowledge the mapping before it becomes usable.', 409);
+      const agreed = agreementDialogue(state, round);
+      invariant(args.dialogue?.status === agreed.status && args.dialogue.registry.mappingVersion === agreed.registry.mappingVersion
+        && canonical(args.dialogue.registry.mappings) === canonical(agreed.registry.mappings)
+        && canonical(args.dialogue.selectedModules) === canonical(agreed.selectedModules), 'ONTOLOGY_STALE_VERSION', 'The registry update differs from the signed agreement.', 409);
+      const previous = state.ontologyHistory.get(agreed.task.id);
+      if (previous?.status === 'accepted') invariant(previous.registry.mappingVersion === agreed.registry.mappingVersion, 'ONTOLOGY_STALE_VERSION', 'A used mapping cannot drift within an active task.', 409);
+      // The controller cannot manufacture or overwrite received semantic facts.
+      const registered = previous?.status === 'accepted' ? previous : agreed;
+      state.ontologies.set(agreed.task.type, registered);
+      state.ontologyHistory.set(agreed.task.id, registered);
+      return { ready: true, role, status: agreed.status, task: agreed.task.type, mappingVersion: agreed.registry.mappingVersion };
+    },
+    ontologyStatus(args) {
+      const state = current(args);
+      return { role, ownOntologyId: state.ownOntology.id, dialogues: Object.fromEntries([...state.ontologies].map(([type, dialogue]) => [type, clone(dialogue)])) };
     },
     projectAlice(args) {
       invariant(role === 'Alice', 'WRONG_AGENT', 'Only Alice can project her own fixture.', 403);
       const state = current(args);
-      return projectedCalendar(state.calendar, args.stage, args.choice, state.agentProfile);
+      const projection = projectedCalendar(state.calendar, args.stage, args.choice, state.agentProfile, args.days);
+      state.projections.set(hashPayload(projection), { stage: args.stage, choice: args.choice, days: clone(args.days) });
+      return projection;
     },
     prepareOutgoing(args) {
       validateOperation(args);
@@ -221,7 +419,9 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
         invariant(args.payloadHash === expected, 'PAYLOAD_HASH_MISMATCH', 'The Alice payload does not match its exact preview hash.', 409);
         const projections = [['initial', 'free'], ['initial', 'busy'], ['initial', 'full'], ['initial', 'none'],
           ['additional', 'keep'], ['additional', 'narrow'], ['additional', 'week']];
-        invariant(projections.some(([stage, choice]) => hashPayload(projectedCalendar(state.calendar, stage, choice, state.agentProfile)) === expected),
+        const recorded = args.projection ?? state.projections.get(expected);
+        const supported = recorded ? hashPayload(projectedCalendar(state.calendar, recorded.stage, recorded.choice, state.agentProfile, recorded.days)) === expected : false;
+        invariant(supported || projections.some(([stage, choice]) => hashPayload(projectedCalendar(state.calendar, stage, choice, state.agentProfile)) === expected),
           'INVALID_PROJECTION', 'Alice can send only an exact supported projection of her own fixture.', 403);
       } else {
         invariant(args.values && typeof args.values === 'object' && !Array.isArray(args.values)
@@ -229,15 +429,23 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
           'INVALID_VALUES', 'Bob outgoing values must exactly match the selected fields.');
         invariant(hashPayload({ fields: args.fields, values: args.values }) === args.payloadHash,
           'PAYLOAD_HASH_MISMATCH', 'The Bob payload does not match its exact content hash.', 409);
-        const ownSources = [state.bobConfig?.data?.brief || {},
-          ...(state.bobConfig?.data?.availableTimes || []).map(slot => ({ ...slot, status: 'Free' }))];
-        invariant(ownSources.some(source => args.fields.every(field => Object.hasOwn(source, field)
-          && (field === 'time' ? withinTime(args.values[field], source[field])
-            : canonical(source[field]) === canonical(args.values[field])))),
+        const briefSource = state.bobConfig?.data?.brief || {};
+        const exactBrief = args.resource !== 'availability' && args.fields.every(field => Object.hasOwn(briefSource, field)
+          && canonical(briefSource[field]) === canonical(args.values[field]));
+        const scopedAvailability = (args.resource === undefined || args.resource === 'availability')
+          && (state.bobConfig?.data?.availableTimes || []).map(slot => ({ ...slot, status: 'Free' })).some(source => args.fields.every(field => Object.hasOwn(source, field)
+            && (field === 'time' ? withinTime(args.values[field], source[field]) : canonical(source[field]) === canonical(args.values[field]))));
+        invariant(exactBrief || scopedAvailability,
           'INVALID_BOB_DATA', 'Bob can send only actual values from his current synthetic data.', 403);
       }
+      const ontologyTask = role === 'Alice' ? 'schedule'
+        : args.fields.length && (args.resource === undefined || args.resource === 'meeting_brief') && args.fields.every(field => ['topic', 'agenda'].includes(field)) ? 'brief'
+          : args.fields.length && (args.resource === undefined || args.resource === 'availability') && args.fields.every(field => SHARED_FIELDS.includes(field)) ? 'schedule' : null;
+      const dialogue = ontologyTask ? state.ontologies.get(ontologyTask) : null;
+      const ontology = dialogue?.status === 'accepted' ? { task: ontologyTask, mappingVersion: dialogue.registry.mappingVersion } : null;
+      invariant(role !== 'Alice' || ontology, 'ONTOLOGY_NOT_ALIGNED', 'Alice can exchange calendar facts only under an accepted mapping.', 409);
       const body = { version: 1, from: role, to: peerRole, sessionId: args.sessionId, epoch: args.epoch,
-        operationId: args.operationId, payload, createdAt: new Date().toISOString() };
+        operationId: args.operationId, payload, ontology, createdAt: new Date().toISOString() };
       const result = { envelope: { body, signature: signObject(body, privateKey) } };
       state.outgoing.set(args.operationId, { digest, result: clone(result) });
       return result;
@@ -251,6 +459,11 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
         'INVALID_PEER_ENVELOPE', 'The message has the wrong sender, recipient or epoch.', 409);
       validateOperation({ ...body, ...body.payload });
       const payload = body.payload;
+      if (body.ontology) {
+        const accepted = [...state.ontologyHistory.values()].find(dialogue => dialogue.task.type === body.ontology.task && dialogue.registry.mappingVersion === body.ontology.mappingVersion);
+        invariant(accepted?.status === 'accepted' && accepted.registry.mappingVersion === body.ontology.mappingVersion,
+          'ONTOLOGY_STALE_VERSION', 'The signed data names a mapping the recipient has not accepted.', 409);
+      } else invariant(role !== 'Bob' || state.legacyLocalMapping, 'ONTOLOGY_NOT_ALIGNED', 'Calendar data requires a signed accepted semantic mapping.', 409);
       invariant(payload.payloadHash === hashPayload(role === 'Bob'
         ? { rows: payload.rows, fields: payload.fields, window: payload.window }
         : { fields: payload.fields, values: payload.values }), 'PAYLOAD_HASH_MISMATCH', 'The signed content hash is invalid.', 409);
@@ -261,10 +474,21 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
         return clone(previous.result);
       }
       const receipt = { operationId: body.operationId, payloadHash: payload.payloadHash,
-        status: 'received', receivedAt: new Date().toISOString() };
+        status: 'received', receivedAt: new Date().toISOString(),
+        ...(body.ontology ? { mappingVersion: body.ontology.mappingVersion, ontologyTask: body.ontology.task } : {}) };
       const proof = { version: 1, sessionId: args.sessionId, epoch: args.epoch,
         sender: peerRole, receiver: role, payloadDigest: digest, ...receipt };
       const result = { receipt, proof: { body: proof, signature: signObject(proof, privateKey) } };
+      const type = role === 'Bob' ? 'schedule' : payload.fields.some(field => ['topic', 'agenda'].includes(field)) ? 'brief' : 'schedule';
+      const dialogue = body.ontology ? [...state.ontologyHistory.values()].find(item => item.registry.mappingVersion === body.ontology.mappingVersion)
+        : role === 'Bob' && state.legacyLocalMapping ? state.ontologies.get('schedule') : null;
+      if (dialogue) {
+        const registered = registerOntologyReceipt(dialogue, { receiptId: receipt.operationId,
+          payloadHash: receipt.payloadHash, direction: role === 'Bob' ? 'aliceToBob' : 'bobToAlice',
+          rows: payload.rows || [], fields: payload.fields, values: payload.values || {} });
+        state.ontologyHistory.set(dialogue.task.id, registered);
+        if (state.ontologies.get(type)?.task.id === dialogue.task.id) state.ontologies.set(type, registered);
+      }
       state.received.set(body.operationId, { digest, payload: clone(payload), result: clone(result) });
       return result;
     },
@@ -291,7 +515,8 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
       const config = state.bobConfig;
       invariant(args.purpose === 'brief' || config.tools?.capabilities?.includes('read_synthetic_calendar'), 'TOOL_DISABLED', 'Bob calendar reading skill is disabled.', 403);
       invariant(args.purpose !== 'brief' || config.tools?.capabilities?.includes('share_brief'), 'TOOL_DISABLED', 'Bob brief sharing skill is disabled.', 403);
-      const matches = intersections(state);
+      const matches = args.purpose === 'brief' ? [] : intersections(state);
+      const durationMinutes = state.ontologies.get('schedule')?.task.durationMinutes ?? 30;
       const brief = clone(config.data?.brief || {});
       if (config.collaboration?.acceptInvitations === false || !config.collaboration?.allowedPeers?.includes('Alice')) {
         return { message: 'Bob is not accepting this collaboration.', action: { type: 'no_match' } };
@@ -302,11 +527,11 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
           : args.purpose === 'initial' ? ['request_more', 'meeting', 'no_match'] : ['meeting', 'no_match'];
         const firstMatch = matches[0];
         const matchStart = firstMatch ? interval(firstMatch.time).start : null;
-        const exampleMeeting = firstMatch ? { day: firstMatch.day, time: `${formatMinute(matchStart)}–${formatMinute(matchStart + 30)}` } : null;
+        const exampleMeeting = firstMatch ? { day: firstMatch.day, time: `${formatMinute(matchStart)}–${formatMinute(matchStart + durationMinutes)}` } : null;
         const briefField = Object.keys(brief)[0];
         const example = args.purpose === 'brief'
           ? { message: 'Bob prepared an optional meeting brief.', action: { type: 'share_brief', fields: briefField ? [briefField] : [], values: briefField ? { [briefField]: brief[briefField] } : {}, resource: 'meeting_brief' } }
-          : exampleMeeting ? { message: 'A shared 30-minute time is available.', action: { type: 'meeting', meeting: exampleMeeting } }
+          : exampleMeeting ? { message: `A shared ${durationMinutes}-minute time is available.`, action: { type: 'meeting', meeting: exampleMeeting } }
           : { message: args.purpose === 'initial' ? 'Would you like to add a sharing scope?' : 'No matching shared free time is available.', action: { type: args.purpose === 'initial' ? 'request_more' : 'no_match' } };
         const contract = args.purpose === 'brief'
           ? 'Choose nonempty fields from ownBrief and copy their exact JSON values into action.values. All brief fields, values and resource belong inside action. '
@@ -320,7 +545,9 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
           + 'submit_proposal only proposes data for controller review; it does not authorize or execute a transfer. '
           + 'ownSkillDefinitions are your owner-provided labels and guidance. Apply that guidance within the allowed actions and sharing boundaries; a custom skill ID never grants another tool or permission.';
         output = await callModel(state, system, {
-          purpose: args.purpose, allowedActions: actions, ownKnowledgeGraph: clone(state.agentProfile?.kg || { nodes: [], edges: [] }), skills: clone(config.tools?.capabilities || []), ownSkillDefinitions: clone((config.tools?.skillDefinitions || []).filter(definition => config.tools?.capabilities?.includes(definition.id))),
+          purpose: args.purpose, allowedActions: actions, task: clone(state.ontologies.get('schedule')?.task),
+          acceptedMappings: clone(state.ontologies.get('schedule')?.registry.mappings || []), receivedSemanticFacts: clone(state.ontologies.get('schedule')?.registry.facts || []),
+          ownKnowledgeGraph: clone(state.agentProfile?.kg || { nodes: [], edges: [] }), skills: clone(config.tools?.capabilities || []), ownSkillDefinitions: clone((config.tools?.skillDefinitions || []).filter(definition => config.tools?.capabilities?.includes(definition.id))),
           received: [...state.received.values()].map(item => clone(item.payload)),
           ownAvailableTimes: config.tools?.capabilities?.includes('read_synthetic_calendar') ? clone(config.data?.availableTimes || []) : [], sharedIntersection: args.purpose === 'brief' ? [] : matches,
           ...(args.purpose === 'brief' ? { ownBrief: brief } : { followUpInstruction: config.prompts?.followUp || '' }),
@@ -334,7 +561,7 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
             && typeof output.action.meeting.day === 'string' && typeof output.action.meeting.time === 'string',
             'MODEL_INVALID_MEETING', 'The model meeting action is missing action.meeting.day or action.meeting.time.', 502);
           invariant(matches.some(meeting => meeting.day === output.action.meeting?.day
-            && withinTime(output.action.meeting?.time, meeting.time, true)),
+            && withinTime(output.action.meeting?.time, meeting.time, durationMinutes)),
             'MODEL_INVALID_MEETING', 'The model meeting is outside the actually shared free-time intersection.', 502);
           return { message, action: { type: 'meeting', meeting: { day: output.action.meeting.day, time: output.action.meeting.time } } };
         }
@@ -353,11 +580,11 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
         action: { type: 'share_brief', fields: Object.keys(brief), values: brief, resource: 'meeting_brief' } };
       if (matches.length) {
         const start = interval(matches[0].time).start;
-        const meeting = { day: matches[0].day, time: `${formatMinute(start)}–${formatMinute(start + 30)}` };
+        const meeting = { day: matches[0].day, time: `${formatMinute(start)}–${formatMinute(start + durationMinutes)}` };
         return { message: `We both have a shared free time on ${meeting.day} at ${meeting.time}.`, action: { type: 'meeting', meeting } };
       }
       if (args.purpose === 'initial') return { message: config.prompts?.followUp
-        || 'I cannot find a matching time in the shared rows. Would you share Thursday free times, keep the current boundary, or share the week?',
+        || 'I cannot find a matching time in the interpreted received facts. You may keep the boundary or choose an additional task-relevant window.',
       action: { type: 'request_more' } };
       return { message: 'The shared information has no matching free time. Your sharing boundary remains in place.', action: { type: 'no_match' } };
     },

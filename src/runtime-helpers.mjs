@@ -77,5 +77,6 @@ export function validateOperation(args) {
     && new Set(args.fields).size === args.fields.length, 'INVALID_FIELDS', 'Fields must be unique strings.');
 }
 
-export const SESSION_RPC_METHODS = new Set(['initialize', 'projectAlice', 'prepareOutgoing', 'receive', 'verifyReceipt', 'planBob', 'planAlice', 'cancelPlanning', 'updateBob', 'clear']);
+export const SESSION_RPC_METHODS = new Set(['initialize', 'projectAlice', 'prepareOutgoing', 'receive', 'verifyReceipt', 'planBob', 'planAlice', 'cancelPlanning', 'updateBob', 'clear',
+  'ontologyModule', 'receiveOntology', 'proposeOntology', 'decideOntology', 'acknowledgeOntology', 'updateOntology', 'ontologyStatus']);
 export const WORKER_RPC_METHODS = new Set(['status', 'configureModel', ...SESSION_RPC_METHODS]);

@@ -6,6 +6,8 @@ This is an exploratory exhibition experience. The fictional calendar and Bob's r
 
 A participant can experience the complete flow without research collection. Declining research does not disable the demonstration. Alice's decision to share a calendar snapshot is separate from consent to record choices. Bob's researcher's approval is also separate: it authorizes only a scoped Bob action and cannot create an Alice grant.
 
+Task ontology acceptance is a third independent decision. It establishes how a peer may interpret received information and may publish the selected fictional working definitions. It does not authorize the peer to read private data. In the ambiguous scenario the owner's confirmation means only that shared Free intervals may be considered for this particular meeting invitation. Research consent still gates persistent recording of that decision and its resulting semantic state.
+
 The store accepts records only when `researchConsent === true` and the mode is `controlled` or `live`. New rounds disclose `research-v2` collection: complete synthetic state snapshots accompany the permitted event metadata. This includes the fictional calendar and brief values; the consent wording must disclose that scope. Legacy `research-v1` records retain their metadata-only whitelist and never acquire full state traces. Replay never creates a research run, even when a replay request contains a true consent flag. A non-consented session receives no research run ID and contributes no identifiable replay history or behavioral counter. Its state and transport routing identifiers remain transient runtime state. Replacement and reset evict the previous session; reset starts with consent off. Browser refresh restores the same temporary session through the participant token in sessionStorage, keeping its epoch, server-confirmed choices and receipts. A draft radio selection does not recreate an authorization, and refresh does not start a second research run.
 
 ```mermaid
@@ -22,22 +24,27 @@ flowchart LR
 
 Do not add browser analytics, action-bearing access logs, request body logs, localStorage calendars or dialogue traces. Application requests have no body/access logging. The project does not save non-consented participant operation traces. Any optional external model's retention and traffic disclosure must be checked separately; the recording gate is a guarantee about this project's research files. For a strictly local experience use controlled mode and the local Bob process.
 
-## Four-minute baseline script
+## Conference baseline script
 
 Participant information and research consent are completed before timing the interaction.
 
 | Approximate time | Activity | Neutral facilitator wording |
 |---|---|---|
 | 0:00–0:25 | Become fictional Alice and arrange a 30-minute discussion | “You decide what Alice shares. There is no correct sharing choice; you may decline or stop.” |
-| 0:25–1:25 | Inspect a Tue–Wed snapshot: free slots, busy/free summary, full content or no sharing | “Preview the exact information before deciding.” |
-| 1:25–2:15 | Baseline Bob has no availability in that window and asks for more | “You can keep the boundary, add only Thursday free slots, or provide the full-week snapshot.” |
-| 2:15–2:55 | Inspect the actual receipt and optionally answer the scope understanding question | “Which information can Bob see?” |
-| 2:55–3:40 | Withdraw future sharing and optionally answer the effect question | “What happens to information already received?” |
-| 3:40–4:15 | Show future sharing blocked and existing snapshots still visible | “Which step was unclear?” Optional verbal feedback is not silently recorded. |
+| 0:25–1:15 | Inspect the task modules, datatype differences and Free meaning; accept, clarify or reject | “Does an empty calendar interval also mean the owner allows this meeting invitation?” |
+| 1:15–2:05 | Inspect a Tue–Wed snapshot: free slots, busy/free summary, full content or no sharing | “Preview the exact information before deciding.” |
+| 2:05–2:45 | Baseline Bob has no availability in that window and asks for more | “You can keep the boundary, add free slots for the requested dates, or provide the full-week snapshot.” |
+| 2:45–3:30 | Inspect mapped receipt facts and the result; optionally narrow Bob's brief | “Which interpretation helped, and which exact information arrived?” |
+| 3:30–4:30 | Optionally answer scope, withdrawal, alignment and module questions | “What does accepting an alignment allow? Which module did this task need?” |
+| 4:30–5:00 | Withdraw future sharing or end, retaining earlier receipt evidence | “Which step was unclear?” Optional verbal feedback is not silently recorded. |
+
+These times are a facilitation target, not measured completion-time results. Browser-started Controlled/Live rounds always review alignment; a compatibility API caller can omit that review for an unambiguous quick start. Do not treat that API path, an ambiguous clarification path and a rejected alignment as identical conditions.
 
 The default Thursday fixture provides a common slot. Sharing the full week and adding Thursday free slots can both support arrangement. Keeping the boundary and refusing the first request are valid terminal outcomes. The baseline intentionally makes a smaller additional disclosure sufficient; it does not establish people's general preferences about real private calendars.
 
 Researcher changes to Bob can produce other valid scenarios, including an initial Tue–Wed match. These changes are supported and must be interpreted by their configuration revision. Do not pretend every modified round followed the baseline expansion script. Neither a sent message nor a queued operation is proof of receipt; use the authenticated received snapshot.
+
+Additional-request dates are calculated from Bob's current availability and the received windows, rather than a fixed Thursday script. The interface offers scheduling durations of 30, 45 or 60 minutes; the API additionally supports 15 minutes. Record the actual `ontology.task`, scenario, selected modules, mapping version and initial conditions when comparing runs. A failed alignment or an owner refusing the invitation meaning is a valid explanation of a non-arranged task, not evidence that the participant refused to disclose data.
 
 Question identifiers and answers:
 
@@ -45,6 +52,8 @@ Question identifiers and answers:
 |---|---|---|
 | `received_scope` | `approved_snapshot`, `outside_scope`, `not_sure` | `approved_snapshot` |
 | `withdrawal` | `future_only`, `delete_received`, `not_sure` | `future_only` |
+| `ontology_alignment` | `mapping_not_permission`, `mapping_grants_access`, `not_sure` | `mapping_not_permission` |
+| `task_module` | `task_subset`, `whole_ontology`, `not_sure` | `task_subset` |
 
 The interface offers optional understanding checks after a task result. Receipt evidence remains available in an optional detail panel; the record does not establish whether a participant opened it before answering. These answers are post-task checks, not blinded predictions or evidence of before/after learning. The instrumentation kind remains `prediction` for compatibility. If withdrawal is an assigned teaching step, do not analyze the click as spontaneous willingness to revoke. This prototype blocks subsequent sharing while already delivered snapshots remain visible. A fresh-round reset clears the complete demonstration state and is a different operation.
 
@@ -62,13 +71,21 @@ Events are flattened objects with sequence number, relative `elapsedMs`, kind an
 
 Allowed event metadata includes stage, enumerated choice and answer, question ID, field identifiers, known time windows, operation/payload identifiers, actor/recipient, configuration/policy revisions, technical code or identifier reason, and separately supplied `decisionMs`/`adminWaitMs`. Optional booleans describe correctness, assistance, repetition, group participation and mode switching. Unknown event keys, raw messages, rows, brief values, names, IP addresses and free-text reasons are dropped. A free-text feedback facility is not part of this event whitelist. V2's separately whitelisted synthetic snapshots do contain exact fictional rows and brief values.
 
+Ontology events such as `ontology_decision` and `ontology_negotiated` pass through the same gate and field filter. Safe module identifiers and mapping-version identifiers are additional metadata. The new answer IDs are enumerated rather than free text. No ontology event creates a run when consent is off.
+
 ## Step-by-step synthetic state traces
 
 Each v2 trace step has `{seq,at,kind,eventSeq,snapshot,previousHash,hash}`. An initialization snapshot records the reviewed conditions; state snapshots accompany events and final action/intervention checkpoints, including the resulting version. `eventSeq` links a snapshot to an event when applicable and is otherwise null. `capturedAt` fixes the snapshot clock, so historical expiry status stays as it was when recorded.
 
 The `agent-trace-v1` snapshot schema records canonical conditions and their hash, current task-effective Bob data/tools/policy/configuration, Alice's calendar, choices, task outcome, stage/version, pause/stop/end flags, exact receipts, pending delivery, approvals, round grants and actual use counters. It also derives both agents' readable KG, skills, data and authorization views. An agent's graph contains its own initialized KG and own data, plus only peer fields contained in `status: 'received'` receipts. Nodes received from a peer retain operation ID, permitted fields, sender and receipt time. A pending transmission or a Bob owner's pending approval is not knowledge received by Alice or Bob. Revocation disables future sharing while the confirmed knowledge and provenance remain in the recorded round.
 
+New optional `ontology` and `briefOntology` fields record published task modules, ontology/schema revisions, bounded proposals and decisions, accepted mappings, task-scoped interpretation, safe explanatory transcript, finite protocol evidence and receipt-backed semantic facts. `additionalRequest` preserves the actual requested days/fields. `task.reason` separates no common time, kept sharing boundary, incomplete peer confirmation and rejected alignment. These additions do not change the initial-condition schema/hash, and legacy traces with no ontology fields remain valid.
+
+Ontology reload/export uses `sanitizeOntologyDialogue`: it verifies registry/ontology versions, accepted mapping and receipt/fact provenance, reconstructs fixed explanatory text from safe reason codes, and whitelists limited protocol evidence. It never persists arbitrary provider context or raw model dialogue as ontology evidence. The safe protocol view retains ordering, roles, move, payload digest and optional signature/version fields; the runtime performs actual signature verification before registration. `runtime_confirmed` records that historical check; reloading a stripped safe export does not independently reverify signatures. Signature-shaped text without a recorded check remains `reload_hash_only`. Sanitization is idempotent so safe reload does not silently change a valid trace hash chain.
+
 Snapshots exclude participant/admin credentials, provider keys and endpoints, legacy model runtime settings, configuration prompts, arbitrary extensions, raw messages, reasoning and hidden runtime context. The separately versioned configuration archive preserves the validated Bob configuration for authorized review. Live initial KG is supplied only to its owning agent model; the UI's side-by-side inspection does not send Alice's private KG or calendar to Bob's model.
+
+Participant HTTP views represent Alice's owner and exclude Bob's unshared initial state. Full trace review and the explicit authenticated observer perspective intentionally expose both synthetic states for research. The setup workbench likewise configures/observes fictional conditions rather than showing a personal assistant's unrestricted private store. In the open-controls demo this observer authority is deliberately available without PIN sign-in; do not interpret that deployment as independent multi-stakeholder confidentiality.
 
 Reload reapplies nested whitelists and rebuilds displayed agent views from retained source state. It checks trace sequence, event links, predecessor hashes and snapshot hashes; the valid prefix survives and a failed chain receives `trace_integrity_failed`. Hash chains expose inconsistent records and are not a signed guarantee against a party able to rewrite the entire file. A saved trace is review material, not a resumable runtime context. A process restart still evicts executing sessions and marks open runs `incomplete + process_interrupted`.
 
@@ -84,6 +101,9 @@ Configuration profile storage is independent of research recording. Profiles can
 - Reaching the task's complete stage keeps the research run open for optional understanding answers and withdrawal. `summary.taskCompleted` counts rounds which reached a recorded task outcome; `summary.runsPendingClose` counts those still active. `summary.completed` counts completed rounds only after the run is closed by End, Reset, replacement or expiry. A task outcome event does not close the record. Once closed, further answers cannot append.
 - After a persistent server restart, open records cannot reconnect to an evicted controller session. They are atomically marked `incomplete` with `process_interrupted`; existing task-outcome events remain intact. No fabricated participant action or unknown end time is added, and these records no longer appear as awaiting End.
 - Analyze controlled and live modes separately. Compare Live model conditions using each run's stored model snapshot and revision, rather than the researcher's currently displayed global settings. Controlled model settings describe the configured condition and are not evidence that a provider was called. Replay has no research records. Model or peer failures, recovery and substantive facilitator help should be marked; valid decisions completed before a fault can be analyzed at their stage.
+- Separate browser-reviewed alignment from compatibility API quick starts. Browser Live calls both models for reviewed candidate selection; an API caller omitting `alignmentReview` can use a known Guided mapping even when subsequent scheduling is Live. A label `live` alone is not evidence that the models searched or negotiated an arbitrary ontology.
+- Use ontology and task evidence to explain mechanism: which working modules were selected, what definition/unit difference was resolved, which accepted mapping transformed which actual receipt, and whether the semantic registry was queried. A finished meeting alone is not proof that ontology assistance improved accuracy or aligned user intention.
+- Treat conditional correspondences, representation transforms and owner clarification as explicit demo adaptations, rather than reproduction of the papers' equivalence-matching experiments. The current trusted local controller, bounded schema family and fixed candidate set do not establish arbitrary cross-domain generality or a formal privacy property.
 - Separate changes made after explanations from initial decisions. They do not erase already received snapshots.
 - Separate participant decision time from admin waiting time. A researcher waiting to approve Bob's brief is not participant hesitation.
 - The terminal `technical` summary counts technical completion statuses. A technical issue which recovered can instead appear in a completed run's quality flags; that run is not counted as a technical abort.
