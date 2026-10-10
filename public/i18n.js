@@ -12,9 +12,10 @@ import { messages as experienceUnderstandingMessages, patterns as experienceUnde
 import { messages as experienceResearchMessages, patterns as experienceResearchPatterns } from './locales/experience-research.js';
 import { messages as refinementMessages, patterns as refinementPatterns } from './locales/refinement.js';
 import { messages as ontologyMessages, patterns as ontologyPatterns } from './locales/ontology.js';
+import { messages as recoveryMessages, patterns as recoveryPatterns } from './locales/recovery.js';
 
 export const LANGUAGE_KEY = 'agent-on-request.language';
-const messages = { ...commonMessages, ...appMessages, ...configMessages, ...stateMessages, ...hierarchyAppMessages, ...hierarchyConditionsMessages, ...hierarchyBobMessages, ...hierarchyModelMessages, ...experienceParticipantMessages, ...experienceOperatorMessages, ...experienceUnderstandingMessages, ...experienceResearchMessages, ...refinementMessages, ...ontologyMessages };
+const messages = { ...commonMessages, ...appMessages, ...configMessages, ...stateMessages, ...hierarchyAppMessages, ...hierarchyConditionsMessages, ...hierarchyBobMessages, ...hierarchyModelMessages, ...experienceParticipantMessages, ...experienceOperatorMessages, ...experienceUnderstandingMessages, ...experienceResearchMessages, ...refinementMessages, ...ontologyMessages, ...recoveryMessages };
 const reverse = new Map();
 for (const [en, zh] of Object.entries(messages)) if (!reverse.has(zh)) reverse.set(zh, en);
 const escapeRegex = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -28,7 +29,7 @@ function compileTemplate(source, target) {
   expression += escapeRegex(source.slice(offset)) + '$';
   return { expression: new RegExp(expression), names, target, weight: source.replace(/\{\w+\}/g, '').length };
 }
-const templates = [...commonPatterns, ...appPatterns, ...configPatterns, ...statePatterns, ...hierarchyAppPatterns, ...hierarchyConditionsPatterns, ...hierarchyBobPatterns, ...hierarchyModelPatterns, ...experienceParticipantPatterns, ...experienceOperatorPatterns, ...experienceUnderstandingPatterns, ...experienceResearchPatterns, ...refinementPatterns, ...ontologyPatterns];
+const templates = [...commonPatterns, ...appPatterns, ...configPatterns, ...statePatterns, ...hierarchyAppPatterns, ...hierarchyConditionsPatterns, ...hierarchyBobPatterns, ...hierarchyModelPatterns, ...experienceParticipantPatterns, ...experienceOperatorPatterns, ...experienceUnderstandingPatterns, ...experienceResearchPatterns, ...refinementPatterns, ...ontologyPatterns, ...recoveryPatterns];
 const compiled = {
   zh: templates.map(([en, zh]) => compileTemplate(en, zh)).sort((a, b) => b.weight - a.weight),
   en: templates.map(([en, zh]) => compileTemplate(zh, en)).sort((a, b) => b.weight - a.weight)

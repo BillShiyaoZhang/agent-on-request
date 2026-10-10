@@ -10,6 +10,14 @@ export class RuntimeError extends Error {
   }
 }
 
+export const PLANNING_STEPS = Object.freeze(['alice_intro', 'alice_alignment', 'bob_alignment', 'bob_initial',
+  'bob_additional', 'bob_brief', 'brief_alignment', 'calendar_delivery', 'reply_delivery']);
+
+export function tagPlanningError(error, step) {
+  if (error instanceof RuntimeError && PLANNING_STEPS.includes(step)) error.planningStep = step;
+  return error;
+}
+
 export function invariant(condition, code, message, status = 400) {
   if (!condition) throw new RuntimeError(code, message, status);
 }
@@ -52,12 +60,13 @@ export function verifyMac(value, signature, secret) {
 }
 
 export function errorJSON(error) {
-  if (error instanceof RuntimeError) return { code: error.code, message: error.message, status: error.status };
+  if (error instanceof RuntimeError) return { code: error.code, message: error.message, status: error.status,
+    ...(PLANNING_STEPS.includes(error.planningStep) ? { planningStep: error.planningStep } : {}) };
   return { code: 'RUNTIME_ERROR', message: 'The isolated runtime could not complete this operation.', status: 500 };
 }
 
 export function fromErrorJSON(error) {
-  return new RuntimeError(error?.code || 'RUNTIME_ERROR', error?.message || 'Runtime operation failed.', error?.status || 500);
+  return tagPlanningError(new RuntimeError(error?.code || 'RUNTIME_ERROR', error?.message || 'Runtime operation failed.', error?.status || 500), error?.planningStep);
 }
 
 export function validateSessionRef(args) {

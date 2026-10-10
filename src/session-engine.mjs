@@ -5,6 +5,8 @@ import { ALICE_CALENDAR, REPLAY_STEPS, SCENARIO_VERSION } from './scenario.mjs';
 import { resolveConditions, conditionBobConfig } from './condition-service.mjs';
 import { buildAgentStates, buildTraceSnapshot } from './agent-observability.mjs';
 import { createOntologyDialogue, startOntologyDialogue, resolveOntologyDialogue, registerOntologyReceipt, sanitizeOntologyDialogue } from './ontology-dialogue.mjs';
+import { MODEL_OUTPUT_DIAGNOSTICS, modelOutputDiagnostic } from './model-provider.mjs';
+import { PLANNING_STEPS } from './runtime-helpers.mjs';
 
 const tokenHash = token => createHash('sha256').update(String(token)).digest();
 const now = () => new Date().toISOString();
@@ -18,7 +20,11 @@ function policyDays(window) {
   const first = DAYS.indexOf(bounds[0]), last = DAYS.indexOf(bounds[1]);
   return first >= 0 && last >= first ? DAYS.slice(first, last + 1) : bounds;
 }
-const PUBLIC_WAIT = { admin: 'Bob’s owner needs to decide whether to share this exact content.', peer_offline: 'Bob has not confirmed receipt. Restore the connection, then explicitly retry the same operation.', model_timeout: 'Agent planning did not finish. Received snapshots remain; researcher intervention is needed.', configuration_changed: 'Bob’s configuration changed in this round. Recheck the policy before resuming.', researcher: 'The researcher paused this round.' };
+const PUBLIC_WAIT = { admin: 'Bob’s owner needs to decide whether to share this exact content.', peer_offline: 'Bob has not confirmed receipt. Restore the connection, then explicitly retry the same operation.',
+  model_timeout: 'The model request timed out. Received snapshots remain; retry the unfinished step explicitly.',
+  model_output: 'The model proposal did not pass validation. Received snapshots remain; retry the unfinished step explicitly.',
+  model_connection: 'The model service could not complete the request. Received snapshots remain; check the saved connection and retry explicitly.',
+  configuration_changed: 'Bob’s configuration changed in this round. Recheck the policy before resuming.', researcher: 'The researcher paused this round.' };
 // Only controller-defined diagnostics are public; never copy arbitrary provider text or thrown messages.
 const SAFE_MODEL_DIAGNOSTICS = new Set([
   'The model proposal is missing the required action object.',
@@ -266,6 +272,7 @@ export class SessionEngine {
   async projection(session, stage, choice, { forSend = false } = {}) {
     requireThat((stage === 'initial' ? INITIAL : stage === 'additional' ? ADDITIONAL : new Set()).has(choice), 'CHOICE', 'Choose a valid sharing scope.');
     if (choice === 'none' || choice === 'keep') return { rows: [], fields: [], window: 'none' };
+    requireThat(session.ontology?.status === 'accepted', 'ONTOLOGY_NOT_ALIGNED', 'Confirm the task-scoped meanings before previewing or sharing calendar data.', 409);
     const profile = session.conditions?.agents.Alice;
     if (profile && forSend) {
       requireThat(profile.skills.includes('send_scoped_snapshot'), 'TOOL_DISABLED', 'Alice snapshot sending skill is disabled. Choose no sharing or change next-round conditions.', 403);
@@ -376,6 +383,17 @@ export class SessionEngine {
           const meeting = this.confirmedMeeting(session);
           await this.complete(session, meeting ? 'arranged' : 'boundary_kept', meeting, 'sharing_stopped');
         }
+      } else if (type === 'skip_optional_brief') {
+        const meeting = this.confirmedMeeting(session);
+        requireThat(session.paused && !session.stopped && session.mode !== 'replay' && meeting
+          && ['bob_brief', 'brief_alignment'].includes(session.waiting?.step)
+          && (!session.pendingDelivery || session.pendingDelivery.direction === 'alice' && session.pendingDelivery.resource === 'meeting_brief'),
+          'OPTIONAL_BRIEF_STAGE', 'Only an unfinished optional brief can be skipped after a meeting is confirmed.', 409);
+        session.pendingDelivery = null;
+        session.approvals.forEach(item => { if (item.resource === 'meeting_brief' && item.status === 'pending') item.status = 'cancelled'; });
+        this.message(session, 'Alice', 'Keep the confirmed meeting and finish without optional meeting context.');
+        await this.event(session, 'choice', { action: 'skip_optional_brief', actor: 'Alice', reason: 'optional_brief_skipped' });
+        await this.complete(session, 'arranged', meeting, 'optional_brief_skipped');
       } else if (type === 'replay_next') {
         requireThat(session.mode === 'replay', 'REPLAY', 'This is not replay mode.');
         const step = REPLAY_STEPS[session.replay.index];
@@ -421,17 +439,27 @@ export class SessionEngine {
   async suspend(session, error) {
     session.savedStage ??= session.stage;
     session.paused = true; session.stage = 'paused';
-    const reason = /OFFLINE|TRANSPORT|PEER|CONNECTION|ECONN/i.test(error.code ?? '') ? 'peer_offline' : 'model_timeout';
-    session.waiting = { reason, message: PUBLIC_WAIT[reason] };
+    const diagnostic = modelOutputDiagnostic(error);
+    const reason = ['MODEL_INVALID_OUTPUT', 'MODEL_INVALID_MEETING'].includes(error.code) ? 'model_output'
+      : ['MODEL_PROVIDER_ERROR', 'MODEL_UNAVAILABLE', 'MODEL_CONFIGURATION_ERROR'].includes(error.code) ? 'model_connection'
+      : /OFFLINE|TRANSPORT|PEER|CONNECTION|ECONN/i.test(error.code ?? '') ? 'peer_offline' : 'model_timeout';
+    const inferredStep = session.pendingDelivery ? session.pendingDelivery.direction === 'bob' ? 'calendar_delivery'
+      : session.pendingDelivery.resource === 'meeting_brief' && session.briefOntology?.status !== 'accepted' ? 'brief_alignment' : 'reply_delivery'
+      : ({ intro: 'alice_intro', alignment: 'alice_alignment', initial: 'bob_initial', additional: 'bob_additional', after_availability: 'bob_brief', recheck: 'bob_additional' }[session.continuation]);
+    const step = PLANNING_STEPS.includes(error.planningStep) ? error.planningStep : inferredStep;
+    const recovery = reason === 'peer_offline' ? 'restore_connection' : session.pendingDelivery ? 'retry_delivery' : 'retry_planning';
+    session.waiting = { reason, message: PUBLIC_WAIT[reason], ...(step ? { step } : {}), recovery };
     if (error.code?.startsWith('MODEL_')) {
       const code = /^[A-Z_]{1,64}$/.test(error.code) ? error.code : 'MODEL_ERROR';
-      const detail = SAFE_MODEL_DIAGNOSTICS.has(error.message) ? error.message
+      const detail = diagnostic ? MODEL_OUTPUT_DIAGNOSTICS[diagnostic.reasonCode].message : (SAFE_MODEL_DIAGNOSTICS.has(error.message) ? error.message
         : code === 'MODEL_TIMEOUT' ? 'The model request timed out; retry explicitly or end this round.'
-        : 'The model could not return a valid proposal. Check the model connection, then retry explicitly or end this round.';
-      session.waiting = { ...session.waiting, code, detail, message: `${PUBLIC_WAIT[reason]} ${code}: ${detail}` };
+        : reason === 'model_connection' ? 'Check the saved model connection, then retry explicitly or end this round.'
+        : 'The model proposal is invalid. Retry this step explicitly or end this round.');
+      session.waiting = { ...session.waiting, code, detail, ...(diagnostic ? { diagnostic: diagnostic.reasonCode } : {}), message: `${PUBLIC_WAIT[reason]} ${code}: ${detail}` };
     }
     this.message(session, 'system', session.waiting.message, 'technical');
-    await this.event(session, 'technical', { code: /^[A-Za-z0-9_]{1,64}$/.test(error.code ?? '') ? error.code : 'RUNTIME_ERROR', stage: session.stage });
+    await this.event(session, 'technical', { code: /^[A-Za-z0-9_]{1,64}$/.test(error.code ?? '') ? error.code : 'RUNTIME_ERROR', stage: session.stage,
+      ...(step ? { step } : {}), ...(diagnostic ? { diagnostic: diagnostic.reasonCode } : {}) });
   }
   async continueDelivery(session) {
     const operation = session.pendingDelivery;
@@ -686,9 +714,17 @@ export class SessionEngine {
         session.savedStage ??= session.stage; session.paused = true; session.stage = 'paused'; session.waiting = { reason: 'researcher', message: PUBLIC_WAIT.researcher };
       } else if (action === 'resume' || action === 'retry') {
         requireThat(session.paused, 'NOT_PAUSED', 'There is no paused operation to retry.', 409);
+        requireThat(!session.stopped, 'SHARING_STOPPED', 'This round stopped future sharing. Start a new round to collaborate again.', 409);
         const changed = session.waiting?.reason === 'configuration_changed';
         session.paused = false; session.waiting = null; session.stage = session.savedStage ?? 'initial'; session.savedStage = null;
-        if (changed) { session.pendingDelivery = null; session.continuation = 'recheck'; }
+        if (changed) {
+          session.pendingDelivery = null;
+          if (session.continuation !== 'intro') {
+            if (session.ontology?.status !== 'accepted') {
+              session.stage = 'alignment'; session.alignmentCandidate = null; session.continuation = null;
+            } else session.continuation = 'recheck';
+          }
+        }
         if (session.pendingDelivery) await this.continueDelivery(session);
         else if (session.continuation) await this.continuePlan(session);
       } else if (action === 'inject_request') {

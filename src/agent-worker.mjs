@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import {
   RuntimeError, invariant, canonical, hashPayload, signObject, verifyObject,
-  macObject, verifyMac, errorJSON, fromErrorJSON, validateSessionRef, validateOperation, WORKER_RPC_METHODS,
+  macObject, verifyMac, errorJSON, fromErrorJSON, validateSessionRef, validateOperation, WORKER_RPC_METHODS, tagPlanningError,
 } from './runtime-helpers.mjs';
 import { ontologyDefinitions, createOntologyDialogue, startOntologyDialogue, defaultOntologyProposal, validateOntologyProposal,
   resolveOntologyDialogue, registerOntologyReceipt, queryRegisteredMeetingSlots } from './ontology-dialogue.mjs';
@@ -136,14 +136,27 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
   }
 
   function modelSelection(output, candidates) {
-    invariant(output && ['accept', 'reject', 'none'].includes(output.decision)
+    const plainObject = output && typeof output === 'object' && !Array.isArray(output)
+      && [Object.prototype, null].includes(Object.getPrototypeOf(output));
+    const decision = plainObject ? Object.getOwnPropertyDescriptor(output, 'decision')?.value : undefined;
+    // A recognized refusal ends this role's proposal attempt. Cosmetic/schema defects
+    // must never turn a negative decision into a request to produce an acceptance.
+    // Project only the negative intent and a bounded message; discard all IDs/extras.
+    if (decision === 'none' || decision === 'reject') {
+      const rawMessage = Object.getOwnPropertyDescriptor(output, 'message')?.value;
+      const message = typeof rawMessage === 'string' && rawMessage.trim() && rawMessage.length <= 4000
+        ? messageFrom({ message: rawMessage }) : 'The model declined the proposed task-scoped mapping.';
+      return { decision: 'rejected', message, selectedMappingIds: [],
+        reasonCode: decision === 'none' ? 'MODEL_CHOSE_NONE' : 'MODEL_REJECTED_OR_INCOMPLETE_MAPPING' };
+    }
+    invariant(plainObject && decision === 'accept'
       && Array.isArray(output.selectedMappingIds) && new Set(output.selectedMappingIds).size === output.selectedMappingIds.length
       && output.selectedMappingIds.every(id => candidates.some(item => item.id === id))
       && Object.keys(output).every(key => ['message', 'decision', 'selectedMappingIds'].includes(key)),
       'MODEL_INVALID_OUTPUT', 'The model must select registered mapping identifiers or explicitly choose none.', 502);
     const message = messageFrom(output);
-    invariant(output.decision === 'accept' || output.selectedMappingIds.length === 0,
-      'MODEL_INVALID_OUTPUT', 'A rejected or none proposal cannot include accepted mappings.', 502);
+    invariant(output.decision !== 'accept' || output.selectedMappingIds.length === candidates.length,
+      'MODEL_INVALID_OUTPUT', 'The model accepted an incomplete set of registered mapping identifiers.', 502);
     const accepted = output.decision === 'accept' && output.selectedMappingIds.length === candidates.length;
     return { decision: accepted ? 'accepted' : 'rejected', message,
       selectedMappingIds: accepted ? candidates.map(item => item.id) : [],
@@ -188,14 +201,47 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
     }
   }
 
-  async function callModel(state, system, context, runtime = {}) {
-    // The Agent owns retry budgets; each broker callback performs exactly one attempt.
+  async function callModel(state, system, context, runtime = {}, validate = output => output, guard = () => {}) {
+    // Transport, JSON/schema and semantic correction share one Agent-owned attempt budget.
+    // Each parent broker callback performs exactly one attempt, without an inner retry loop.
     const effectiveRuntime = state.modelSettings || runtime;
-    const attempts = Math.max(1, Math.min(11, 1 + (Number(effectiveRuntime.retryLimit) || 0)));
+    const attempts = Math.max(1, Math.min(11, 1 + Math.trunc(Number(effectiveRuntime.retryLimit) || 0)));
+    const generation = state.planningGeneration;
+    const assertPlanningCurrent = () => {
+      invariant(current(state) === state, 'PLANNING_CANCELLED', 'This planning request was interrupted.', 409);
+      guard();
+      invariant(state.planningGeneration === generation, 'PLANNING_CANCELLED', 'This planning request was interrupted.', 409);
+    };
+    let correction = null;
     for (let attempt = 0; attempt < attempts; attempt++) {
-      try { return await oneModelCall(state, system, context, runtime); }
+      assertPlanningCurrent();
+      try {
+        const output = await oneModelCall(state, correction
+          ? `${system}\nA previous proposal failed validation. Produce a new proposal using the supplied contract and original source values only. No failed proposal has been executed or authorized.` : system,
+        correction ? { ...context, proposalCorrection: { attempt: attempt + 1, maxAttempts: attempts, ...correction } } : context, runtime);
+        assertPlanningCurrent();
+        return validate(output);
+      }
       catch (error) {
-        if (attempt + 1 === attempts || !['MODEL_TIMEOUT', 'MODEL_PROVIDER_ERROR'].includes(error.code)) throw error;
+        assertPlanningCurrent();
+        const invalidProposal = ['MODEL_INVALID_OUTPUT', 'MODEL_INVALID_MEETING'].includes(error.code);
+        if (attempt + 1 === attempts || !invalidProposal && !['MODEL_TIMEOUT', 'MODEL_PROVIDER_ERROR'].includes(error.code)) {
+          const planningStep = context.purpose === 'ontology_alignment'
+            ? context.task?.type === 'brief' ? 'brief_alignment' : `${role.toLowerCase()}_alignment`
+            : role === 'Alice' ? 'alice_intro' : `bob_${context.purpose}`;
+          error.planningAttempts = attempt + 1;
+          error.planningMaxAttempts = attempts;
+          throw tagPlanningError(error, planningStep);
+        }
+        if (invalidProposal) correction = {
+          code: error.code,
+          // Fixed guidance only: never echo arbitrary provider text, the failed output or error.message.
+          instruction: context.purpose === 'ontology_alignment'
+            ? 'Return one object with message, decision and selectedMappingIds. Use only supplied candidate IDs; a mapping does not authorize disclosure. An explicit none or reject remains a refusal.'
+            : Array.isArray(context.allowedActions)
+              ? 'Return message and action. Choose only an allowed action type. A meeting needs action.meeting.day/time inside sharedIntersection for the exact task duration. A brief needs action.fields/values/resource with exact ownBrief values. Add no permission fields.'
+              : 'Return exactly one object with a nonempty bounded message string. Do not add an action, grant or sharing decision.',
+        };
       }
     }
   }
@@ -251,7 +297,7 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
         peerPublicKey: args.peerPublicKey, initialHash,
         calendar: clone(calendar), bobConfig: role === 'Bob' ? clone(args.bobConfig) : undefined,
         agentProfile: args.agentProfile ? clone(args.agentProfile) : null, initializedAt: Date.now(),
-        configRevision: args.configRevision, received: new Map(), outgoing: new Map(), modelCalls: new Set(), projections: new Map(),
+        configRevision: args.configRevision, received: new Map(), outgoing: new Map(), modelCalls: new Set(), planningGeneration: 0, projections: new Map(),
         ownOntology: clone(ownOntology), ontologyContext,
         // Direct library callers predate the dialogue API. Product managers always supply
         // ontologyContext and execute the signed two-worker negotiation before any query.
@@ -327,13 +373,14 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
         message: 'Rule selector proposes registered correspondences inside the disclosed task modules.' };
       if (args.liveProposal && selection.decision === 'accepted') {
         const revision = state.configRevision;
-        const output = await callModel(state, 'You are Alice selecting task-scoped ontology correspondences. Choose only supplied candidate identifiers or none. '
+        selection = await callModel(state, 'You are Alice selecting task-scoped ontology correspondences. Choose only supplied candidate identifiers or none. '
           + 'Return message, decision and selectedMappingIds. Accept only a complete semantically sound task mapping. A mapping never authorizes data disclosure.',
         { purpose: 'ontology_alignment', stage: 'propose', task: clone(state.ontologyContext.task),
-          ownWorkingOntology: clone(selectedOwnModule(state)), receivedWorkingOntology: clone(round.peerModules), candidates: clone(candidates), interpretation: clone(args.interpretation) });
-        assertStillCurrent(args, state, revision);
-        invariant(state.ontologyRound === round, 'ONTOLOGY_STALE_VERSION', 'The ontology dialogue changed while its model was selecting.', 409);
-        selection = modelSelection(output, candidates);
+          ownWorkingOntology: clone(selectedOwnModule(state)), receivedWorkingOntology: clone(round.peerModules), candidates: clone(candidates), interpretation: clone(args.interpretation) }, {},
+        output => modelSelection(output, candidates), () => {
+          assertStillCurrent(args, state, revision);
+          invariant(state.ontologyRound === round, 'ONTOLOGY_STALE_VERSION', 'The ontology dialogue changed while its model was selecting.', 409);
+        });
       }
       if (selection.decision === 'rejected') selection.selectedMappingIds = [];
       const payload = { candidates, interpretation: clone(args.interpretation), ...selection, selector: args.liveProposal ? 'live' : 'guided' };
@@ -349,14 +396,15 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
         selectedMappingIds: round.proposal.candidates.map(item => item.id), message: 'Bob verifies the definitions, registered transforms and task-scoped owner interpretation.', selector: 'guided' };
       if (args.liveProposal && selection.decision === 'accepted') {
         const revision = state.configRevision;
-        const output = await callModel(state, 'You are Bob independently reviewing Alice’s signed correspondence proposal. '
+        selection = { ...await callModel(state, 'You are Bob independently reviewing Alice’s signed correspondence proposal. '
           + 'Choose only supplied candidate identifiers or none. Return message, decision and selectedMappingIds. '
           + 'Calendar occupancy does not imply invitation permission without the supplied explicit task-scoped interpretation. Mapping acceptance never permits data disclosure.',
         { purpose: 'ontology_alignment', stage: 'decide', task: clone(state.ontologyContext.task), ownWorkingOntology: clone(selectedOwnModule(state)),
-          receivedWorkingOntology: clone(round.peerModules), candidates: clone(round.proposal.candidates), interpretation: clone(round.proposal.interpretation) });
-        assertStillCurrent(args, state, revision);
-        invariant(state.ontologyRound === round, 'ONTOLOGY_STALE_VERSION', 'The ontology dialogue changed while Bob was reviewing.', 409);
-        selection = { ...modelSelection(output, round.proposal.candidates), selector: 'live' };
+          receivedWorkingOntology: clone(round.peerModules), candidates: clone(round.proposal.candidates), interpretation: clone(round.proposal.interpretation) }, state.bobConfig?.runtime || {},
+        output => modelSelection(output, round.proposal.candidates), () => {
+          assertStillCurrent(args, state, revision);
+          invariant(state.ontologyRound === round, 'ONTOLOGY_STALE_VERSION', 'The ontology dialogue changed while Bob was reviewing.', 409);
+        }), selector: 'live' };
       }
       if (selection.decision === 'rejected') selection.selectedMappingIds = [];
       round.decision = clone(selection);
@@ -521,7 +569,6 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
       if (config.collaboration?.acceptInvitations === false || !config.collaboration?.allowedPeers?.includes('Alice')) {
         return { message: 'Bob is not accepting this collaboration.', action: { type: 'no_match' } };
       }
-      let output;
       if (state.mode === 'live') {
         const actions = args.purpose === 'brief' ? ['share_brief']
           : args.purpose === 'initial' ? ['request_more', 'meeting', 'no_match'] : ['meeting', 'no_match'];
@@ -544,21 +591,27 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
           + 'Never invent a meeting or source values. You have only the actual received Alice projection and do not know any unshared calendar entry. '
           + 'submit_proposal only proposes data for controller review; it does not authorize or execute a transfer. '
           + 'ownSkillDefinitions are your owner-provided labels and guidance. Apply that guidance within the allowed actions and sharing boundaries; a custom skill ID never grants another tool or permission.';
-        output = await callModel(state, system, {
+        return callModel(state, system, {
           purpose: args.purpose, allowedActions: actions, task: clone(state.ontologies.get('schedule')?.task),
           acceptedMappings: clone(state.ontologies.get('schedule')?.registry.mappings || []), receivedSemanticFacts: clone(state.ontologies.get('schedule')?.registry.facts || []),
           ownKnowledgeGraph: clone(state.agentProfile?.kg || { nodes: [], edges: [] }), skills: clone(config.tools?.capabilities || []), ownSkillDefinitions: clone((config.tools?.skillDefinitions || []).filter(definition => config.tools?.capabilities?.includes(definition.id))),
           received: [...state.received.values()].map(item => clone(item.payload)),
           ownAvailableTimes: config.tools?.capabilities?.includes('read_synthetic_calendar') ? clone(config.data?.availableTimes || []) : [], sharedIntersection: args.purpose === 'brief' ? [] : matches,
           ...(args.purpose === 'brief' ? { ownBrief: brief } : { followUpInstruction: config.prompts?.followUp || '' }),
-        }, config.runtime || {});
-        assertStillCurrent(args, state, revision);
+        }, config.runtime || {}, output => {
+        invariant(output && typeof output === 'object' && !Array.isArray(output)
+          && Object.keys(output).every(key => ['message', 'action'].includes(key)),
+          'MODEL_INVALID_OUTPUT', 'The model planning proposal contains unsupported fields.', 502);
         const message = messageFrom(output, config.response?.maxWords || 80);
         invariant(output.action && typeof output.action === 'object' && !Array.isArray(output.action), 'MODEL_INVALID_OUTPUT', 'The model proposal is missing the required action object.', 502);
         invariant(actions.includes(output.action.type), 'MODEL_INVALID_OUTPUT', 'The model action.type is not permitted for this planning step.', 502);
+        const actionKeys = output.action.type === 'meeting' ? ['type', 'meeting']
+          : output.action.type === 'share_brief' ? ['type', 'fields', 'values', 'resource'] : ['type'];
+        invariant(Object.keys(output.action).every(key => actionKeys.includes(key)), 'MODEL_INVALID_OUTPUT', 'The model action contains fields not permitted for this planning step.', 502);
         if (output.action.type === 'meeting') {
           invariant(output.action.meeting && typeof output.action.meeting === 'object' && !Array.isArray(output.action.meeting)
-            && typeof output.action.meeting.day === 'string' && typeof output.action.meeting.time === 'string',
+            && typeof output.action.meeting.day === 'string' && typeof output.action.meeting.time === 'string'
+            && Object.keys(output.action.meeting).every(key => ['day', 'time'].includes(key)),
             'MODEL_INVALID_MEETING', 'The model meeting action is missing action.meeting.day or action.meeting.time.', 502);
           invariant(matches.some(meeting => meeting.day === output.action.meeting?.day
             && withinTime(output.action.meeting?.time, meeting.time, durationMinutes)),
@@ -575,6 +628,7 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
           return { message: 'Bob prepared an optional meeting brief.', action: { type: 'share_brief', fields: clone(fields), values: clone(values), resource } };
         }
         return { message, action: { type: output.action.type } };
+        }, () => assertStillCurrent(args, state, revision));
       }
       if (args.purpose === 'brief') return { message: 'Bob prepared an optional meeting brief.',
         action: { type: 'share_brief', fields: Object.keys(brief), values: brief, resource: 'meeting_brief' } };
@@ -596,16 +650,19 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
       if (state.mode !== 'live') return { message: args.purpose === 'intro'
         ? 'I can help arrange a fictional discussion with Bob. You choose exactly what I share.'
         : 'I will use only the exact projection you approve for this collaboration.' };
-      const output = await callModel(state,
+      return callModel(state,
         'You are Alice, a fictional assistant speaking to your own participant. Return JSON {"message":"text"}. '
           + 'Explain that the participant chooses any sharing. Never claim you have already sent or authorized anything. '
           + 'ownSkillDefinitions are participant-provided labels and guidance. Apply that guidance within the existing sharing boundaries; a custom skill ID never grants another tool or permission.',
-        { purpose: args.purpose, ownCalendar: state.agentProfile && !state.agentProfile.skills.includes('read_synthetic_calendar') ? [] : clone(state.calendar), ownKnowledgeGraph: clone(state.agentProfile?.kg || { nodes: [], edges: [] }), skills: clone(state.agentProfile?.skills || []), ownSkillDefinitions: clone((state.agentProfile?.skillDefinitions || []).filter(definition => state.agentProfile?.skills?.includes(definition.id))), receivedBobData: state.agentProfile && !state.agentProfile.skills.includes('inspect_received_snapshot') ? [] : [...state.received.values()].map(item => clone(item.payload)) });
-      assertStillCurrent(args, state);
-      return { message: messageFrom(output) };
+        { purpose: args.purpose, ownCalendar: state.agentProfile && !state.agentProfile.skills.includes('read_synthetic_calendar') ? [] : clone(state.calendar), ownKnowledgeGraph: clone(state.agentProfile?.kg || { nodes: [], edges: [] }), skills: clone(state.agentProfile?.skills || []), ownSkillDefinitions: clone((state.agentProfile?.skillDefinitions || []).filter(definition => state.agentProfile?.skills?.includes(definition.id))), receivedBobData: state.agentProfile && !state.agentProfile.skills.includes('inspect_received_snapshot') ? [] : [...state.received.values()].map(item => clone(item.payload)) }, {}, output => {
+          invariant(output && typeof output === 'object' && !Array.isArray(output) && Object.keys(output).every(key => key === 'message'),
+            'MODEL_INVALID_OUTPUT', 'The model Alice reply must contain only a message.', 502);
+          return { message: messageFrom(output) };
+        }, () => assertStillCurrent(args, state));
     },
     cancelPlanning(args) {
       const state = current(args);
+      state.planningGeneration++;
       const count = state.modelCalls.size;
       for (const abort of state.modelCalls) abort.abort('planning_cancelled');
       return { cancelled: true, role, count };
@@ -616,6 +673,7 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
       invariant(Number.isSafeInteger(args.configRevision) && args.configRevision > state.configRevision,
         'CONFIGURATION_CHANGED', 'A Bob update requires a newer revision.', 409);
       for (const abort of state.modelCalls) abort.abort('configuration_changed');
+      state.planningGeneration++;
       state.bobConfig = clone(args.bobConfig);
       state.configRevision = args.configRevision;
       return { ready: true, role, epoch: args.epoch, configRevision: args.configRevision };

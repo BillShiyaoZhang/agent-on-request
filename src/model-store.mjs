@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { chmod, lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, unlink } from 'node:fs/promises';
+import { renameAtomicFile } from './atomic-file.mjs';
 import path from 'node:path';
 import { canonicalStringify, clone, diffConfig } from './config.mjs';
 import { AppError, requireThat } from './errors.mjs';
@@ -9,8 +10,8 @@ export const DEFAULT_MODEL_CONFIG = {
   provider: 'minimax_cn_token_plan',
   baseUrl: 'https://api.minimax.cn/v1',
   agents: {
-    Alice: { model: 'MiniMax-M3', temperature: 1, maxTokens: 4096, timeoutSeconds: 45, retryLimit: 0, thinking: 'disabled' },
-    Bob: { model: 'MiniMax-M3', temperature: 1, maxTokens: 4096, timeoutSeconds: 45, retryLimit: 0, thinking: 'disabled' }
+    Alice: { model: 'MiniMax-M3', temperature: 1, maxTokens: 4096, timeoutSeconds: 45, retryLimit: 1, thinking: 'disabled' },
+    Bob: { model: 'MiniMax-M3', temperature: 1, maxTokens: 4096, timeoutSeconds: 45, retryLimit: 1, thinking: 'disabled' }
   }
 };
 
@@ -227,7 +228,7 @@ export class ModelStore {
       await handle.sync();
       await handle.close();
       handle = null;
-      await rename(temporary, this.filename);
+      await renameAtomicFile(temporary, this.filename);
     } finally {
       await handle?.close();
       await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error; });

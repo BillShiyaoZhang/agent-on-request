@@ -1,9 +1,12 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { chmod, lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
+import { chmod, lstat, mkdir, open, unlink } from 'node:fs/promises';
+import { renameAtomicFile } from './atomic-file.mjs';
 import path from 'node:path';
 import { hashValue } from './config.mjs';
 import { buildTraceSnapshot, sanitizeTraceSnapshot } from './agent-observability.mjs';
+import { PLANNING_STEPS } from './runtime-helpers.mjs';
+import { MODEL_OUTPUT_DIAGNOSTICS } from './model-provider.mjs';
 
 const IDENTIFIER = /^[A-Za-z0-9_.:\/-]{1,128}$/;
 const SAFE_KINDS = /^[a-z][a-z0-9_]{0,63}$/;
@@ -81,6 +84,8 @@ function whitelistEvent(event, run) {
     else if (key === 'choice' && CHOICES.has(value)) output[key] = value;
     else if (key === 'fields' && Array.isArray(value) && value.length <= 100 && value.every(safeId)) output[key] = [...value];
     else if (key === 'moduleIds' && Array.isArray(value) && value.length <= 8 && value.every(safeId)) output[key] = [...value];
+    else if (key === 'step' && PLANNING_STEPS.includes(value)) output[key] = value;
+    else if (key === 'diagnostic' && typeof value === 'string' && Object.hasOwn(MODEL_OUTPUT_DIAGNOSTICS, value)) output[key] = value;
     else if (key === 'window' || key === 'timeWindow' || key === 'time_window') { const window = safeWindow(value); if (window !== undefined) output[key] = window; }
     else if (key === 'payloadHash' && typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value)) output[key] = value.toLowerCase();
     else if ((key === 'actor' || key === 'recipient') && ACTORS.has(value)) output[key] = value;
@@ -211,7 +216,7 @@ export class ResearchStore {
       await handle.sync();
       await handle.close();
       handle = null;
-      await rename(temporary, this.filename);
+      await renameAtomicFile(temporary, this.filename);
     } finally {
       await handle?.close();
       await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error; });

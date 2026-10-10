@@ -94,6 +94,16 @@ Direct legacy library fixtures that initialize an isolated worker without an ont
 
 These checks establish the exercised implementation paths on that date. They are not a user study, a measured learning result or a guarantee of future model/service availability.
 
+## Verification recorded on 2026-10-10
+
+- The final automated regression reported 308 tests: 307 passed, none failed, and one Windows file-symlink privilege check was skipped. The local run log is [stability-final-acceptance-after-storage.log](../artifacts/stability-final-acceptance-after-storage.log).
+- Three real MiniMax Live rounds each confirmed an actual 30-minute meeting. Two completed as `arranged` with the optional brief. The third encountered HTTP 529 during optional briefing alignment and safely paused with the confirmed meeting and received snapshots preserved; it did not complete the full optional path.
+- Browser rehearsals exercised a failed proposal followed by explicit recovery, peer disconnection/restoration and exact delivery retry, alignment refusal, narrowed sharing, owner/observer changes, reset, PIN access, Chinese/English text and mobile layouts. A failed optional brief could be skipped by the participant while retaining the confirmed meeting, finishing as `arranged` without another model call, data delivery or grant use. The exercised browser checks produced no browser errors.
+- Refusal regression checks covered both roles' `none`/`reject` decisions with missing, blank or oversized explanations, malformed identifiers and extra grant fields. These remained refusals without correction into acceptance or data delivery. Separate direct Worker checks bypassed provider normalization.
+- Windows persistence replacement now retries only transient-eligible rename errors within a short fixed bound. Tests verified that the old destination remains intact until replacement, exhausted attempts preserve committed state, and the profile store cleans its generated temporary file on failure. The particular external cause of the intermittent rename failures was not established.
+
+These are implementation and rehearsal checks, not a user study. The observed optional HTTP failure remains part of the validation record; service availability and every future Live round are not guaranteed by these results.
+
 ## Supplied research sources
 
 - [Zhang et al. (2025), *LLM-Assisted Ontology-Based Task-Oriented Data Exchange Paradigm: A Case Study*](<C:/Users/zhang/Zotero/storage/R5RS5DZS/Zhang et al. - 2025 - LLM-Assisted Ontology-Based Task-Oriented Data Exchange Paradigm A Case Study.pdf>): PDF p. 2 describes natural-language task planning; p. 3 defines `O = map(D)`, the task working subset `W = relate(O,t)` and mutually accepted alignment before exchange. PDF pp. 4–5 describe the FIBO-based case study and acknowledge that automated alignment/conflict handling was not implemented there.

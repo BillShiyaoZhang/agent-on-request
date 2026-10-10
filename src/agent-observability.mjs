@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { ALICE_CALENDAR } from './scenario.mjs';
 import { sanitizeOntologyDialogue } from './ontology-dialogue.mjs';
+import { PLANNING_STEPS } from './runtime-helpers.mjs';
+import { MODEL_OUTPUT_DIAGNOSTICS } from './model-provider.mjs';
 
 const ROLES = ['Alice', 'Bob'];
 const FIELD_LABELS = { day: '日期', time: '时间', status: '状态', title: '事件标题', note: '备注', topic: '讨论主题', agenda: '议程' };
@@ -205,7 +207,11 @@ function baseSnapshot(input) {
       ...(read(task, 'reason') !== undefined ? { reason: text(read(task, 'reason'), 128) } : {}) },
     preparedMeeting: object(read(input, 'preparedMeeting')) ? scalars(read(input, 'preparedMeeting'), ['day', 'time']) : null,
     choices: { initial: text(read(choices, 'initial'), 128), additional: text(read(choices, 'additional'), 128) },
-    waiting: object(waiting) ? { reason: text(read(waiting, 'reason'), 128), message: text(read(waiting, 'message')) } : null,
+    waiting: object(waiting) ? { reason: text(read(waiting, 'reason'), 128), message: text(read(waiting, 'message')),
+      ...(PLANNING_STEPS.includes(read(waiting, 'step')) ? { step: read(waiting, 'step') } : {}),
+      ...(typeof read(waiting, 'code') === 'string' && /^[A-Z_]{1,64}$/.test(read(waiting, 'code')) ? { code: read(waiting, 'code') } : {}),
+      ...(typeof read(waiting, 'diagnostic') === 'string' && Object.hasOwn(MODEL_OUTPUT_DIAGNOSTICS, read(waiting, 'diagnostic')) ? { diagnostic: read(waiting, 'diagnostic') } : {}),
+      ...(['retry_planning','retry_delivery','review_configuration','restore_connection'].includes(read(waiting, 'recovery')) ? { recovery: read(waiting, 'recovery') } : {}) } : null,
     receipts: receipts(read(input, 'receipts')), approvals: approvals(read(input, 'approvals')), grants: grants(read(input, 'grants')),
     policyUses: number(read(input, 'policyUses')) ?? 0, aliceUses: number(read(input, 'aliceUses')),
     aliceCalendar: calendar(read(input, 'aliceCalendar')),

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { detectLanguage, translateText } from '../public/i18n.js';
+import { MODEL_OUTPUT_DIAGNOSTICS } from '../src/model-provider.mjs';
 
 test('language follows the saved choice, then supported browser preferences', () => {
   assert.equal(detectLanguage('en', ['zh-CN']), 'en');
@@ -37,4 +38,29 @@ test('joined validation messages translate without rewriting property paths', ()
   assert.match(translated, /\$\.agents\.Alice\.temperature：必须是/);
   assert.match(translated, /\$\.agents\.Bob\.retryLimit：必须是/);
   assert.equal(translateText(translated, 'en'), errors);
+});
+
+test('free-time confirmation uses plain language and preserves sharing as a separate decision', () => {
+  assert.equal(translateText('Confirm how the two assistants understand free time', 'zh'), '确认两位助理对空闲时间的理解');
+  assert.equal(translateText('Agree to use this rule to find a meeting time', 'zh'), '同意按这条规则寻找会议时间');
+  for (const text of [
+    'This agrees how to search for a time. You will choose what calendar information to share next.',
+    'The recovery outcome needs verification. Check the current step before choosing another retry. No changed sharing decision was sent.',
+    'This round remains in Live model mode.',
+    'Retrying keeps the sharing boundary. It does not approve extra fields or change the mode.'
+  ]) {
+    const chinese = translateText(text, 'zh');
+    assert.notEqual(chinese, text);
+    assert.equal(translateText(chinese, 'en'), text);
+  }
+});
+
+test('every controller-defined model output diagnostic is readable in Chinese', () => {
+  for (const [code, diagnostic] of Object.entries(MODEL_OUTPUT_DIAGNOSTICS)) {
+    const translated = translateText(diagnostic.message, 'zh');
+    assert.notEqual(translated, diagnostic.message, code);
+    assert.match(translated, /[\u4e00-\u9fff]/, code);
+    assert.equal(translateText(translated, 'en'), diagnostic.message, code);
+  }
+  assert.equal(translateText('INCOMPLETE_MAPPING', 'zh'), 'INCOMPLETE_MAPPING');
 });

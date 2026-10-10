@@ -189,7 +189,11 @@ export async function createDemoServer(options = {}) {
         match = /^\/api\/admin\/approvals\/([^/]+)\/decision$/.exec(route);
         if (match && req.method === 'POST') return json(res, await engine.decide(match[1], await body(req)));
         match = /^\/api\/admin\/sessions\/([^/]+)\/intervene$/.exec(route);
-        if (match && req.method === 'POST') return json(res, await engine.intervene(engine.get(match[1]), await body(req)));
+        if (match && req.method === 'POST') {
+          const result = await engine.intervene(engine.get(match[1]), await body(req));
+          if (result.token) result.state = engine.view(engine.get(result.state.session.id), { perspective: 'owner' });
+          return json(res, result);
+        }
       }
       const match = /^\/api\/sessions\/([^/]+)(?:\/(preview|actions))?$/.exec(route);
       if (match) {

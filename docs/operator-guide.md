@@ -16,6 +16,8 @@ The default participant mode uses Guided/Controlled local Alice and Bob processe
 
 Choose Live for a model-assisted ontology dialogue. The interface automatically begins every new Controlled/Live round with alignment review; there is no separate review toggle. Only compatibility API callers omitting `alignmentReview` can use a known Guided mapping for an unambiguous quick start even when later meeting planning is Live. A provider connection probe checks connectivity only; it is not proof that the reviewed alignment and brief path will complete at conference time.
 
+New model configurations default to `retryLimit: 1`: each planning request can make at most two provider calls for that role. Network failures/timeouts and proposal format/semantic corrections share that total budget. A saved explicit zero is respected and permits one call. Incomplete mapping acceptance is an invalid proposal to correct, not a person's refusal. A recognized ontology `reject`/`none` ends the model attempt as a refusal even if its explanation is missing, blank or too long, its identifiers are malformed, or it includes extra fields. Only a bounded explanation or fixed refusal message remains, and selected mapping IDs are cleared. It is never corrected into acceptance; accepting proposals still require full validation. A failure after the budget is exhausted identifies the failed step and a fixed safe explanation. It never switches to Guided automatically.
+
 ## Local rehearsal
 
 Before admitting a participant, rehearse these paths using research consent off:
@@ -37,6 +39,8 @@ Before admitting a participant, rehearse these paths using research consent off:
 ## Initial conditions and visible state
 
 Follow the participant page from the main collaboration flow into optional detail. First inspect the concept differences and task module in the automatic alignment review. Explain Alice's `{day,time,status}` versus Bob's `{weekday,startMinute,endMinute,bookable}` using the concrete conversion card. For ambiguous Free, let the person explicitly confirm or decline invitation meaning. Then choose a separate sharing scope, preview the exact information and confirm only what may be sent. The **Information Alice received** card appears only after a confirmed Bob-to-Alice receipt and shows actual received values; a pending approval is not received information. Narrowing a Bob approval keeps excluded fields out of that card.
+
+A plain explanation of the alignment card is: “The assistants agree how to read a date, a time and the word Free.” Alice's Tuesday clock range must become Bob's weekday number and minute values. An empty calendar alone may not mean the owner wants an invitation. Accepting that interpretation does not send calendar data; the person still chooses the exact sharing preview afterward.
 
 When a participant wants more context, open **Inside Alice · optional** to inspect their own agent's calendar, knowledge, skills and permissions. Bob's unshared initial state is excluded from the default owner HTTP response. A researcher can explicitly select the observer perspective to inspect both synthetic agents; identify that role switch before using it. Use receipt details for the exact fields actually received. Inspectors are read-only; opening a graph or card never sends information or expands either owner's authority.
 
@@ -71,6 +75,10 @@ Recovery operations have distinct meanings:
 | Retry | Reconcile/reuse an existing approved operation |
 | Reset | End the previous epoch, clear both synthetic stores and issue a new participant token; consent resets off |
 | Inject request | Explicit researcher intervention, marked in consented research metadata |
+
+When model planning fails, inspect the displayed step and safe reason before explicitly resuming or retrying. A model correction requests a fresh proposal; a delivery retry reconciles the same already-authorized operation and payload. Neither creates a new disclosure grant. Keep confirmed received snapshots and their provenance visible during recovery; do not restart simply to hide a failed model step. If the participant chooses Guided instead, start a new round explicitly and keep the mode change identifiable in any consented research interpretation.
+
+After a meeting has actually been confirmed, a failed optional Bob brief proposal or briefing alignment also offers **Keep the meeting and skip optional context**. The participant can finish as `arranged` with that exact confirmed meeting, without another model call, brief delivery or authorization use. The action cancels the unfinished optional brief and its pending approvals while keeping receipt history. It applies only to a pause at `bob_brief` or `brief_alignment`; an unconfirmed meeting, another pending delivery, a stopped-sharing round or Replay cannot use it to create success.
 
 ## Both Agents on this computer
 

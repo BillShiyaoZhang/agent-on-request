@@ -9,6 +9,7 @@ import { renderLoginHtml, renderApprovalHtml, renderConsoleHtml } from './operat
 import { rememberDisclosures, restoreDisclosures, observeDisclosures } from './disclosure-state.js';
 import { mountResearchReview } from './research-ui.js';
 import { renderPerspectiveHtml, renderOntologyHtml, renderContributionHtml } from './ontology-ui.js';
+import { renderRecoveryHtml } from './recovery-ui.js';
 
 initLanguageSwitcher();
 
@@ -22,13 +23,15 @@ const pendingKey = 'agent-on-request.pending';
 const openControlsMarker = 'local-demo-open-controls-access';
 let meta, current, participantToken, adminToken, adminState, selectedSessionId, activeView = 'participant', configController, modelController, conditionsController;
 let perspective = 'owner', perspectiveBusy = false;
+let recoveryBusy = false;
+let sessionRestore = null, sessionRestoreBusy = false;
 let adminSessions = [], research = null, dialogContext = null, dialogOpener = null, requestBusy = false, interruptBusy = false, requestSequence = 0, interruptSequence = 0, pollBusy = false, planningNewRound = false;
 let pending = readStorage(pendingKey);
 const local = { mode: 'controlled', ontologyScenario: 'distinct', durationMinutes: 30, consent: false, initial: null, additional: null, preview: null, previewStage: null, previewChoice: null, prediction: null, revocation: null, alignmentAnswer: null, moduleAnswer: null, predictionSubmitted: false, revocationSubmitted: false };
 const researchFilters = { mode: 'all', status: 'all', quality: 'all' };
 const approvalDrafts = new Map();
 let selectedResearchRunId, researchStep = 0;
-let participantFocusFrame, participantStepFocusPending = false, participantPreviewFocusPending = false, adminLoadSequence = 0;
+let participantFocusFrame, participantStepFocusPending = false, participantPreviewFocusPending = false, adminLoadSequence = 0, adminDialogLoadSequence = 0;
 
 function participantFocusSnapshot(view) {
   const node = document.activeElement;
@@ -61,7 +64,23 @@ function restoreParticipantPosition(view, step, focus) {
 
 function readStorage(key) { try { return JSON.parse(sessionStorage.getItem(key)); } catch { return null; } }
 function writeStorage(key, value) { try { value === null ? sessionStorage.removeItem(key) : sessionStorage.setItem(key, JSON.stringify(value)); } catch { /* In-memory operation remains available when session storage is blocked. */ } }
-function rememberSession(token, state) { if (current?.session.id !== state.session.id) { requestSequence++; interruptSequence++; requestBusy = false; interruptBusy = false; } participantToken = token; current = state; writeStorage(sessionKey, { id: state.session.id, token }); }
+function rememberSession(token, state) { if (current?.session.id !== state.session.id) { requestSequence++; interruptSequence++; requestBusy = false; interruptBusy = false; } sessionRestore = null; participantToken = token; current = state; writeStorage(sessionKey, { id: state.session.id, token }); }
+async function restoreParticipantSession({ quiet = false } = {}) {
+  if (!sessionRestore || sessionRestoreBusy) return false;
+  const target = sessionRestore;
+  sessionRestoreBusy = true; renderParticipant();
+  try {
+    const state = await api('/api/sessions/' + encodeURIComponent(target.id), { token: target.token, admin: false });
+    if (sessionRestore !== target) return false;
+    perspective = 'owner'; rememberSession(target.token, state); selectedSessionId = state.session.id;
+    if (!quiet) notify(''); return true;
+  } catch (error) {
+    if (sessionRestore !== target) return false;
+    if ([401, 404, 410].includes(error.status)) { sessionRestore = null; participantToken = null; writeStorage(sessionKey, null); rememberPending(null); notify('This in-memory session is no longer available. A server restart or round reset ends the old round; start a new demo.', 'warning'); }
+    else if (!quiet) notify('The round credential is retained. Check the connection and reload this round; no replacement round was created.', 'warning');
+    return false;
+  } finally { sessionRestoreBusy = false; renderParticipant(); }
+}
 function rememberPending(value) { pending = value; writeStorage(pendingKey, value); }
 const isInterrupt = action => action === 'end' || action === 'stop_sharing';
 function removePendingRequest(requestId) {
@@ -121,6 +140,10 @@ function clearAdmin() {
   approvalDrafts.clear();
   adminToken = null; adminState = null; adminSessions = []; research = null;
   perspective = 'owner';
+  if (current?.perspective === 'observer' && participantToken) {
+    sessionRestore = { id: current.session.id, token: participantToken }; current = null;
+    renderParticipant(); restoreParticipantSession({ quiet: true });
+  }
   enableControls(null);
   configController?.clear();
   modelController?.clear();
@@ -270,6 +293,7 @@ function renderParticipant() {
   const view = $('participant-view');
   const focus = participantFocusSnapshot(view);
   rememberDisclosures(view, view.dataset.disclosureScope || 'start');
+  if (sessionRestore) { view.innerHTML = '<section class="panel" role="status"><h2>Checking the saved round</h2><p>The round credential is retained while its owner view is loaded. No information is shown until the server confirms this view.</p><button class="button primary section-actions" data-participant-action="restore_session" ' + (sessionRestoreBusy ? 'disabled' : '') + '>' + (sessionRestoreBusy ? 'Checking the round…' : 'Reload the saved round') + '</button></section>'; return; }
   if (!current || planningNewRound) { renderStart(); return; }
   const session = current.session;
   view.setAttribute('aria-busy', String(requestBusy || interruptBusy));
@@ -301,11 +325,11 @@ function renderParticipant() {
   else if (current.task?.outcome === 'ended') outcome = '<h2>This demo has ended</h2><p class="lead">No further information will be sent. The receipts show what had already been delivered.</p>';
   const waiting = current.waiting;
   const approvalPending = current.pendingApprovals?.some(item => item.status === 'pending');
-  const heading = session.stage === 'alignment' ? 'Align the concepts for this task' : session.stage === 'initial' ? 'Choose Alice’s sharing boundary' : session.stage === 'additional' ? 'Review Bob’s additional request' : session.stage === 'replay' ? 'Labelled replay' : 'Your collaboration';
+  const heading = session.stage === 'alignment' ? 'Confirm how the two assistants understand free time' : session.stage === 'initial' ? 'Choose Alice’s sharing boundary' : session.stage === 'additional' ? 'Review Bob’s additional request' : session.stage === 'replay' ? 'Labelled replay' : 'Your collaboration';
   const controls = (endingPending ? '<span class="tag warn">End needs confirmation</span>' : !session.ended ? '<button class="button quiet" data-participant-action="end" ' + (interruptBusy ? 'disabled' : '') + '>End this demo</button>' + (!current.alice.stopped && session.mode !== 'replay' ? '<button class="button" data-participant-action="stop_sharing" ' + (interruptBusy ? 'disabled' : '') + '>Stop future sharing</button>' : '') : '<button class="button" data-participant-action="fresh" ' + (requestBusy || interruptBusy || pending ? 'disabled' : '') + '>New demo</button>');
   const warnings = (hasPending && (isInterrupt(pending?.body?.action) ? interruptBusy : requestBusy) ? '<div class="notice" role="status" data-processing-choice><strong>Processing your choice</strong><p>Your original choice is being confirmed. You can stop future sharing or end this round.</p><button class="button" data-participant-action="refresh">Check session state</button></div>' : hasPending ? '<div class="notice warning" role="status"><strong>Submission outcome needs verification</strong><p>The same request ID and intent are retained. No changed sharing choice will be resubmitted automatically.</p><div class="toolbar"><button class="button" data-participant-action="verify_pending">Verify the same submission</button><button class="button" data-participant-action="refresh">Check session state</button></div></div>' : '')
     + (current.alice?.stopped ? '<div class="notice">' + (stoppingPending ? 'Waiting for Stop confirmation. ' : 'Future Alice sharing is stopped. ') + 'Previously received snapshots remain in the receipt history.</div>' : '')
-    + (waiting || session.paused ? '<div class="notice warning" role="status"><strong>' + (session.paused ? 'Collaboration paused' : 'Waiting') + '</strong><p>' + escapeHtml(waiting?.message || 'The researcher paused this round. Your current step and received information are preserved.') + '</p>' + (approvalPending || waiting?.reason === 'admin' || waiting?.reason === 'configuration_changed' ? '<div class="toolbar"><button class="button" data-participant-action="admin_review">Open Bob owner review window</button><span class="muted">Closing it leaves the request pending.</span></div>' : '') + '</div>' : '');
+    + (session.paused ? renderRecoveryHtml(current, { busy: requestBusy || interruptBusy || recoveryBusy || hasPending }) : waiting ? '<div class="notice warning" role="status"><strong>Waiting</strong><p>' + escapeHtml(waiting.message) + '</p>' + (approvalPending || waiting.reason === 'admin' ? '<div class="toolbar"><button class="button" data-participant-action="admin_review">Open Bob owner review window</button><span class="muted">Closing it leaves the request pending.</span></div>' : '') + '</div>' : '');
   const replay = session.stage === 'replay' ? '<section class="panel"><h3>Saved trace · replay</h3><p class="muted">Source: ' + escapeHtml(current.replay?.source || 'Saved replay') + ' · step ' + escapeHtml(current.replay?.index ?? 0) + ' / ' + escapeHtml(current.replay?.total ?? 0) + '</p><button class="button primary section-actions" data-participant-action="replay_next" ' + (requestBusy || interruptBusy || pending || session.ended || (current.replay?.index ?? 0) >= (current.replay?.total ?? 0) ? 'disabled' : '') + '>Next replay step</button></section>' : '';
   const ontologyCard = renderOntologyHtml(current, { busy: requestBusy || interruptBusy || Boolean(pending) || session.paused || Boolean(waiting) });
   const ontology = session.stage === 'alignment' || !ontologyCard ? ontologyCard : '<details class="ontology-aligned-access" data-disclosure-id="ontology-accepted-summary"><summary><span>' + (current.ontology?.status === 'accepted' ? 'Meaning aligned for this task' : 'Alignment decision & evidence') + '</span><small>Definitions, mappings and confirmed agent dialogue</small></summary>' + ontologyCard + '</details>';
@@ -330,6 +354,7 @@ async function startSession() {
   finally { requestBusy = false; renderParticipant(); }
 }
 async function refreshCurrent({ quiet = false } = {}) {
+  if (sessionRestore) return restoreParticipantSession({ quiet });
   if (!current || !participantToken) return;
   const sessionId = current.session.id, token = participantToken;
   const observer = perspective === 'observer' && Boolean(adminToken);
@@ -421,6 +446,7 @@ $('participant-view').addEventListener('click', event => {
   const button = event.target.closest('[data-participant-action]'); if (!button || button.disabled) return;
   const actionName = button.dataset.participantAction;
   if (actionName === 'start') startSession();
+  else if (actionName === 'restore_session') restoreParticipantSession();
   else if (actionName === 'recommended') startRecommended();
   else if (actionName === 'perspective') switchPerspective(button.dataset.perspective);
   else if (actionName.startsWith('alignment_')) performAction('alignment_decision', { decision: actionName.slice('alignment_'.length), expectedAlignmentVersion: current.ontology?.revision, ...(button.dataset.bookable !== undefined ? { calendarFreeMeansBookable: button.dataset.bookable === 'true' } : {}) });
@@ -430,6 +456,7 @@ $('participant-view').addEventListener('click', event => {
   else if (actionName === 'verify_pending') performAction(pending?.body?.action, {}, { repeat: true });
   else if (actionName === 'refresh') refreshCurrent();
   else if (actionName === 'admin_review') openAdminDialog({ kind: 'approval', sessionId: current.session.id });
+  else if (actionName === 'recover') openAdminDialog({ kind: 'recovery', sessionId: current.session.id });
   else if (actionName === 'end') showDialog('end-dialog', button);
   else if (actionName === 'answer_prediction') performAction(actionName, { answer: local.prediction });
   else if (actionName === 'answer_revocation') performAction(actionName, { answer: local.revocation });
@@ -483,6 +510,7 @@ function openAdminDialog(context = { kind: 'login' }) {
   showDialog('admin-dialog');
   if (!adminToken) renderLogin();
   else if (context.kind === 'approval') loadApprovals(context.sessionId);
+  else if (context.kind === 'recovery') loadRecovery(context.sessionId);
   else { closeDialog('admin-dialog'); setView('console'); }
 }
 function renderLogin(message = '') {
@@ -501,21 +529,40 @@ $('admin-dialog-body').addEventListener('submit', async event => {
   try {
     const result = await api('/api/admin/login', { method: 'POST', auth: false, body: { pin } }); enableControls(result.token);
     if (context?.kind === 'approval') await loadApprovals(context.sessionId);
+    else if (context?.kind === 'recovery') await loadRecovery(context.sessionId);
     else if (context?.kind === 'perspective') { closeDialog('admin-dialog'); await switchPerspective(context.perspective); }
     else closeDialog('admin-dialog');
   } catch (error) { renderLogin(error.message); }
 });
 async function loadApprovals(sessionId) {
   if (!adminToken || !sessionId) return;
+  const sequence = ++adminDialogLoadSequence;
   rememberApprovalDraft();
   dialogContext = { kind: 'approval', sessionId }; $('admin-dialog-title').textContent = meta?.openControls ? 'Review Bob’s sharing request' : 'Bob authorization · researcher review'; $('admin-dialog-body').innerHTML = '<p class="loading">Loading the immutable pending request…</p>';
   try {
     const result = await api('/api/admin/sessions/' + encodeURIComponent(sessionId) + '/approvals');
-    if (!dialogContext || dialogContext.sessionId !== sessionId || !$('admin-dialog').open) return;
+    if (sequence !== adminDialogLoadSequence || dialogContext?.kind !== 'approval' || dialogContext.sessionId !== sessionId || !$('admin-dialog').open) return;
     const approvals = result.approvals.filter(item => item.status === 'pending'); dialogContext.approvals = approvals;
     if (!approvals.length) { $('admin-dialog-body').innerHTML = '<p>No pending Bob approval. Closing this window returns to the unchanged participant step.</p><div class="toolbar dialog-actions"><button class="button" data-close-dialog="admin-dialog">Return</button></div>'; return; }
     renderApproval(approvals[0]);
-  } catch (error) { $('admin-dialog-body').innerHTML = '<div class="notice error" role="alert">' + escapeHtml(error.message) + '</div><button class="button" data-close-dialog="admin-dialog">Return without deciding</button>'; }
+  } catch (error) { if (sequence === adminDialogLoadSequence && dialogContext?.kind === 'approval' && dialogContext.sessionId === sessionId && $('admin-dialog').open) $('admin-dialog-body').innerHTML = '<div class="notice error" role="alert">' + escapeHtml(error.message) + '</div><button class="button" data-close-dialog="admin-dialog">Return without deciding</button>'; }
+}
+async function loadRecovery(sessionId, message = '') {
+  if (!adminToken || !sessionId) return;
+  const sequence = ++adminDialogLoadSequence;
+  dialogContext = { kind: 'recovery', sessionId };
+  $('admin-dialog-title').textContent = 'Recover the paused step';
+  $('admin-dialog-body').innerHTML = '<p class="loading">Checking the current step and confirmed receipts…</p>';
+  try {
+    const isCurrent = current?.session.id === sessionId;
+    const state = await api('/api/sessions/' + encodeURIComponent(sessionId) + (isCurrent ? '' : '?perspective=observer'), { token: isCurrent ? participantToken : adminToken, admin: !isCurrent });
+    if (sequence !== adminDialogLoadSequence || dialogContext?.kind !== 'recovery' || dialogContext.sessionId !== sessionId || !$('admin-dialog').open) return;
+    dialogContext.state = state;
+    $('admin-dialog-body').innerHTML = state.session.paused && !state.session.ended ? renderRecoveryHtml(state, { controls: true, busy: recoveryBusy, message }) : '<p>No paused operation remains. Review the current round before taking another action.</p><button class="button section-actions" data-close-dialog="admin-dialog">Return</button>';
+  } catch (error) {
+    if (sequence !== adminDialogLoadSequence || dialogContext?.kind !== 'recovery' || dialogContext.sessionId !== sessionId || !$('admin-dialog').open) return;
+    $('admin-dialog-body').innerHTML = '<p class="notice warning">' + escapeHtml(error.message) + '</p><div class="toolbar"><button class="button" data-recovery-action="refresh">Check the current step</button><button class="button" data-close-dialog="admin-dialog">Return without retrying</button></div>';
+  }
 }
 function renderApproval(approval, message = '') {
   dialogContext.selected = approval;
@@ -529,14 +576,42 @@ function renderApproval(approval, message = '') {
   restoreDisclosures(body, scope);
 }
 $('admin-dialog-body').addEventListener('click', async event => {
+  const recoveryButton = event.target.closest('[data-recovery-action]');
+  if (recoveryButton && !recoveryButton.disabled && dialogContext?.kind === 'recovery' && !recoveryBusy) {
+    const context = dialogContext, sessionId = context.sessionId, recoveryAction = recoveryButton.dataset.recoveryAction;
+    if (recoveryAction === 'refresh') { await loadRecovery(sessionId); return; }
+    if (recoveryAction === 'configure') { selectedSessionId = sessionId; closeDialog('admin-dialog'); setView('config'); return; }
+    if (!['retry', 'restore_bob'].includes(recoveryAction)) return;
+    recoveryBusy = true;
+    $('admin-dialog-body').innerHTML = renderRecoveryHtml(context.state, { controls: true, busy: true }); renderParticipant();
+    let recoveryMessage = '';
+    try {
+      const result = await api('/api/admin/sessions/' + encodeURIComponent(sessionId) + '/intervene', { method: 'POST', body: { action: recoveryAction } });
+      applyState(result.state);
+      if (current?.session.id === sessionId) await refreshCurrent({ quiet: true });
+    } catch (error) {
+      if (error.status === 401 && !meta?.openControls) { recoveryBusy = false; if (dialogContext?.kind === 'recovery' && dialogContext.sessionId === sessionId) renderLogin('Researcher sign-in expired. Sign in again to recover this paused step.'); return; }
+      recoveryMessage = error.status ? error.message : 'The recovery outcome needs verification. Check the current step before choosing another retry. No changed sharing decision was sent.';
+    } finally { recoveryBusy = false; renderParticipant(); }
+    if (dialogContext?.kind === 'recovery' && dialogContext.sessionId === sessionId && $('admin-dialog').open) await loadRecovery(sessionId, recoveryMessage);
+    return;
+  }
   const button = event.target.closest('[data-approval-decision]'); if (!button || !dialogContext?.selected || button.disabled) return;
-  const approval = dialogContext.selected;
+  const context = dialogContext, approval = context.selected;
   const fields = [...$('admin-dialog-body').querySelectorAll('input[name="approval-field"]:checked')].map(input => input.value);
   const body = { decision: button.dataset.approvalDecision, fields, expectedPolicyRevision: approval.policyRevision, expectedPayloadHash: approval.payloadHash };
+  if (body.decision !== 'deny' && !fields.length) { renderApproval(approval, 'Select at least one field to allow a reply, or decline the request.'); return; }
   if (body.decision === 'allow_round') { body.maxUses = Number($('approval-max-uses').value); body.expiryMinutes = Number($('approval-expiry').value); }
   $('admin-dialog-body').querySelectorAll('button,input').forEach(node => { node.disabled = true; });
-  try { const result = await api('/api/admin/approvals/' + encodeURIComponent(approval.id) + '/decision', { method: 'POST', body }); applyState(result.state); closeDialog('admin-dialog'); approvalDrafts.delete(approval.id); if (activeView === 'console') loadAdminSessions(); }
-  catch (error) { if (error.status === 401 && !meta?.openControls) { renderLogin('Researcher sign-in expired. Sign in again to review this pending request.'); } else if (error.status === 409) { await loadApprovals(approval.sessionId); notify('The pending Bob request changed. Review its new revision; no decision was automatically resent.', 'warning'); } else renderApproval(approval, error.message); }
+  try { const result = await api('/api/admin/approvals/' + encodeURIComponent(approval.id) + '/decision', { method: 'POST', body }); applyState(result.state); if (dialogContext === context) closeDialog('admin-dialog'); approvalDrafts.delete(approval.id); if (activeView === 'console') loadAdminSessions(); }
+  catch (error) { if (dialogContext !== context || !$('admin-dialog').open) return; if (error.status === 401 && !meta?.openControls) { renderLogin('Researcher sign-in expired. Sign in again to review this pending request.'); } else if (error.status === 409 || !error.status) { await loadApprovals(approval.sessionId); notify(error.status === 409 ? 'The pending Bob request changed. Review its new revision; no decision was automatically resent.' : 'The approval outcome needs verification. The current pending request was checked; no approval was automatically resent.', 'warning'); } else renderApproval(approval, error.message); }
+});
+$('admin-dialog-body').addEventListener('change', event => {
+  if (event.target.name !== 'approval-field') return;
+  const body = $('admin-dialog-body'), empty = !body.querySelector('input[name="approval-field"]:checked');
+  body.querySelectorAll('[data-approval-decision="allow_once"],[data-approval-decision="allow_round"]').forEach(button => { button.disabled = empty; });
+  const hint = body.querySelector('[data-empty-approval]'); if (hint) hint.hidden = !empty;
+  rememberApprovalDraft();
 });
 $('admin-open').addEventListener('click', () => openAdminDialog());
 $('admin-logout').addEventListener('click', async () => { try { await api('/api/admin/logout', { method: 'POST' }); } catch { /* Clearing local admin capability is still required. */ } clearAdmin(); });
@@ -573,13 +648,20 @@ $('console-view').addEventListener('click', async event => {
   if (actionName === 'refresh') { loadAdminSessions(); return; }
   if (actionName === 'config') { setView('config'); return; }
   if (actionName === 'approvals') { openAdminDialog({ kind: 'approval', sessionId: selectedSessionId }); return; }
+  if (actionName === 'retry' || actionName === 'resume' && adminState?.session.paused) { openAdminDialog({ kind: 'recovery', sessionId: selectedSessionId }); return; }
   if (!selectedSessionId || adminState?.session.id !== selectedSessionId) return; button.disabled = true;
   try {
     const oldId = selectedSessionId;
     const result = await api('/api/admin/sessions/' + encodeURIComponent(oldId) + '/intervene', { method: 'POST', body: { action: actionName } });
     if (result.token && current?.session.id === oldId) {
-      const ownerState = result.state?.perspective === 'owner' ? result.state : await api('/api/sessions/' + encodeURIComponent(result.state.session.id), { token: result.token, admin: false });
-      perspective = 'owner'; rememberSession(result.token, ownerState); rememberPending(null); clearPreview(); local.initial = null; local.additional = null; local.prediction = null; local.revocation = null; local.alignmentAnswer = null; local.moduleAnswer = null; local.predictionSubmitted = false; local.revocationSubmitted = false; renderParticipant();
+      const target = { id: result.state.session.id, token: result.token };
+      // Preserve the replacement credential before any follow-up read can fail.
+      perspective = 'owner'; participantToken = result.token; writeStorage(sessionKey, target); sessionRestore = target; current = null;
+      requestSequence++; interruptSequence++; requestBusy = false; interruptBusy = false;
+      rememberPending(null); clearPreview(); local.initial = null; local.additional = null; local.prediction = null; local.revocation = null; local.alignmentAnswer = null; local.moduleAnswer = null; local.predictionSubmitted = false; local.revocationSubmitted = false; renderParticipant();
+      if (result.state?.perspective === 'owner') rememberSession(result.token, result.state);
+      else await restoreParticipantSession();
+      renderParticipant();
     }
     else applyState(result.state);
     selectedSessionId = result.state?.session.id || oldId; await loadAdminSessions(); notify('');
@@ -627,8 +709,9 @@ async function boot() {
     const stored = readStorage(sessionKey);
     if (stored?.id && stored?.token) {
       participantToken = stored.token;
-      try { current = await api('/api/sessions/' + encodeURIComponent(stored.id)); selectedSessionId = current.session.id; if (pending?.sessionId !== current.session.id) rememberPending(null); }
-      catch (error) { current = null; participantToken = null; writeStorage(sessionKey, null); rememberPending(null); notify('The previous in-memory round is unavailable. Start a new demo; no previous sharing choice will be reconstructed.', 'warning'); }
+      sessionRestore = { id: stored.id, token: stored.token }; current = null;
+      await restoreParticipantSession();
+      if (current && pending?.sessionId !== current.session.id) rememberPending(null);
     } else rememberPending(null);
     renderParticipant();
     await conditionsController.load();

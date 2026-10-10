@@ -12,6 +12,16 @@
 .ontology-definition.bob { background:var(--violet-soft); }
 .ontology-definition > strong { display:block; margin:6px 0; font-size:17px; }
 .ontology-definition p { font-size:13px; overflow-wrap:anywhere; }
+.ontology-meaning-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin:14px 0; }
+.ontology-meaning-grid + .ontology-rule { background:var(--soft); }
+.recovery-panel { border-top:3px solid var(--amber,#d99327); margin:16px 0; }
+.recovery-panel .panel-heading { align-items:flex-start; }
+.recovery-panel .definition-list { margin:14px 0; }
+.recovery-receipts { padding:13px 15px; background:var(--soft); border-radius:9px; }
+.recovery-receipts > strong { display:block; margin-bottom:9px; }
+.recovery-receipts p { font-size:13px; margin:6px 0; }
+.recovery-receipts p > span { display:block; margin-top:5px; }
+.recovery-explanation { margin:14px 0 7px; }
 .ontology-mapping-link { display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; }
 .ontology-mapping-link > span { color:var(--violet); font-size:28px; }
 .ontology-mapping-link small { font-size:11px; }
@@ -58,5 +68,5 @@
 .ontology-contribution > details > .ontology-panel { margin-top:12px; }
 .ontology-transcript .tag.good { margin-left:8px; }
 .ontology-transcript code { display:block; margin-top:5px; }
-@media(max-width:700px) { .perspective-bar { flex-direction:column; align-items:flex-start; } .ontology-contribution-grid { grid-template-columns:minmax(0,1fr); } .ontology-mapping { grid-template-columns:minmax(0,1fr); gap:9px; } .ontology-mapping-link { flex-direction:row; gap:10px; } .ontology-mapping-link > span { transform:rotate(90deg); font-size:24px; } .ontology-module-grid { grid-template-columns:minmax(0,1fr); } .ontology-story-grid { grid-template-columns:minmax(0,1fr); } }
+@media(max-width:700px) { .perspective-bar { flex-direction:column; align-items:flex-start; } .ontology-contribution-grid,.ontology-meaning-grid { grid-template-columns:minmax(0,1fr); } .ontology-mapping { grid-template-columns:minmax(0,1fr); gap:9px; } .ontology-mapping-link { flex-direction:row; gap:10px; } .ontology-mapping-link > span { transform:rotate(90deg); font-size:24px; } .ontology-module-grid { grid-template-columns:minmax(0,1fr); } .ontology-story-grid { grid-template-columns:minmax(0,1fr); } }
 @media(max-width:600px) { .experience-progress:has(li:nth-child(4)) { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; } .ontology-aligned-access > summary small,.understanding-access > summary small,.initial-conditions-access > summary small { max-width:45%; } }

@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile, lstat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, lstat, unlink } from 'node:fs/promises';
+import { renameAtomicFile } from './atomic-file.mjs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { clone, DEFAULT_BOB_CONFIG, validateConfig, hashValue } from './config.mjs';
@@ -42,15 +43,20 @@ export class ProfileStore {
     this.queue = result.catch(() => {});
     return result;
   }
-  async save() {
+  // The rename dependency is injectable by local tests, never from an HTTP request.
+  async save({ renameFile = renameAtomicFile } = {}) {
     if (!this.persist) return;
     await mkdir(this.directory, { recursive: true, mode: 0o700 });
     const stat = await lstat(this.directory);
     requireThat(stat.isDirectory() && !stat.isSymbolicLink(), 'CONFIG_FILE', '配置目录无效。');
     const filename = path.join(this.directory, 'config.json');
     const temporary = path.join(this.directory, `.config-${randomUUID()}.tmp`);
-    await writeFile(temporary, JSON.stringify({ template: this.template, templateRevision: this.templateRevision, revision: this.revision, profiles: this.list(), versions: this.versions }), { flag: 'wx', mode: 0o600 });
-    await rename(temporary, filename);
+    try {
+      await writeFile(temporary, JSON.stringify({ template: this.template, templateRevision: this.templateRevision, revision: this.revision, profiles: this.list(), versions: this.versions }), { flag: 'wx', mode: 0o600 });
+      await renameFile(temporary, filename);
+    } finally {
+      await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error; });
+    }
   }
   archive(config, target) {
     const revision = ++this.revision;

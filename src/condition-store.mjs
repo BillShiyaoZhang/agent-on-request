@@ -1,5 +1,6 @@
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, rename, unlink } from 'node:fs/promises';
+import { lstat, mkdir, open, unlink } from 'node:fs/promises';
+import { renameAtomicFile } from './atomic-file.mjs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { canonicalStringify, DEFAULT_BOB_CONFIG, hashValue } from './config.mjs';
@@ -119,7 +120,7 @@ export class ConditionStore {
       await handle.close(); handle = null;
       await this.assertDirectory();
       await this.assertFile();
-      await rename(temporary, this.filename);
+      await renameAtomicFile(temporary, this.filename);
     } finally {
       await handle?.close();
       try { await unlink(temporary); } catch (error) { if (error.code !== 'ENOENT') throw error; }
