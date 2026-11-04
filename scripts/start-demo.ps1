@@ -1,3 +1,5 @@
+param([switch]$Hermes)
+
 $ErrorActionPreference = 'Stop'
 $demoRoot = Split-Path -Parent $PSScriptRoot
 $demoCandidates = @()
@@ -13,5 +15,7 @@ foreach ($demoCandidate in $demoCandidates) {
 }
 if (-not $demoNode) { throw 'Node.js 26+ is required. Install Node.js 26+, or set AGENT_DEMO_NODE to its node.exe path.' }
 Write-Host "Using $demoNode"
-& $demoNode (Join-Path $PSScriptRoot 'demo.mjs')
+$demoArgs = @()
+if ($Hermes) { $demoArgs += '--hermes' }
+& $demoNode (Join-Path $PSScriptRoot 'demo.mjs') @demoArgs
 exit $LASTEXITCODE

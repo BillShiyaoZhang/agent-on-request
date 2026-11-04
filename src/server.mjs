@@ -42,13 +42,14 @@ export async function createDemoServer(options = {}) {
   requireThat(typeof adminPin === 'string' && adminPin.length >= 6 && adminPin.length <= 128, 'PIN_CONFIG', '管理员 PIN 需要 6–128 个字符。');
   // The event application always runs both Agents on this computer. Remote adapters are library fixtures only.
   const runtime = options.runtime ?? createRuntimeManager({ ...options, bobUrl: '' });
+  const useHermes = Boolean(options.hermes);
   const legacyProvider = Boolean(options.modelBaseUrl && options.modelName);
   const initialModelConfig = options.modelConfig ?? (legacyProvider ? {
     provider: 'openai_compatible', baseUrl: options.modelBaseUrl,
     agents: Object.fromEntries(['Alice', 'Bob'].map(role => [role, { ...DEFAULT_MODEL_CONFIG.agents[role], model: options.modelName,
       temperature: 0.2, timeoutSeconds: (options.modelTimeoutMs ?? 20_000) / 1000 }]))
   } : DEFAULT_MODEL_CONFIG);
-  const models = options.models ?? new ModelStore({ directory, persist: options.persist !== false, initialConfig: initialModelConfig,
+  const models = options.models ?? new ModelStore({ directory, persist: !useHermes && options.persist !== false, initialConfig: initialModelConfig,
     apiKey: legacyProvider ? options.modelApiKey ?? '' : options.minimaxApiKey ?? process.env.MINIMAX_TOKEN_PLAN_KEY ?? '',
     environmentApiKey: options.environmentApiKey });
   const profiles = options.profiles ?? new ProfileStore({ directory, persist: options.persist !== false });
@@ -103,7 +104,8 @@ export async function createDemoServer(options = {}) {
         const status = runtime.status();
         return json(res, { title: 'Agent on Request', modes: [
           { id: 'controlled', label: 'Controlled', available: true, description: 'Offline rule-based planning with real process communication and receipt confirmation.' },
-          { id: 'live', label: 'Live', available: status.live.available, description: 'Configured model planning; the session controller still enforces permissions.' },
+          { id: 'live', label: 'Live', available: status.live.available, description: useHermes
+            ? 'Planning in two local Hermes profiles with direct agent-comm delivery.' : 'Configured model planning; the session controller still enforces permissions.' },
           { id: 'replay', label: 'Replay', available: true, description: 'A synthetic reference trace; no messages or research records.' }
         ], live: status.live, openControls, consentVersion: 'research-v2', runtime: status });
       }
@@ -148,6 +150,9 @@ export async function createDemoServer(options = {}) {
         if (conditionMatch && req.method === 'DELETE') {
           await conditionsStore.delete(conditionMatch[1], Number(url.searchParams.get('expectedRevision')));
           return json(res, { bundles: conditionsStore.list() });
+        }
+        if (useHermes && /^\/api\/admin\/models(?:\/|$)/.test(route)) {
+          throw new AppError('HERMES_MANAGED_MODELS', 'Configure models in the two local Hermes profiles.', 409);
         }
         if (route === '/api/admin/models' && req.method === 'GET') return json(res, models.view());
         if (route === '/api/admin/models/validate' && req.method === 'POST') return json(res, models.validate((await body(req)).config));

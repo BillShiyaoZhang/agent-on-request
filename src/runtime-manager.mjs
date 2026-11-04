@@ -1,12 +1,15 @@
 import { WorkerClient, RemoteBobClient } from './runtime-client.mjs';
 import { RuntimeError, invariant, canonical, hashPayload, verifyObject, validateSessionRef } from './runtime-helpers.mjs';
-import { callProvider } from './model-provider.mjs';
+import { callHermesPlanner, callProvider } from './model-provider.mjs';
 import { ontologyDefinitions, createOntologyDialogue, startOntologyDialogue, resolveOntologyDialogue } from './ontology-dialogue.mjs';
 
 export { RuntimeError, hashPayload } from './runtime-helpers.mjs';
 
 /** Controller-facing adapter. A plan is never a disclosure authorization. */
 export function createRuntimeManager(options = {}) {
+  const { hermes, peerTransport } = options;
+  const hermesSettings = { timeoutSeconds: 45, retryLimit: 1 };
+  let hermesReady = false;
   const legacySettings = { model: options.modelName ?? process.env.MODEL_NAME ?? '', temperature: 0.2,
     maxTokens: 4096, timeoutSeconds: (options.modelTimeoutMs ?? 20_000) / 1000, retryLimit: 0, thinking: 'disabled' };
   let models = { revision: 1, apiKey: options.modelApiKey ?? process.env.MODEL_API_KEY ?? '', config: {
@@ -15,6 +18,7 @@ export function createRuntimeManager(options = {}) {
   let legacyMode = true;
   // Product rounds default to two local isolated workers. Remote pairing is an explicit compatibility option.
   const bobUrl = options.bobUrl;
+  invariant(!bobUrl || (!hermes && !peerTransport), 'RUNTIME_CONFIG', 'The Hermes direct demo requires both local roles.');
   const bobToken = options.bobToken ?? process.env.BOB_TOKEN;
   const sessions = new Map();
   const retired = new Set();
@@ -41,18 +45,24 @@ export function createRuntimeManager(options = {}) {
   }
 
   function available(snapshot = models) {
+    if (hermes) return hermesReady;
     return Boolean(snapshot.config.baseUrl && snapshot.config.agents.Alice.model && snapshot.config.agents.Bob.model
       && (snapshot.config.provider !== 'minimax_cn_token_plan' || snapshot.apiKey));
   }
   function modelInfo(snapshot = models) {
+    if (hermes) return { revision: 1, provider: 'hermes', agents: {
+      Alice: { model: 'Hermes Alice', ...hermesSettings }, Bob: { model: 'Hermes Bob', ...hermesSettings },
+    }, disclosure: 'Live 由 Alice 和 Bob 各自的本机 Hermes profile 规划。两端的模型供应商可能收到该端用于规划的虚构数据。对端数据仅在字段授权并交付后用于规划。Hermes profile 可在本机保存运行记录。' };
     return { revision: snapshot.revision, provider: snapshot.config.provider, baseUrl: snapshot.config.baseUrl,
       agents: structuredClone(snapshot.config.agents),
       disclosure: `本轮 Alice 使用 ${snapshot.config.agents.Alice.model}，Bob 使用 ${snapshot.config.agents.Bob.model}，模型服务地址为 ${snapshot.config.baseUrl}。Live 会把虚构日历发给 Alice 的模型；Bob 的模型只收到实际授权传送给 Bob 的日历投影，以及 Bob 自己的模拟信息。服务商可能按照其政策处理和保留输入；模型错误会明确显示。` };
   }
   function sanitized(role) {
+    if (hermes) return { name: `Hermes ${role}`, available: hermesReady, timeoutMs: hermesSettings.timeoutSeconds * 1000 };
     return { name: models.config.agents[role].model, available: available(), timeoutMs: models.config.agents[role].timeoutSeconds * 1000 };
   }
   function effectiveSettings(state, role, hints) {
+    if (hermes) return hermesSettings;
     const settings = { ...state.models.config.agents[role] };
     if (state.legacyMode && role === 'Bob') {
       const legacy = hints ?? state.runtime;
@@ -70,10 +80,35 @@ export function createRuntimeManager(options = {}) {
     const state = session(request);
     invariant(state.mode === 'live' && request.role === role && request.modelRevision === state.models.revision,
       'MODEL_INVALID_REQUEST', 'The model request does not match this active round.', 409);
-    const result = await callProvider({ connection: { ...state.models.config, apiKey: state.models.apiKey },
-      settings: effectiveSettings(state, role, request.legacyRuntime), system: request.system, context: request.context, signal: request.signal });
+    const settings = effectiveSettings(state, role, request.legacyRuntime);
+    const result = hermes ? await callHermesPlanner(hermes, request, settings.timeoutSeconds * 1000)
+      : await callProvider({ connection: { ...state.models.config, apiKey: state.models.apiKey },
+        settings, system: request.system, context: request.context, signal: request.signal });
     session(request);
     return result;
+  }
+
+  function checkDispatch(ref, generation) {
+    invariant(session(ref).dispatchGeneration === generation, 'PLANNING_CANCELLED', 'This peer operation was interrupted.', 409);
+    requireBob();
+  }
+
+  async function deliverPeer(sender, recipient, method, ref, envelope, generation, operation) {
+    if (!peerTransport) return recipient.call(method, { ...ref, envelope });
+    checkDispatch(ref, generation);
+    if (operation) {
+      const previous = await recipient.call('verifyReceipt', operation);
+      if (previous) return peerTransport.transfer(recipient.role, previous, { beforeSend: () => session(ref) });
+    }
+    const received = await peerTransport.transfer(sender.role, envelope, { beforeSend: () => {
+      checkDispatch(ref, generation);
+      invariant(operation?.expiresAt === undefined || operation.expiresAt > Date.now(),
+        recipient.role === 'Bob' ? 'ALICE_AUTH_EXPIRED' : 'BOB_AUTH_EXPIRED', 'The exact authorization expired before direct transmission.', 403);
+    } });
+    session(ref);
+    requireBob();
+    const receipt = await recipient.call(method, { ...ref, envelope: received });
+    return peerTransport.transfer(recipient.role, receipt, { beforeSend: () => session(ref) });
   }
 
   function checkedReceipt(result, envelope, recipient, identity) {
@@ -94,6 +129,7 @@ export function createRuntimeManager(options = {}) {
 
   const manager = {
     async configureModels(snapshot) {
+      if (hermes) return modelInfo();
       invariant(snapshot?.config?.agents?.Alice && snapshot?.config?.agents?.Bob && Number.isSafeInteger(snapshot.revision),
         'MODEL_CONFIG', 'A valid model snapshot is required.');
       models = structuredClone(snapshot);
@@ -109,25 +145,34 @@ export function createRuntimeManager(options = {}) {
       if (starting) return starting;
       starting = (async () => {
         try {
+          if (hermes) {
+            await Promise.all(['Alice', 'Bob'].map(role => hermes.check({ role })));
+            hermesReady = true;
+          }
+          await peerTransport?.start();
           alice = new WorkerClient('Alice', sanitized('Alice'), { onModelCall: request => broker('Alice', request) });
           bob = bobUrl ? new RemoteBobClient(bobUrl, bobToken) : new WorkerClient('Bob', sanitized('Bob'), { onModelCall: request => broker('Bob', request) });
           [aliceStatus, bobStatus] = await Promise.all([alice.start(), bob.start()]);
           started = true;
           return manager.status();
         } catch (error) {
-          await Promise.allSettled([alice?.close(), bob?.close()]);
+          hermesReady = false;
+          await Promise.allSettled([alice?.close(), bob?.close(), peerTransport?.close()]);
           throw error;
         } finally { starting = undefined; }
       })();
       return starting;
     },
     status() {
+      const transport = peerTransport?.status();
       return {
-        alice: { online: Boolean(started && !closed && alice?.online), role: 'Alice', transport: 'ipc', isolation: alice?.isolation, ...(aliceStatus?.pid ? { pid: aliceStatus.pid } : {}) },
-        bob: { online: Boolean(started && !closed && bobOnline && bob?.online), role: 'Bob', transport: bobUrl ? 'http' : 'ipc', isolation: bob?.isolation, ...(bobStatus?.pid ? { pid: bobStatus.pid } : {}) },
+        alice: { online: Boolean(started && !closed && alice?.online), role: 'Alice', transport: transport ? 'agent-comm-direct' : 'ipc', isolation: alice?.isolation, ...(aliceStatus?.pid ? { pid: aliceStatus.pid } : {}) },
+        bob: { online: Boolean(started && !closed && bobOnline && bob?.online), role: 'Bob', transport: transport ? 'agent-comm-direct' : bobUrl ? 'http' : 'ipc', isolation: bob?.isolation, ...(bobStatus?.pid ? { pid: bobStatus.pid } : {}) },
+        ...(transport ? { peerTransport: transport } : {}),
         live: {
           available: Boolean(available() && !closed && !bobUrl),
-          model: available() ? models.config.agents.Alice.model : null,
+          model: available() ? modelInfo().agents.Alice.model : null,
+          ...(hermes ? { harness: 'hermes' } : {}),
           models: modelInfo(), disclosure: modelInfo().disclosure,
         },
       };
@@ -151,16 +196,18 @@ export function createRuntimeManager(options = {}) {
       const ontologyContext = { scenario: ontologyDialogue?.scenario ?? 'distinct', task: ontologyDialogue?.task ?? { type: 'schedule', durationMinutes: 30 } };
       const common = { sessionId: args.sessionId, epoch: args.epoch, mode: args.mode, configRevision: args.configRevision,
         modelRevision: snapshot.revision, modelAvailable: available(snapshot) };
+      const roleSettings = role => hermes ? { modelSettings: hermesSettings }
+        : !legacyMode ? { modelSettings: snapshot.config.agents[role] } : {};
       try {
         const [a, b] = await Promise.all([
           alice.call('initialize', { ...common, ontologyContext, ownOntology: args.ownOntology?.Alice ?? definitions.Alice,
-            ...(!legacyMode ? { modelSettings: snapshot.config.agents.Alice } : {}), aliceData: args.aliceData, ...(args.aliceProfile ? { agentProfile: args.aliceProfile } : {}), peerPublicKey: bob.identity }),
+            ...roleSettings('Alice'), aliceData: args.aliceData, ...(args.aliceProfile ? { agentProfile: args.aliceProfile } : {}), peerPublicKey: bob.identity }),
           bob.call('initialize', { ...common, ontologyContext, ownOntology: args.ownOntology?.Bob ?? definitions.Bob,
-            ...(!legacyMode ? { modelSettings: snapshot.config.agents.Bob } : {}), bobConfig: args.bobConfig, ...(args.bobProfile ? { agentProfile: args.bobProfile } : {}), peerPublicKey: alice.identity }),
+            ...roleSettings('Bob'), bobConfig: args.bobConfig, ...(args.bobProfile ? { agentProfile: args.bobProfile } : {}), peerPublicKey: alice.identity }),
         ]);
         sessions.set(args.sessionId, { epoch: args.epoch, mode: args.mode, digest,
           configRevision: args.configRevision, runtime: structuredClone(args.bobConfig?.runtime || {}), models: snapshot, legacyMode,
-          negotiationRevision: 0, ontologyResults: new Map(), ontologyDialogue });
+          dispatchGeneration: 0, negotiationRevision: 0, ontologyResults: new Map(), ontologyDialogue });
         const negotiated = args.mode === 'replay' || args.alignReview ? { dialogue: ontologyDialogue, protocol: [] }
           : await manager.negotiateOntology({ ...common, dialogue: ontologyDialogue, liveProposal: false });
         return { ready: true, alice: a, bob: b, models: modelInfo(snapshot), ontologyDialogue: negotiated.dialogue, protocol: negotiated.protocol };
@@ -176,6 +223,7 @@ export function createRuntimeManager(options = {}) {
     },
     async negotiateOntology(args) {
       const state = session(args);
+      const generation = state.dispatchGeneration;
       requireBob();
       const dialogue = args.dialogue;
       invariant(dialogue && ['accepted', 'rejected'].includes(dialogue.status), 'ONTOLOGY_CLARIFICATION_REQUIRED', 'Resolve the owner interpretation before publishing the working ontology.', 409);
@@ -191,6 +239,7 @@ export function createRuntimeManager(options = {}) {
       const protocol = [];
       let sequence = 0, previousHash = null;
       async function exchange(sender, recipient, method, extra = {}) {
+        if (peerTransport) checkDispatch(ref, generation);
         const expectedSequence = ++sequence;
         const result = await sender.call(method, { ...ref, sequence: expectedSequence, previousHash, ...extra }, rpcTimeout(args, sender.role));
         session(args);
@@ -200,7 +249,7 @@ export function createRuntimeManager(options = {}) {
           && body.roundId === roundId && body.roundRevision === roundRevision && body.sequence === expectedSequence
           && body.previousHash === previousHash && body.payloadHash === hashPayload(body.payload),
           'ONTOLOGY_PROTOCOL', 'The isolated worker did not sign the expected ordered ontology move.', 401);
-        const receipt = await recipient.call('receiveOntology', { ...ref, envelope });
+        const receipt = await deliverPeer(sender, recipient, 'receiveOntology', ref, envelope, generation);
         session(args);
         const proof = receipt?.proof?.body;
         invariant(proof && verifyObject(proof, receipt.proof.signature, recipient.identity)
@@ -221,6 +270,7 @@ export function createRuntimeManager(options = {}) {
         const decision = await exchange(bob, alice, 'decideOntology', { liveProposal: args.liveProposal === true && state.mode === 'live' });
         await exchange(alice, bob, 'acknowledgeOntology');
         await exchange(bob, alice, 'acknowledgeOntology');
+        if (peerTransport) checkDispatch(ref, generation);
         const resultDialogue = decision.selection.decision === 'accepted' ? structuredClone(dialogue)
           : dialogue.status === 'rejected' ? structuredClone(dialogue)
             : resolveOntologyDialogue(startOntologyDialogue({ ...context, mode: state.mode }), { decision: 'reject' });
@@ -251,10 +301,10 @@ export function createRuntimeManager(options = {}) {
       return { Alice: a, Bob: b };
     },
     async deliverToBob(args) {
-      session(args);
+      const generation = session(args).dispatchGeneration;
       requireBob();
       const { envelope } = await alice.call('prepareOutgoing', args);
-      const result = await bob.call('receive', { sessionId: args.sessionId, epoch: args.epoch, envelope });
+      const result = await deliverPeer(alice, bob, 'receive', { sessionId: args.sessionId, epoch: args.epoch }, envelope, generation, args);
       session(args);
       return checkedReceipt(result, envelope, 'Bob', bob.identity);
     },
@@ -272,11 +322,11 @@ export function createRuntimeManager(options = {}) {
       return result;
     },
     async deliverToAlice(args) {
-      session(args);
+      const generation = session(args).dispatchGeneration;
       requireBob();
       const { envelope } = await bob.call('prepareOutgoing', args);
       invariant(verifyObject(envelope.body, envelope.signature, bob.identity), 'INVALID_PEER_SIGNATURE', 'Bob did not sign the proposed outgoing payload.', 401);
-      const result = await alice.call('receive', { sessionId: args.sessionId, epoch: args.epoch, envelope });
+      const result = await deliverPeer(bob, alice, 'receive', { sessionId: args.sessionId, epoch: args.epoch }, envelope, generation, args);
       session(args);
       return checkedReceipt(result, envelope, 'Alice', alice.identity);
     },
@@ -313,9 +363,10 @@ export function createRuntimeManager(options = {}) {
       return result;
     },
     async cancelPlanning(args, roles = ['Alice', 'Bob']) {
-      session(args);
+      const state = session(args);
       invariant(Array.isArray(roles) && roles.length > 0 && new Set(roles).size === roles.length
         && roles.every(role => ['Alice', 'Bob'].includes(role)), 'INVALID_ROLES', 'Choose Alice, Bob, or both planning runtimes.');
+      state.dispatchGeneration++;
       // Cancellation bypasses simulated peer disconnection and never removes receipts or outgoing operations.
       const results = await Promise.all(roles.map(role => (role === 'Alice' ? alice : bob).call('cancelPlanning', args)));
       return { cancelled: true, roles: structuredClone(roles), results };
@@ -346,9 +397,10 @@ export function createRuntimeManager(options = {}) {
         await Promise.allSettled(refs.map(ref => manager.clear(ref)));
       }
       closed = true;
+      hermesReady = false;
       sessions.clear();
       retired.clear();
-      await Promise.allSettled([alice?.close(), bob?.close()]);
+      await Promise.allSettled([alice?.close(), bob?.close(), peerTransport?.close()]);
       started = false;
     },
   };

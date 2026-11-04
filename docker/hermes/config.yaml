@@ -1,0 +1,25 @@
+model:
+  provider: minimax-cn
+  default: MiniMax-M3.1-Flash
+  streaming: false
+
+platform_toolsets:
+  api_server: []
+mcp_servers: {}
+plugins:
+  enabled: []
+fallback_providers: []
+agent:
+  max_turns: 1
+  api_max_retries: 1
+  background_review:
+    enabled: false
+auxiliary:
+  title_generation:
+    enabled: false
+    model_upgrade_enabled: false
+memory:
+  memory_enabled: false
+  user_profile_enabled: false
+security:
+  allow_lazy_installs: false

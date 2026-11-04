@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node src/server.mjs",
     "demo": "node scripts/demo.mjs",
+    "demo:hermes": "node scripts/demo.mjs --hermes",
     "bob": "node src/bob-server.mjs",
     "test": "node --test"
   }

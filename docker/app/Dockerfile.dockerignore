@@ -1,0 +1,16 @@
+**
+!bridge/
+!bridge/agent-comm-direct/
+!bridge/agent-comm-direct/go.mod
+!bridge/agent-comm-direct/go.sum
+!bridge/agent-comm-direct/main.go
+!src/
+!src/**
+!public/
+!public/**
+!scripts/
+!scripts/demo.mjs
+!docker/
+!docker/app/
+!docker/app/Dockerfile
+!docker/app/start.mjs

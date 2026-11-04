@@ -41,6 +41,7 @@ function safeId(value) { return typeof value === 'string' && IDENTIFIER.test(val
 function whitelistModels(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const revision = safeRevision(value.revision);
+  if (revision !== null && value.provider === 'hermes') return { revision, provider: 'hermes' };
   if (revision === null || !['minimax_cn_token_plan', 'openai_compatible'].includes(value.provider)) return null;
   const agents = {};
   for (const role of ['Alice', 'Bob']) {

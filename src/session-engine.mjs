@@ -440,8 +440,9 @@ export class SessionEngine {
     session.savedStage ??= session.stage;
     session.paused = true; session.stage = 'paused';
     const diagnostic = modelOutputDiagnostic(error);
+    const hermesIssue = error.code?.startsWith('HERMES_');
     const reason = ['MODEL_INVALID_OUTPUT', 'MODEL_INVALID_MEETING'].includes(error.code) ? 'model_output'
-      : ['MODEL_PROVIDER_ERROR', 'MODEL_UNAVAILABLE', 'MODEL_CONFIGURATION_ERROR'].includes(error.code) ? 'model_connection'
+      : hermesIssue || ['MODEL_PROVIDER_ERROR', 'MODEL_UNAVAILABLE', 'MODEL_CONFIGURATION_ERROR'].includes(error.code) ? 'model_connection'
       : /OFFLINE|TRANSPORT|PEER|CONNECTION|ECONN/i.test(error.code ?? '') ? 'peer_offline' : 'model_timeout';
     const inferredStep = session.pendingDelivery ? session.pendingDelivery.direction === 'bob' ? 'calendar_delivery'
       : session.pendingDelivery.resource === 'meeting_brief' && session.briefOntology?.status !== 'accepted' ? 'brief_alignment' : 'reply_delivery'
@@ -449,10 +450,11 @@ export class SessionEngine {
     const step = PLANNING_STEPS.includes(error.planningStep) ? error.planningStep : inferredStep;
     const recovery = reason === 'peer_offline' ? 'restore_connection' : session.pendingDelivery ? 'retry_delivery' : 'retry_planning';
     session.waiting = { reason, message: PUBLIC_WAIT[reason], ...(step ? { step } : {}), recovery };
-    if (error.code?.startsWith('MODEL_')) {
+    if (hermesIssue || error.code?.startsWith('MODEL_')) {
       const code = /^[A-Z_]{1,64}$/.test(error.code) ? error.code : 'MODEL_ERROR';
       const detail = diagnostic ? MODEL_OUTPUT_DIAGNOSTICS[diagnostic.reasonCode].message : (SAFE_MODEL_DIAGNOSTICS.has(error.message) ? error.message
         : code === 'MODEL_TIMEOUT' ? 'The model request timed out; retry explicitly or end this round.'
+        : hermesIssue ? 'Check the two local Hermes profiles, then retry explicitly or end this round.'
         : reason === 'model_connection' ? 'Check the saved model connection, then retry explicitly or end this round.'
         : 'The model proposal is invalid. Retry this step explicitly or end this round.');
       session.waiting = { ...session.waiting, code, detail, ...(diagnostic ? { diagnostic: diagnostic.reasonCode } : {}), message: `${PUBLIC_WAIT[reason]} ${code}: ${detail}` };

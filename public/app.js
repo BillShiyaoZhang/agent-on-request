@@ -126,7 +126,9 @@ function enableControls(token = adminToken) {
   const next = open ? openControlsMarker : token === openControlsMarker ? null : token || null;
   const changed = adminToken !== next;
   adminToken = next;
-  document.querySelectorAll('[data-admin-nav]').forEach(node => { node.hidden = !next; });
+  document.querySelectorAll('[data-admin-nav]').forEach(node => {
+    node.hidden = !next || (node.dataset.view === 'models' && meta?.live?.harness === 'hermes');
+  });
   $('admin-open').hidden = open;
   $('admin-open').textContent = next ? 'Researcher tools' : 'Researcher sign in';
   $('admin-logout').hidden = open || !next;
@@ -704,7 +706,8 @@ async function boot() {
   try {
     meta = await api('/api/meta', { auth: false });
     enableControls();
-    $('connection-status').textContent = 'Local demo'; $('connection-status').className = 'tag good';
+    $('connection-status').textContent = meta.live?.harness === 'hermes' ? 'Hermes · Agent Comm' : 'Local demo';
+    $('connection-status').className = 'tag good';
     $('runtime-status').textContent = 'Alice: ' + (meta.runtime?.alice?.online ? 'ready' : 'offline') + ' · Bob: ' + (meta.runtime?.bob?.online ? 'ready' : 'offline');
     const stored = readStorage(sessionKey);
     if (stored?.id && stored?.token) {

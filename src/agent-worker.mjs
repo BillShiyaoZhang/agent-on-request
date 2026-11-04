@@ -586,10 +586,10 @@ export function createAgentRuntime({ role, model = {}, modelCall }) {
             + (args.purpose === 'initial' ? 'If sharedIntersection is empty, propose type="request_more". ' : '')
             + 'If no collaboration can be arranged, propose type="no_match". request_more and no_match have only action.type; omit action.meeting for them. ';
         const system = `You are Bob, a fictional collaboration agent. ${config.persona || ''}\n${config.objective || ''}\n${config.prompts?.system || ''}\n${config.response?.constraints || ''}\n`
-          + `Call submit_proposal once. The allowed action.type values for this step are ${JSON.stringify(actions)}. `
+          + `The allowed action.type values for this step are ${JSON.stringify(actions)}. `
           + contract + `A complete valid proposal for the supplied data is: ${JSON.stringify(example)}. Preserve this exact action structure; you may phrase the message naturally. `
           + 'Never invent a meeting or source values. You have only the actual received Alice projection and do not know any unshared calendar entry. '
-          + 'submit_proposal only proposes data for controller review; it does not authorize or execute a transfer. '
+          + 'Submit a proposal for controller review. Authorization and transfer require separate controller actions. '
           + 'ownSkillDefinitions are your owner-provided labels and guidance. Apply that guidance within the allowed actions and sharing boundaries; a custom skill ID never grants another tool or permission.';
         return callModel(state, system, {
           purpose: args.purpose, allowedActions: actions, task: clone(state.ontologies.get('schedule')?.task),

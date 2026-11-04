@@ -1,0 +1,88 @@
+name: agent-on-request-hermes-demo
+
+x-hermes: &hermes
+  image: agent-on-request/hermes-demo-gateway:0.22.7
+  build: docker/hermes
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  hermes-alice:
+    <<: *hermes
+    environment:
+      API_SERVER_KEY: ${DEMO_HERMES_ALICE_KEY:?Run scripts/start-docker-demo.ps1 to generate local keys}
+      DEMO_HERMES_ROLE: Alice
+    networks:
+      alice_link:
+      alice_egress:
+        gw_priority: 1
+    volumes:
+      - alice_profile:/opt/data
+
+  hermes-bob:
+    <<: *hermes
+    environment:
+      API_SERVER_KEY: ${DEMO_HERMES_BOB_KEY:?Run scripts/start-docker-demo.ps1 to generate local keys}
+      DEMO_HERMES_ROLE: Bob
+    networks:
+      bob_link:
+      bob_egress:
+        gw_priority: 1
+    volumes:
+      - bob_profile:/opt/data
+
+  demo:
+    image: agent-on-request/hermes-demo-app:local
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      DEMO_HERMES_ALICE_URL: http://127.0.0.1:8643
+      DEMO_HERMES_ALICE_KEY: ${DEMO_HERMES_ALICE_KEY:?Run scripts/start-docker-demo.ps1 to generate local keys}
+      DEMO_HERMES_BOB_URL: http://127.0.0.1:8644
+      DEMO_HERMES_BOB_KEY: ${DEMO_HERMES_BOB_KEY:?Run scripts/start-docker-demo.ps1 to generate local keys}
+    depends_on:
+      hermes-alice:
+        condition: service_healthy
+      hermes-bob:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${DEMO_DOCKER_PORT:-4327}:4328"
+    networks:
+      ingress:
+        interface_name: eth0
+        gw_priority: 1
+      alice_link:
+        interface_name: eth1
+      bob_link:
+        interface_name: eth2
+    volumes:
+      - demo_data:/app/.data
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4327/api/meta').then(async r => { if (!r.ok || !(await r.json()).live.available) process.exitCode=1 }).catch(() => { process.exitCode=1 })"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+      start_period: 15s
+
+networks:
+  ingress:
+  alice_link:
+    internal: true
+  bob_link:
+    internal: true
+  alice_egress:
+  bob_egress:
+
+volumes:
+  alice_profile:
+  bob_profile:
+  demo_data:

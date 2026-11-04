@@ -98,7 +98,7 @@ export class WorkerClient {
         && body.id.length <= 200 && typeof body.system === 'string' && body.system.length <= 100_000
         && body.context && typeof body.context === 'object', 'MODEL_INVALID_REQUEST', 'The isolated model request is invalid.');
       invariant(typeof this.onModelCall === 'function', 'MODEL_UNAVAILABLE', 'There is no parent model broker.', 503);
-      answer.result = await this.onModelCall({ role: this.role, ...ref, system: body.system,
+      answer.result = await this.onModelCall({ role: this.role, ...ref, requestId: body.id, system: body.system,
         context: body.context, legacyRuntime: body.legacyRuntime, signal: abort.signal });
       answer.ok = true;
     } catch (error) {

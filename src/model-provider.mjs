@@ -45,20 +45,21 @@ export function modelOutputDiagnostic(error) {
   return { reasonCode, detail: item.detail, retryable: item.retryable };
 }
 
-function stageContract(context) {
+function stageContract(context, useTool = true) {
+  const submission = useTool ? 'Call submit_proposal exactly once with' : 'Return';
   if (context?.purpose === 'ontology_alignment') {
     const ids = (context.candidates || []).map(candidate => candidate.id).filter(id => typeof id === 'string');
-    return 'OUTPUT CONTRACT: Call submit_proposal exactly once. Return only the three required keys message, decision, selectedMappingIds. '
+    return `OUTPUT CONTRACT: ${useTool ? 'Call submit_proposal exactly once. ' : ''}Return only the three required keys message, decision, selectedMappingIds. `
       + 'message must be a nonempty string; decision must be accept, reject, or none. selectedMappingIds must be an actual JSON array of strings, never a string, object, or comma-separated list. '
       + 'For accept, select ALL supplied candidate identifiers exactly once. For reject or none, use an empty array. '
       + `A complete acceptance object is ${JSON.stringify({ message: 'The supplied task correspondences are acceptable.', decision: 'accept', selectedMappingIds: ids })}. `
       + `A complete refusal object is ${JSON.stringify({ message: 'No supplied correspondence is acceptable.', decision: 'none', selectedMappingIds: [] })}. `
       + 'Choose your decision from the supplied definitions. Do not return or copy the input context, candidates, mappings, task, action, permissions, analysis, or any additional keys. This proposal never authorizes data sharing.';
   }
-  if (context?.purpose === 'connectivity_test' && context.synthetic === true) return `OUTPUT CONTRACT: Call submit_proposal exactly once with ${JSON.stringify({ message: CONNECTIVITY_ACK })}. Add no other keys.`;
+  if (context?.purpose === 'connectivity_test' && context.synthetic === true) return `OUTPUT CONTRACT: ${submission} ${JSON.stringify({ message: CONNECTIVITY_ACK })}. Add no other keys.`;
   const actions = Array.isArray(context?.allowedActions) ? context.allowedActions.filter(type => BOB_ACTIONS.has(type)) : [];
-  if (!actions.length) return 'OUTPUT CONTRACT: Call submit_proposal exactly once with one JSON object containing only message, a nonempty string. Do not copy the input context or add an action, permission, reasoning, or other keys.';
-  return `OUTPUT CONTRACT: Call submit_proposal exactly once with one JSON object containing only message and action. message must be a nonempty string. action.type must be one of ${JSON.stringify(actions)}. `
+  if (!actions.length) return `OUTPUT CONTRACT: ${submission} one JSON object containing only message, a nonempty string. Do not copy the input context or add an action, permission, reasoning, or other keys.`;
+  return `OUTPUT CONTRACT: ${submission} one JSON object containing only message and action. message must be a nonempty string. action.type must be one of ${JSON.stringify(actions)}. `
     + 'request_more and no_match contain only action.type. meeting contains only action.type and action.meeting; meeting contains only day and time from the actual sharedIntersection for the exact task duration. '
     + 'share_brief contains only action.type, action.fields, action.values, and action.resource="meeting_brief"; choose existing ownBrief fields and copy their exact JSON values. '
     + 'Do not put nested action fields at the top level, copy the context, invent source values, or add authorization, permissions, reasoning, or extra keys.';
@@ -121,6 +122,33 @@ function negativeOntologyProposal(result, context) {
   return { message, decision: result.decision, selectedMappingIds: [] };
 }
 
+function validateProposalStructure(result) {
+  const pending = [{ value: result, depth: 0 }];
+  let nodes = 1;
+  while (pending.length) {
+    const { value, depth } = pending.pop();
+    invariant(typeof value !== 'number' || Number.isFinite(value), 'MODEL_INVALID_OUTPUT', 'The model proposal contains a non-finite number.', 502);
+    if (!value || typeof value !== 'object') continue;
+    invariant(depth <= 32, 'MODEL_INVALID_OUTPUT', 'The model proposal exceeds the JSON structure limit.', 502);
+    invariant(!Object.keys(value).some(key => ['__proto__', 'constructor', 'prototype', 'reasoning_content', 'reasoning_details'].includes(key)),
+      'MODEL_INVALID_OUTPUT', 'The model proposal contains a forbidden field.', 502);
+    const children = Object.values(value);
+    nodes += children.length;
+    invariant(nodes <= 8192, 'MODEL_INVALID_OUTPUT', 'The model proposal exceeds the JSON structure limit.', 502);
+    for (const child of children) pending.push({ value: child, depth: depth + 1 });
+  }
+  return result;
+}
+
+/** A Hermes run proposes the same JSON object through its final response, without a tool call. */
+export async function callHermesPlanner(client, request, timeoutMs) {
+  const result = await client.propose({ role: request.role, input: JSON.stringify(request.context),
+    instructions: `${request.system}\n${stageContract(request.context, false)}`,
+    requestId: request.requestId, signal: request.signal, timeoutMs });
+  invariant(result && typeof result === 'object' && !Array.isArray(result), 'MODEL_INVALID_OUTPUT', 'The model proposal must be a JSON object.', 502);
+  return negativeOntologyProposal(result, request.context) ?? validateProposalStructure(result);
+}
+
 function parseProposal(data, context) {
   invariant(!data?.error && (!data?.base_resp?.status_code || data.base_resp.status_code === 0),
     'MODEL_PROVIDER_ERROR', 'The model provider rejected this request.', 502);
@@ -155,20 +183,7 @@ function parseProposal(data, context) {
     if (negative) return negative;
     assertCompletion();
     invariant(source.length <= 262144, 'MODEL_INVALID_OUTPUT', 'The model returned no bounded JSON proposal.', 502);
-    const pending = [{ value: result, depth: 0 }];
-    let nodes = 1;
-    while (pending.length) {
-      const { value, depth } = pending.pop();
-      if (!value || typeof value !== 'object') continue;
-      invariant(depth <= 32, 'MODEL_INVALID_OUTPUT', 'The model proposal exceeds the JSON structure limit.', 502);
-      invariant(!Object.keys(value).some(key => ['__proto__', 'constructor', 'prototype', 'reasoning_content', 'reasoning_details'].includes(key)),
-        'MODEL_INVALID_OUTPUT', 'The model proposal contains a forbidden field.', 502);
-      const children = Object.values(value);
-      nodes += children.length;
-      invariant(nodes <= 8192, 'MODEL_INVALID_OUTPUT', 'The model proposal exceeds the JSON structure limit.', 502);
-      for (const child of children) pending.push({ value: child, depth: depth + 1 });
-    }
-    return result;
+    return validateProposalStructure(result);
   } catch (error) {
     assertCompletion();
     throw error;
