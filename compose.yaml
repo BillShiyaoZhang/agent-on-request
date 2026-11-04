@@ -6,12 +6,15 @@ x-hermes: &hermes
   restart: unless-stopped
   security_opt:
     - no-new-privileges:true
+  secrets:
+    - source: minimax_cn_api_key
+      uid: '0'
+      mode: 0400
 
 services:
   hermes-alice:
     <<: *hermes
     environment:
-      API_SERVER_KEY: ${DEMO_HERMES_ALICE_KEY:?Run scripts/start-docker-demo.ps1 to generate local keys}
       DEMO_HERMES_ROLE: Alice
     networks:
       alice_link:
@@ -19,11 +22,11 @@ services:
         gw_priority: 1
     volumes:
       - alice_profile:/opt/data
+      - alice_gateway_auth:/run/demo-gateway-auth
 
   hermes-bob:
     <<: *hermes
     environment:
-      API_SERVER_KEY: ${DEMO_HERMES_BOB_KEY:?Run scripts/start-docker-demo.ps1 to generate local keys}
       DEMO_HERMES_ROLE: Bob
     networks:
       bob_link:
@@ -31,6 +34,7 @@ services:
         gw_priority: 1
     volumes:
       - bob_profile:/opt/data
+      - bob_gateway_auth:/run/demo-gateway-auth
 
   demo:
     image: agent-on-request/hermes-demo-app:local
@@ -46,9 +50,7 @@ services:
       - no-new-privileges:true
     environment:
       DEMO_HERMES_ALICE_URL: http://127.0.0.1:8643
-      DEMO_HERMES_ALICE_KEY: ${DEMO_HERMES_ALICE_KEY:?Run scripts/start-docker-demo.ps1 to generate local keys}
       DEMO_HERMES_BOB_URL: http://127.0.0.1:8644
-      DEMO_HERMES_BOB_KEY: ${DEMO_HERMES_BOB_KEY:?Run scripts/start-docker-demo.ps1 to generate local keys}
     depends_on:
       hermes-alice:
         condition: service_healthy
@@ -66,6 +68,8 @@ services:
         interface_name: eth2
     volumes:
       - demo_data:/app/.data
+      - alice_gateway_auth:/run/demo-gateway-auth/alice:ro
+      - bob_gateway_auth:/run/demo-gateway-auth/bob:ro
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:4327/api/meta').then(async r => { if (!r.ok || !(await r.json()).live.available) process.exitCode=1 }).catch(() => { process.exitCode=1 })"]
       interval: 5s
@@ -85,4 +89,10 @@ networks:
 volumes:
   alice_profile:
   bob_profile:
+  alice_gateway_auth:
+  bob_gateway_auth:
   demo_data:
+
+secrets:
+  minimax_cn_api_key:
+    environment: MINIMAX_CN_API_KEY

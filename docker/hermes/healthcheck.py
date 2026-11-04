@@ -1,11 +1,11 @@
 import json
-import os
+from pathlib import Path
 import urllib.request
 
 
 def main():
     try:
-        key = os.environ["API_SERVER_KEY"]
+        key = Path("/run/demo-gateway-auth/key").read_text(encoding="ascii").strip()
         request = urllib.request.Request(
             "http://127.0.0.1:8642/health/detailed",
             headers={"Authorization": f"Bearer {key}"},

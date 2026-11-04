@@ -6,7 +6,7 @@
 
 ## 运行
 
-Docker Desktop 上可用 `powershell -ExecutionPolicy Bypass -File scripts/start-docker-demo.ps1` 启动两套独立 Hermes profile 与本机直连演示。默认入口为 [http://127.0.0.1:4327](http://127.0.0.1:4327)。[Docker 启动与管理](docs/hermes-docker-demo.md)
+在项目根目录的 `.env` 填好 `MINIMAX_CN_API_KEY`，运行 `docker compose up -d --build --wait` 即可启动双 Hermes 本机直连演示。默认入口为 [http://127.0.0.1:4327](http://127.0.0.1:4327)。[Docker 启动与管理](docs/hermes-docker-demo.md)
 
 双 Hermes 演示使用 `npm run demo:hermes`。Windows 启动器加 `-Hermes` 参数即可选择同一模式。先按[双 Hermes 本机直连指南](docs/hermes-direct-demo.md)准备两个独立 profile 和 agent-comm bridge。Live 规划由 Hermes 执行，双方通过 agent-comm 的两个回环端口交换签名消息，字段授权和回执校验由演示控制器执行。这个模式无需协作平台、Web 配对或公网消息服务。
 

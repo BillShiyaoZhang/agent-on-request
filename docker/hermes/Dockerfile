@@ -19,4 +19,5 @@ ENV API_SERVER_ENABLED=true \
 EXPOSE 8642
 HEALTHCHECK --interval=3s --timeout=3s --start-period=20s --retries=20 \
     CMD ["/opt/hermes/.venv/bin/python", "/opt/hermes/demo-healthcheck.py"]
+ENTRYPOINT ["/opt/hermes/.venv/bin/python", "/opt/hermes/configure-demo-profile.py"]
 CMD ["gateway", "run"]
