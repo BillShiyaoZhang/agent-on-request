@@ -1,8 +1,8 @@
 /* Initial conditions: category summaries, visual context and one entry at a time. */
+.conditions-default-status { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; margin-bottom:16px; padding:12px 14px; background:var(--soft); border-radius:12px; }
+.initial-conditions > .configuration-disclosure + .configuration-disclosure { margin-top:12px; }
 .conditions-composition-heading { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; margin:16px 0 10px; }
 .conditions-composition-heading .tag { font-size:11px; }
-.conditions-customize-kit { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; margin-top:12px; }
-.conditions-customize-kit .button { font-size:12px; padding:7px 10px; }
 .conditions-customize-link { flex:none; min-height:36px; padding:5px 9px; font-size:11px; color:var(--category-tone); }
 .conditions-extension-editor { margin-top:12px; border:1px dashed var(--line); border-radius:8px; }
 .conditions-extension-editor > summary { font-size:12px; padding:10px 12px; min-height:40px; }

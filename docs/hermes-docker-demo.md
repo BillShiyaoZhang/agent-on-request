@@ -6,7 +6,7 @@
 docker compose up -d --build --wait
 ```
 
-打开 [http://127.0.0.1:4327](http://127.0.0.1:4327)，选 **Live** 和默认研究会议，审阅本体对齐，然后预览并批准空闲时间。补充周四后，打开 Bob 主人的审阅窗口，可只允许主题或拒绝简报。按需查看精确回执和双方的已接收状态。
+观众打开[演示首页](http://127.0.0.1:4327/)，先浏览架构，再选择 **Live**、审阅本体对齐并批准空闲时间。补充周四后，操作员在[控制台](http://127.0.0.1:4327/console)代 Bob 主人审阅简报，可以只允许主题或拒绝简报。观众在总结页查看结果和协作记录。操作员也可以在控制台检查两个 Agent Comm 端点和编辑新一轮的初始状态。
 
 Compose 运行两个 Hermes gateway 和一个演示容器。Alice 和 Bob 的 Live 推理使用 `MiniMax-M3.1-Flash`（MiniMax 中国区）。Compose 把根目录 `.env` 的模型密钥作为 secret 交给两个 Hermes 容器。两端分别生成和保存本地 gateway 密钥，共享 MiniMax 账户额度。Live 会把各端用于规划的虚构数据发到 MiniMax。
 

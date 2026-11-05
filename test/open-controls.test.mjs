@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createDemoServer } from '../src/server.mjs';
 
 async function fixture(t, options = {}) {
@@ -25,6 +28,60 @@ async function fixture(t, options = {}) {
   }
   return { app, call, ok };
 }
+
+test('operator defaults persist and apply to new audience rounds without changing earlier rounds', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'agent-demo-defaults-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const route = '/api/admin/conditions/default';
+  const edit = {
+    custom: Object.fromEntries(['Alice', 'Bob'].map(role => [role, {
+      kg: { nodes: [{ id: `${role.toLowerCase()}-fixture`, label: `${role} fixture`, type: 'resource' }], edges: [] },
+      skills: ['read_synthetic_calendar', `${role.toLowerCase()}_fixture_skill`]
+    }]))
+  };
+  let saved;
+  await t.test('the PIN console owns the revision and the audience can use it without a PIN', async t => {
+    const { call, ok } = await fixture(t, { directory, persist: true });
+    const pin = 'synthetic-open-controls-pin';
+    const { token } = await ok('/api/admin/login', { pin });
+    const first = await ok('/api/sessions', { mode: 'controlled', alignmentReview: true }, undefined, undefined, 201);
+    const original = await ok(`/api/sessions/${first.state.session.id}?perspective=observer`, undefined, token);
+    const defaults = await ok(route, undefined, token);
+    assert.equal(defaults.conditions, null);
+    const input = { expectedRevision: defaults.revision, initialConditions: edit };
+    assert.equal((await call(route)).status, 401);
+    assert.equal((await call('/api/admin/runtime')).status, 401);
+    assert.equal((await call(route, input, undefined, { method: 'PUT' })).status, 401);
+    const invalid = { expectedRevision: defaults.revision, initialConditions: { presetId: 'invalid-fixture' } };
+    assert.equal((await call(route, invalid, token, { method: 'PUT' })).status, 422);
+    assert.deepEqual(await ok(route, undefined, token), defaults);
+    saved = await ok(route, input, token, { method: 'PUT' });
+    assert.equal((await call(route, input, token, { method: 'PUT' })).status, 409);
+    assert.deepEqual((await ok(`/api/sessions/${original.session.id}?perspective=observer`, undefined, token)).initialConditions, original.initialConditions);
+
+    const next = await ok('/api/sessions', { mode: 'controlled', alignmentReview: true }, undefined, undefined, 201);
+    assert.equal(next.state.agentStates.Bob, null);
+    assert.equal(next.state.initialConditions.agents.Bob, undefined);
+    assert.deepEqual(next.state.initialConditions.agents.Alice, saved.conditions.agents.Alice);
+    const observer = await ok(`/api/sessions/${next.state.session.id}?perspective=observer`, undefined, token);
+    assert.deepEqual(observer.initialConditions.agents, saved.conditions.agents);
+    for (const role of ['Alice', 'Bob']) {
+      assert.deepEqual(observer.initialConditions.agents[role].kg, edit.custom[role].kg);
+      assert.deepEqual(observer.initialConditions.agents[role].skills, edit.custom[role].skills);
+    }
+  });
+
+  await t.test('the saved default survives restart and can be reset', async t => {
+    const { ok } = await fixture(t, { directory, persist: true, openControls: true });
+    assert.deepEqual(await ok(route), saved);
+    const created = await ok('/api/sessions', { mode: 'controlled', alignmentReview: true }, undefined, undefined, 201);
+    assert.deepEqual(created.state.initialConditions.agents.Alice, saved.conditions.agents.Alice);
+    const reset = await ok(route, { expectedRevision: saved.revision, initialConditions: null }, undefined, { method: 'PUT' });
+    assert.equal(reset.conditions, null);
+    const next = await ok('/api/sessions', { mode: 'controlled', alignmentReview: true }, undefined, undefined, 201);
+    assert.notDeepEqual(next.state.initialConditions.agents.Alice, saved.conditions.agents.Alice);
+  });
+});
 
 test('local open controls expose all demo tools while exact participant sharing and Bob approval remain enforced', async t => {
   const { app, call, ok } = await fixture(t, { openControls: true });

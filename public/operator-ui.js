@@ -10,14 +10,15 @@ const icon = kind => {
     send: '<path d="m3 12 18-9-6 18-3-7Z"/><path d="m12 14 9-11"/>',
     receipt: '<rect x="3" y="5" width="18" height="14" rx="3"/><path d="m4 7 8 6 8-6m-12 9h8"/>',
     outcome: '<circle cx="12" cy="12" r="9"/><path d="m7 12 3 3 7-7"/>',
-    people: '<circle cx="8" cy="8" r="3"/><path d="M2 20v-3a6 6 0 0 1 12 0v3m2-16a3 3 0 0 1 0 6m2 3a6 6 0 0 1 4 5v2"/>'
+    people: '<circle cx="8" cy="8" r="3"/><path d="M2 20v-3a6 6 0 0 1 12 0v3m2-16a3 3 0 0 1 0 6m2 3a6 6 0 0 1 4 5v2"/>',
+    link: '<path d="m10 13 4-4m-6 6-1 1a3 3 0 0 1-4-4l4-4a3 3 0 0 1 4 0m2 8a3 3 0 0 0 4 0l4-4a3 3 0 0 0-4-4l-1 1"/>'
   };
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths[kind] + '</svg>';
 };
 const disclosure = (id, title, body, subtitle = 'Optional details') => '<details class="operator-detail" data-disclosure-id="' + escapeHtml(id) + '"><summary><span><strong>' + title + '</strong><small>' + subtitle + '</small></span></summary><div class="operator-detail-body">' + body + '</div></details>';
 
 export function renderLoginHtml(message = '') {
-  return '<div class="operator-access-intro"><span class="operator-icon operator-violet">' + icon('key') + '</span><div><h3>Manage Bob and review his requests</h3><small>Alice keeps control of her own sharing.</small></div></div>'
+  return '<div class="operator-access-intro"><span class="operator-icon operator-violet">' + icon('key') + '</span><div><h3>Manage demo defaults and Bob’s requests</h3><small>Alice keeps control of her own sharing.</small></div></div>'
     + (message ? '<div class="notice error" role="alert">' + escapeHtml(message) + '</div>' : '')
     + '<form id="admin-login-form"><label class="field"><span>Researcher PIN</span><input id="admin-pin" type="password" autocomplete="off" required></label>'
     + disclosure('researcher-login-role', 'What researcher access allows', '<div class="operator-role-scope"><span class="operator-icon operator-violet">' + icon('shield') + '</span><p>The researcher controls Bob’s permissions. Alice’s data sharing still requires the participant’s own choice. The token stays in memory.</p></div>', 'Role & permission boundary')
@@ -57,7 +58,29 @@ const consoleButton = (action, label, disabled = false, primary = false) => '<bu
 function signal(kind, tone, title, value) {
   return '<article class="operator-signal operator-' + tone + '"><span class="operator-icon">' + icon(kind) + '</span><div><small>' + title + '</small><strong>' + escapeHtml(value) + '</strong></div></article>';
 }
-export function renderConsoleHtml({ state, sessions = [], selectedSessionId, loading = false, openControls = false, modeLabel = value => value }) {
+function renderConnectionHtml(runtime) {
+  const transport = runtime?.peerTransport;
+  const cards = [
+    ['Alice', 'Agent Comm A', runtime?.alice],
+    ['Bob', 'Agent Comm B', runtime?.bob]
+  ].map(([role, label, agent]) => {
+    const address = transport?.addresses?.[role];
+    const listening = Boolean(transport?.online && address);
+    const endpointState = !runtime ? 'Status unavailable'
+      : !transport ? 'Inactive in this runtime'
+        : listening ? 'Listening' : 'Offline';
+    return '<article class="operator-connection" data-agent-comm="' + role + '"><span class="operator-icon operator-blue">' + icon('link') + '</span><div><h4>' + label + ' · ' + role + '</h4><span class="tag ' + (listening ? 'good' : transport ? 'warn' : '') + '">' + endpointState + '</span>'
+      + (address ? '<code>' + escapeHtml(address) + '</code>' : '')
+      + (agent ? '<small>' + (agent.online ? 'Agent available' : 'Agent unavailable') + '</small>' : '') + '</div></article>';
+  }).join('');
+  const details = !runtime ? 'Refresh to check the runtime and its transport.'
+    : transport ? 'The direct SDK sends transfers over local TCP. Agent availability can also change during a simulation.'
+      : runtime.bob?.transport === 'http' ? 'This runtime reaches Bob over HTTP and Alice over local process IPC.'
+        : 'This runtime uses local process IPC between the agents and the controller.';
+  return '<section class="panel operator-connections"><div class="panel-heading"><div><h3>Agent connections</h3><small>' + details + '</small></div></div><div class="operator-connection-grid">' + cards + '</div></section>';
+}
+
+export function renderConsoleHtml({ state, sessions = [], selectedSessionId, loading = false, openControls = false, runtime, modeLabel = value => value }) {
   const session = state?.session;
   const received = state?.receipts?.aliceToBob?.filter(receipt => receipt.status === 'received') || [];
   const submitted = state?.choices?.initial !== null && state?.choices?.initial !== undefined;
@@ -67,13 +90,14 @@ export function renderConsoleHtml({ state, sessions = [], selectedSessionId, loa
   const canShareBrief = !Array.isArray(bobSkills) || bobSkills.some(skill => skill.id === 'share_brief' && skill.enabled !== false);
   const canInject = canIntervene && !session.paused && !pendingCount && canShareBrief;
   const sessionList = '<div class="session-list">' + sessions.map(item => '<div class="session-row ' + (item.id === selectedSessionId ? 'selected' : '') + '"><div><strong class="mono">' + escapeHtml(item.id.slice(0, 12)) + ' · epoch ' + escapeHtml(item.epoch) + '</strong><small>' + escapeHtml(modeLabel(item.mode)) + ' · ' + escapeHtml(item.stage) + ' · research ' + (item.researchConsent ? 'on' : 'off') + '</small></div><button class="button" data-console-select="' + escapeHtml(item.id) + '">Inspect</button></div>').join('') + '</div>' + (!sessions.length ? '<p class="empty">No current sessions.</p>' : '');
-  const header = '<div class="panel-heading"><div><h2>Operator console</h2><small>Watch the selected round, then choose an action.</small></div>' + consoleButton('refresh', 'Refresh sessions') + '</div>';
+  const header = '<div class="panel-heading"><div><h2>Operator console</h2><small>Prepare future demos, check connections and manage active rounds.</small></div>' + consoleButton('refresh', 'Refresh sessions and connections') + '</div>';
+  const setup = '<section class="panel operator-setup"><div class="panel-heading"><div><h3>Agent defaults</h3><small>Set the starting knowledge graphs, skills and data for both agents.</small></div>' + consoleButton('conditions', 'Manage agent defaults', false, true) + '</div></section>';
   const round = session ? '<section class="panel operator-current-round"><div class="operator-round-heading"><span class="operator-icon ' + (session.paused ? 'operator-amber' : 'operator-teal') + '">' + icon(session.paused ? 'pause' : session.ended || session.stage === 'complete' ? 'outcome' : 'play') + '</span><div><p class="eyebrow">Selected round</p><h3>' + (session.ended ? 'Round ended' : session.paused ? 'Round paused' : session.stage === 'complete' ? 'Collaboration complete' : 'Round in progress') + '</h3><small>' + escapeHtml(modeLabel(session.mode)) + ' · ' + escapeHtml(session.stage) + '</small></div><span class="tag ' + (state.bob.online ? 'good' : 'warn') + '">' + (state.bob.online ? 'Bob connected' : 'Bob offline') + '</span></div>'
     + '<div class="operator-signals">' + signal('send', 'blue', 'Queued / submitted', submitted ? state.choices.initial === 'none' ? 'Sharing declined' : 'Confirmed action' : 'No confirmed action') + signal('receipt', 'teal', 'Bob received', received.length + ' actually received') + signal('outcome', 'violet', 'Business outcome', state.task?.outcome || 'Pending') + '</div>'
     + (session.paused ? renderRecoveryHtml(state, { showActions: false }) : state.waiting ? '<div class="notice warning">' + escapeHtml(state.waiting.message) + '</div>' : '')
-    + '<div class="toolbar operator-main-actions">' + consoleButton(session.paused ? 'resume' : 'pause', session.paused ? 'Review paused step' : 'Pause at safe point', !canIntervene, true) + consoleButton('approvals', 'Review Bob approvals') + (pendingCount ? '<span class="tag warn">' + pendingCount + ' pending requests</span>' : '') + consoleButton('reset', 'Start new round') + consoleButton('config', 'Configure Bob') + '</div><small class="operator-boundary-note">A new round clears both stores, revokes the old token and starts consent off.</small></section>' : '<section class="panel"' + (loading ? ' aria-busy="true" role="status"' : '') + '><div class="operator-access-intro"><span class="operator-icon operator-blue">' + icon('people') + '</span><div><h3>' + (loading ? 'Loading selected round…' : 'No round selected') + '</h3><small>' + (loading ? 'Controls become available after this round is confirmed.' : 'Select a current session.') + '</small></div></div></section>';
-  const extras = session ? disclosure('operator-' + session.id + '-troubleshooting', 'Troubleshooting & simulation', '<p class="muted">These controls act on the selected round. Researcher interventions are saved only with research consent.</p><div class="toolbar section-actions">' + consoleButton(state.bob.online ? 'disconnect_bob' : 'restore_bob', state.bob.online ? 'Simulate Bob offline' : 'Restore Bob connection', !canIntervene) + consoleButton('retry', 'Verify / retry same request', !canIntervene || !session.paused) + consoleButton('inject_request', 'Inject researcher request', !canInject) + '</div><small class="operator-boundary-note">' + (!canIntervene ? 'Ended rounds and replay do not accept interventions. Start a new round to continue.' : 'Retry is available only for a paused round. Resolve pending deliveries and approvals before injecting a request.') + '</small>' + (!canShareBrief ? '<small class="operator-boundary-note">Bob’s brief sharing skill is disabled in this round.</small>' : ''), 'Connection, retries & test requests')
+    + '<div class="toolbar operator-main-actions">' + consoleButton(session.paused ? 'resume' : 'pause', session.paused ? 'Review paused step' : 'Pause at safe point', !canIntervene, true) + consoleButton('approvals', 'Review Bob approvals') + (pendingCount ? '<span class="tag warn">' + pendingCount + ' pending requests</span>' : '') + consoleButton('config', 'Configure Bob') + '</div><small class="operator-boundary-note">Start a new demo from the audience page.</small></section>' : '<section class="panel"' + (loading ? ' aria-busy="true" role="status"' : '') + '><div class="operator-access-intro"><span class="operator-icon operator-blue">' + icon('people') + '</span><div><h3>' + (loading ? 'Loading selected round…' : 'No round selected') + '</h3><small>' + (loading ? 'Controls become available after this round is confirmed.' : 'Select a current session.') + '</small></div></div></section>';
+  const extras = session ? disclosure('operator-' + session.id + '-troubleshooting', 'Troubleshooting & simulation', '<p class="muted">Connection simulation affects the running demo service. Retry and test requests act on the selected round. Researcher interventions are saved only with research consent.</p><div class="toolbar section-actions">' + consoleButton(state.bob.online ? 'disconnect_bob' : 'restore_bob', state.bob.online ? 'Simulate Bob offline' : 'Restore Bob connection', !canIntervene) + consoleButton('retry', 'Verify / retry same request', !canIntervene || !session.paused) + consoleButton('inject_request', 'Inject researcher request', !canInject) + '</div><small class="operator-boundary-note">' + (!canIntervene ? 'Interventions are available during active demos.' : 'Retry is available only for a paused round. Resolve pending deliveries and approvals before injecting a request.') + '</small>' + (!canShareBrief ? '<small class="operator-boundary-note">Bob’s brief sharing skill is disabled in this round.</small>' : ''), 'Connection, retries & test requests')
     + disclosure('operator-' + session.id + '-identity', 'Round identity & permissions', '<dl class="definition-list"><dt>Session</dt><dd class="mono" data-i18n-ignore>' + escapeHtml(session.id) + '</dd><dt>Run mode</dt><dd>' + escapeHtml(modeLabel(session.mode)) + '</dd><dt>Bob config</dt><dd>Active r' + escapeHtml(state.bob.configRevision) + ' · template r' + escapeHtml(state.bob.templateRevision) + '</dd><dt>Research consent</dt><dd>' + (session.researchConsent ? 'On · participant agreed' : 'Off · memory only') + '</dd><dt>Agent stores</dt><dd>Alice / Bob isolated</dd></dl><p class="muted">' + (openControls ? 'Direct demo controls · Alice sharing still needs confirmation' : 'Authenticated researcher · Bob control only') + '</p><p class="muted">Consented research records remain after a new round. Researcher interventions are recorded separately.</p>', 'IDs, versions & research consent')
     + disclosure('operator-' + session.id + '-receipts', 'Actual receipt state', '<p class="muted">Submitted actions and received content are separate facts.</p><pre>' + escapeHtml(JSON.stringify(state.receipts, null, 2)) + '</pre>', 'Exact receipt JSON') : '';
-  return header + round + '<div class="operator-detail-grid">' + disclosure('operator-session-list', 'Switch or inspect another round', sessionList, sessions.length + ' current sessions') + extras + '</div>';
+  return header + setup + renderConnectionHtml(runtime) + round + '<div class="operator-detail-grid">' + disclosure('operator-session-list', 'Switch or inspect another round', sessionList, sessions.length + ' current sessions') + extras + '</div>';
 }

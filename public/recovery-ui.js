@@ -28,7 +28,7 @@ export function confirmedRecoveryMeeting(state) {
   return receipt?.values?.status === 'Free' && receipt.values.day && receipt.values.time ? { day: receipt.values.day, time: receipt.values.time } : null;
 }
 
-export function renderRecoveryHtml(state, { busy = false, controls = false, showActions = true, message = '' } = {}) {
+export function renderRecoveryHtml(state, { busy = false, controls = false, showActions = true, operatorOnly = false, message = '' } = {}) {
   if (!state?.session || !state.session.paused || state.session.ended) return '';
   const waiting = state.waiting || {};
   const stopped = Boolean(state.alice?.stopped);
@@ -46,7 +46,7 @@ export function renderRecoveryHtml(state, { busy = false, controls = false, show
   const recoveryAdvice = recovery === 'restore_connection' && !peerOffline ? 'The connection is restored. Explicitly retry the same approved operation.' : recoveryLabels[recovery] || recoveryLabels.retry_planning;
   const detail = waiting.detail || (failedOutput ? 'The proposed action did not match the allowed format for this step.' : waiting.message);
   const mode = state.session.mode === 'live' ? 'This round remains in Live model mode.' : 'This round keeps its selected mode.';
-  const participantActions = '<button class="button" data-participant-action="recover" ' + (busy ? 'disabled' : '') + '>Open recovery controls</button>'
+  const participantActions = (operatorOnly ? '<span>The operator can review the paused step in the console.</span>' : '<button class="button" data-participant-action="recover" ' + (busy ? 'disabled' : '') + '>Open recovery controls</button>')
     + (skipOptional ? '<button class="button primary" data-participant-action="skip_optional_brief" ' + (busy ? 'disabled' : '') + '>Keep the meeting and skip optional context</button>' : '');
   const actions = !controls ? participantActions : '<button class="button" data-close-dialog="admin-dialog">Return without retrying</button>'
     + (peerOffline ? '<button class="button" data-recovery-action="restore_bob" ' + (busy || stopped ? 'disabled' : '') + '>Restore Bob’s connection</button>' : '')

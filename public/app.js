@@ -3,17 +3,19 @@ import { mountModelConfig } from './model-config.js';
 import { mountAgentStates } from './agent-state.js';
 import { createInitialConditions } from './initial-conditions.js';
 import { initLanguageSwitcher } from './i18n.js';
-import { renderParticipantHtml, scopeIconHtml } from './participant-ui.js';
+import { renderAudienceIntroHtml, renderParticipantHtml, scopeIconHtml } from './participant-ui.js';
 import { renderUnderstandingHtml, understandingQuestionForInput } from './understanding.js';
 import { renderLoginHtml, renderApprovalHtml, renderConsoleHtml } from './operator-ui.js';
 import { rememberDisclosures, restoreDisclosures, observeDisclosures } from './disclosure-state.js';
 import { mountResearchReview } from './research-ui.js';
-import { renderPerspectiveHtml, renderOntologyHtml, renderContributionHtml } from './ontology-ui.js';
+import { renderOntologyHtml, renderContributionHtml } from './ontology-ui.js';
 import { renderRecoveryHtml } from './recovery-ui.js';
 
 initLanguageSwitcher();
 
 const $ = id => document.getElementById(id);
+const operatorPage = document.body.dataset.surface === 'operator';
+const operatorViews = ['console', 'conditions', 'config', 'models', 'research'];
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const textValue = value => Array.isArray(value) ? value.map(textValue).join(', ') : value && typeof value === 'object' ? Object.entries(value).map(([key, item]) => key + ': ' + textValue(item)).join(' · ') : String(value ?? 'None');
 const sessionKey = 'agent-on-request.session';
@@ -21,12 +23,13 @@ const pendingKey = 'agent-on-request.pending';
 // This is a UI capability marker, not a credential. Only the server's explicit
 // local open-controls mode accepts unauthenticated control requests.
 const openControlsMarker = 'local-demo-open-controls-access';
-let meta, current, participantToken, adminToken, adminState, selectedSessionId, activeView = 'participant', configController, modelController, conditionsController;
-let perspective = 'owner', perspectiveBusy = false;
+let meta, current, participantToken, adminToken, adminState, adminRuntime, selectedSessionId, activeView = operatorPage ? 'console' : 'participant';
+let configController, modelController, conditionsController;
 let recoveryBusy = false;
 let sessionRestore = null, sessionRestoreBusy = false;
 let adminSessions = [], research = null, dialogContext = null, dialogOpener = null, requestBusy = false, interruptBusy = false, requestSequence = 0, interruptSequence = 0, pollBusy = false, planningNewRound = false;
-let pending = readStorage(pendingKey);
+let renderedConsole = '';
+let pending = operatorPage ? null : readStorage(pendingKey);
 const local = { mode: 'controlled', ontologyScenario: 'distinct', durationMinutes: 30, consent: false, initial: null, additional: null, preview: null, previewStage: null, previewChoice: null, prediction: null, revocation: null, alignmentAnswer: null, moduleAnswer: null, predictionSubmitted: false, revocationSubmitted: false };
 const researchFilters = { mode: 'all', status: 'all', quality: 'all' };
 const approvalDrafts = new Map();
@@ -38,6 +41,7 @@ function participantFocusSnapshot(view) {
   if (!view.contains(node)) return null;
   if (node.id) return { id: node.id };
   if (node.matches('input[name]')) return { name: node.name, value: node.value };
+  if (node.matches('details[data-disclosure-id] > summary')) return { disclosure: node.parentElement.dataset.disclosureId };
   if (node.dataset.participantAction) return { action: node.dataset.participantAction, stage: node.dataset.stage };
   return null;
 }
@@ -56,6 +60,7 @@ function restoreParticipantPosition(view, step, focus) {
     }
     const target = focus?.id ? document.getElementById(focus.id)
       : focus?.name ? [...view.querySelectorAll('input[name]')].find(node => node.name === focus.name && node.value === focus.value)
+      : focus?.disclosure ? [...view.querySelectorAll('details[data-disclosure-id] > summary')].find(node => node.parentElement.dataset.disclosureId === focus.disclosure)
       : focus?.action ? [...view.querySelectorAll('[data-participant-action]')].find(node => node.dataset.participantAction === focus.action && node.dataset.stage === focus.stage)
       : null;
     if (target && view.contains(target) && !target.disabled) target.focus({ preventScroll: true });
@@ -72,7 +77,7 @@ async function restoreParticipantSession({ quiet = false } = {}) {
   try {
     const state = await api('/api/sessions/' + encodeURIComponent(target.id), { token: target.token, admin: false });
     if (sessionRestore !== target) return false;
-    perspective = 'owner'; rememberSession(target.token, state); selectedSessionId = state.session.id;
+    rememberSession(target.token, state);
     if (!quiet) notify(''); return true;
   } catch (error) {
     if (sessionRestore !== target) return false;
@@ -104,12 +109,11 @@ function notify(message, kind = '') {
 class ApiError extends Error {
   constructor(message, status = 0, code = 'NETWORK', details) { super(message); this.status = status; this.code = code; this.details = details; }
 }
-async function api(path, { method = 'GET', body, admin = path.startsWith('/api/admin/'), token, auth = true, researcher = false } = {}) {
+async function api(path, { method = 'GET', body, admin = path.startsWith('/api/admin/'), token, auth = true } = {}) {
   const bearer = token ?? (admin ? adminToken : participantToken);
   const headers = { Accept: 'application/json' };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (auth && bearer) headers.Authorization = 'Bearer ' + bearer;
-  if (researcher && adminToken) headers['X-Researcher-Token'] = adminToken;
   let response;
   try { response = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), cache: 'no-store' }); }
   catch { throw new ApiError('The connection was interrupted. The outcome of a submitted action may be unknown.'); }
@@ -129,38 +133,36 @@ function enableControls(token = adminToken) {
   document.querySelectorAll('[data-admin-nav]').forEach(node => {
     node.hidden = !next || (node.dataset.view === 'models' && meta?.live?.harness === 'hermes');
   });
-  $('admin-open').hidden = open;
-  $('admin-open').textContent = next ? 'Researcher tools' : 'Researcher sign in';
+  $('app-tabs').hidden = !next;
+  $('console-access').hidden = Boolean(next);
+  $('admin-open').hidden = open || Boolean(next);
   $('admin-logout').hidden = open || !next;
-  if (next) selectedSessionId ||= current?.session.id;
   if (changed) conditionsController?.authorizationChanged();
-  if (!next && activeView !== 'participant') setView('participant');
+  if (!next) for (const name of operatorViews) $(name + '-view').hidden = true;
 }
 function clearAdmin() {
   if (meta?.openControls) { enableControls(); return; }
   adminLoadSequence++;
   approvalDrafts.clear();
-  adminToken = null; adminState = null; adminSessions = []; research = null;
-  perspective = 'owner';
-  if (current?.perspective === 'observer' && participantToken) {
-    sessionRestore = { id: current.session.id, token: participantToken }; current = null;
-    renderParticipant(); restoreParticipantSession({ quiet: true });
-  }
+  adminToken = null; adminState = null; adminRuntime = null; adminSessions = []; research = null; selectedSessionId = null;
+  renderedConsole = '';
+  $('console-view').replaceChildren();
+  $('research-view').replaceChildren();
   enableControls(null);
   configController?.clear();
   modelController?.clear();
   conditionsController?.authorizationChanged();
-  if (activeView !== 'participant') setView('participant');
+  activeView = 'console';
 }
 function setView(view) {
-  if (meta?.openControls && !adminToken) enableControls();
-  if (view !== 'participant' && !adminToken) { openAdminDialog(); return; }
+  if (!operatorPage || !adminToken || !operatorViews.includes(view)) return;
   if (activeView === 'models' && view !== 'models') modelController?.clearSecret();
   activeView = view;
-  for (const name of ['participant', 'console', 'config', 'models', 'research']) $(name + '-view').hidden = name !== view;
+  for (const name of operatorViews) $(name + '-view').hidden = name !== view;
   document.querySelectorAll('[data-view]').forEach(button => { button.toggleAttribute('aria-current', button.dataset.view === view); if (button.dataset.view === view) button.setAttribute('aria-current', 'page'); });
-  if (view === 'console') loadAdminSessions();
-  if (view === 'config') configController.load(selectedSessionId || current?.session.id);
+  if (view === 'console') { renderConsole(); loadAdminSessions(); }
+  if (view === 'conditions') conditionsController.load();
+  if (view === 'config') configController.load(selectedSessionId);
   if (view === 'models') modelController.load();
   if (view === 'research') loadResearch();
 }
@@ -174,10 +176,7 @@ function stateCanAdvance(next, previous) {
 function applyState(state) {
   if (!state?.session) return;
   if (current && state.session.id === current.session.id && stateCanAdvance(state, current)) {
-    // Administrative mutations may return the full observer state. Only the
-    // explicit perspective request may replace this participant view with it.
-    if ((state.perspective || 'owner') === perspective) { current = state; renderParticipant(); }
-    else refreshCurrent({ quiet: true });
+    current = state; renderParticipant();
   }
   if (state.session.id === selectedSessionId && stateCanAdvance(state, adminState)) { adminState = state; if (activeView === 'console') renderConsole(); }
 }
@@ -200,45 +199,28 @@ function calendarHtml() {
   return '<section class="panel calendar-panel"><div class="panel-heading"><h3>Alice’s fictional calendar</h3><span class="tag">Synthetic data</span></div>' + tableRows(rows, 'calendar-table') + '<p class="private-label" style="margin-top:12px">Event titles and notes are fictional private information. Only your confirmed snapshot can be sent to Bob.</p></section>';
 }
 function renderStart() {
-  const focus = participantFocusSnapshot($('participant-view'));
-  rememberDisclosures($('participant-view'), $('participant-view').dataset.disclosureScope || 'start');
-  $('participant-view').dataset.disclosureScope = 'start';
-  $('participant-view').setAttribute('aria-busy', String(requestBusy || interruptBusy));
+  const view = $('participant-view');
+  const focus = participantFocusSnapshot(view);
+  rememberDisclosures(view, view.dataset.disclosureScope || 'start');
+  view.dataset.disclosureScope = 'start';
+  view.setAttribute('aria-busy', String(requestBusy || interruptBusy));
   const modes = meta?.modes || [];
-  const selected = modes.find(mode => mode.id === local.mode);
-  const ready = meta && selected?.available && meta.runtime?.alice?.online !== false && meta.runtime?.bob?.online !== false;
-  const consentDetailsOpen = $('participant-view').querySelector('.consent-details')?.open;
-  const modeCopy = { controlled: ['Guided experience', 'A predictable first round'], live: ['Live models', 'Try model-driven collaboration'], replay: ['Watch a replay', 'Explore a reference example'] };
-  const modeShapes = { controlled: '<rect x="7" y="8" width="22" height="22" rx="6"/><path d="m13 19 4 4 7-8"/>', live: '<path d="m18 4 3.8 9.2L31 17l-9.2 3.8L18 30l-3.8-9.2L5 17l9.2-3.8Z"/><path d="M29 3v6m-3-3h6"/>', replay: '<circle cx="18" cy="18" r="13"/><path d="m15 12 9 6-9 6Z"/>' };
-  $('participant-view').innerHTML = `<section class="start-hero">
-    <div><p class="eyebrow">Two owners · different meanings · one task</p><h1>Can your agents understand each other?</h1><p class="lead">Help Alice and Bob arrange a discussion. Review how their concepts align, then decide what information may cross each owner’s boundary.</p><small>About 3–5 minutes · fictional calendars</small></div>
-    <div class="boundary-illustration" role="img" aria-label="Alice and Bob have separate data. You control the sharing boundary.">
-      <svg viewBox="0 0 360 106" aria-hidden="true"><path d="M82 49h60m76 0h60" class="boundary-path"/><circle cx="52" cy="49" r="30" class="boundary-alice"/><circle cx="308" cy="49" r="30" class="boundary-bob"/><g class="boundary-avatar"><rect x="37" y="38" width="30" height="23" rx="8"/><path d="M52 32v6m-7 10h1m12 0h1m-12 7h10"/><rect x="293" y="38" width="30" height="23" rx="8"/><path d="M308 32v6m-7 10h1m12 0h1m-12 7h10"/></g><rect x="150" y="20" width="60" height="58" rx="16" class="boundary-gate"/><g class="boundary-lock"><rect x="169" y="43" width="22" height="19" rx="4"/><path d="M174 43v-6a6 6 0 0 1 12 0v6m-6 7v5"/></g></svg>
-      <div class="boundary-captions"><span><strong>Alice</strong><small>Your agent</small></span><span><strong>Your choice</strong><small>Sharing boundary</small></span><span><strong>Bob</strong><small>Peer agent</small></span></div>
-    </div>
-  </section><section class="panel start-ontology-story"><div class="panel-heading"><div><p class="eyebrow">Recommended conference experience</p><h3>Calendar availability and booking eligibility differ</h3></div><span class="tag">A task-scoped alignment</span></div><p>Alice describes calendar entries. Bob describes booking slots. The agents must agree on the relevant meanings before interpreting a shared snapshot.</p><div class="ontology-story-grid"><label class="choice"><input type="radio" name="ontology-scenario" value="distinct" ${local.ontologyScenario === 'distinct' ? 'checked' : ''}><span><strong>Different models · guided alignment</strong><small>Review interval, weekday and booking rules, then approve an exact snapshot.</small></span></label><label class="choice"><input type="radio" name="ontology-scenario" value="ambiguous" ${local.ontologyScenario === 'ambiguous' ? 'checked' : ''}><span><strong>Same word · ambiguous meaning</strong><small>Does “free” mean only no event, or permission to consider a meeting? Clarify before proceeding.</small></span></label></div><label class="field section-actions"><span>Discussion duration</span><select id="task-duration">${[30,45,60].map(minutes => '<option value="' + minutes + '" ' + (local.durationMinutes === minutes ? 'selected' : '') + '>' + minutes + ' minutes</option>').join('')}</select></label><div class="recommended-launch"><button class="button primary" data-participant-action="recommended" ${!ready || requestBusy ? 'disabled' : ''}>Start recommended guided demo</button><small>Uses the conference kit in guided mode. Your selected story, duration and research choice apply. No sharing is preapproved.</small></div></section><section class="panel start-preferences"><fieldset><legend><span class="setup-step">1</span>Choose your experience</legend><div class="mode-grid">${modes.map(mode => `<label class="choice mode-card ${!mode.available ? 'dimmed' : ''}" data-mode="${escapeHtml(mode.id)}"><input type="radio" name="start-mode" value="${escapeHtml(mode.id)}" ${local.mode === mode.id ? 'checked ' : ''}${!mode.available ? 'disabled ' : ''}><span class="mode-icon"><svg viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${modeShapes[mode.id] || modeShapes.controlled}</svg></span><span><strong>${modeCopy[mode.id]?.[0] || escapeHtml(mode.label)}</strong><small>${modeCopy[mode.id]?.[1] || escapeHtml(mode.description)}</small><span class="mode-status">${!mode.available ? 'Unavailable' : mode.id === 'controlled' ? 'Recommended to start' : escapeHtml(mode.label)}</span></span></label>`).join('')}</div></fieldset>
-    ${local.mode === 'live' ? '<div class="notice live-disclosure">' + escapeHtml(modeDisclosure(local.mode)) + '</div>' : ''}
-    <div class="recording-option"><span class="recording-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="8" y="6" width="17" height="22" rx="4"/><path d="M12 4h9v5h-9zM12 15h9m-9 5h6"/></svg></span><div><label class="check"><input id="start-consent" type="checkbox" ${local.consent ? 'checked ' : ''}${local.mode === 'replay' ? 'disabled ' : ''}><span><strong>Record this fictional round for research</strong><small>Optional. Records fictional data and agent states; sharing permission is separate.</small></span></label><details class="consent-details" ${consentDetailsOpen ? 'open' : ''}><summary>What gets recorded?</summary><p class="muted">Researchers can review the fictional KG, data, skills, authorization, changes and understanding answers. Model secrets and raw provider conversations are excluded. No name or account is requested. Sharing permission is a separate decision. Without consent, no research record is written. Session state remains in memory until replacement, reset or expiry.</p><small>Consent version: ${escapeHtml(meta?.consentVersion || 'Loading')}</small></details></div></div></section>`;
-  const conditionsAccess = document.createElement('details'); conditionsAccess.className = 'initial-conditions-access'; conditionsAccess.dataset.disclosureId = 'start-initial-conditions';
-  conditionsAccess.innerHTML = '<summary><span>Explore or customize the starting states</span><small>Optional · calendars, skills, knowledge and permission limits</small></summary><p class="muted">Experiment setup · observer preview of fictional starting states. This view is separate from Alice’s owner view during the collaboration.</p>';
-  const holder = document.createElement('div'); holder.id = 'initial-conditions-builder';
-  conditionsAccess.append(holder); $('participant-view').append(conditionsAccess);
-  conditionsController?.attach(holder);
-  const actionPanel = document.createElement('section'); actionPanel.className = 'panel start-round-panel';
-  actionPanel.innerHTML = '<div class="toolbar section-actions"><button class="button primary" data-participant-action="start" ' + (!ready || requestBusy ? 'disabled' : '') + '>' + (requestBusy ? 'Starting isolated agents…' : 'Start the demo') + '</button><span class="muted">' + (!ready ? 'Waiting for an available mode and both agents.' : 'Ready · creates the exact reviewed initial states.') + '</span></div>';
-  $('participant-view').append(actionPanel);
-  updateStartControls();
-  restoreDisclosures($('participant-view'), 'start');
-  restoreParticipantPosition($('participant-view'), 'start', focus);
-}
-function updateStartControls() {
-  const button = $('participant-view').querySelector('[data-participant-action="start"]'); if (!button) return;
-  const modeReady = meta?.modes?.find(mode => mode.id === local.mode)?.available && meta.runtime?.alice?.online !== false && meta.runtime?.bob?.online !== false;
-  button.disabled = !modeReady || requestBusy || !conditionsController?.ready();
-  const recommended = $('participant-view').querySelector('[data-participant-action="recommended"]');
-  if (recommended) recommended.disabled = requestBusy || !meta?.modes?.find(mode => mode.id === 'controlled')?.available || !conditionsController?.canSelectPreset('conference');
-  const note = button.parentElement.querySelector('.muted');
-  if (note) note.textContent = !modeReady ? 'Waiting for an available mode and both agents.' : conditionsController?.ready() ? 'Ready · creates the exact reviewed initial states.' : meta?.openControls ? 'Resolve and validate your initial conditions before starting.' : 'Resolve and validate your initial conditions; Bob changes need researcher sign-in.';
+  const ready = modes.some(mode => mode.id === local.mode && mode.available)
+    && (local.mode === 'replay' || (meta.runtime?.alice?.online !== false && meta.runtime?.bob?.online !== false));
+  const options = `<section class="panel audience-start-options">
+    <div class="toolbar"><button class="button primary" data-participant-action="start" ${!ready || requestBusy ? 'disabled' : ''}>${requestBusy ? 'Starting isolated agents…' : 'Start the demo'}</button>${!ready ? '<span class="muted">Waiting for an available mode and both agents.</span>' : ''}</div>
+    <details data-disclosure-id="audience-options"><summary>Demo options</summary>
+      <fieldset><legend>Choose your experience</legend><div class="toolbar">${modes.map(mode => '<label class="check"><input type="radio" name="start-mode" value="' + escapeHtml(mode.id) + '" ' + (local.mode === mode.id ? 'checked ' : '') + (!mode.available ? 'disabled ' : '') + '><span>' + escapeHtml(mode.label) + '</span></label>').join('')}</div></fieldset>
+      <fieldset><legend>Meaning to align</legend><div class="toolbar"><label class="check"><input type="radio" name="ontology-scenario" value="distinct" ${local.ontologyScenario === 'distinct' ? 'checked' : ''}><span>Different models · guided alignment</span></label><label class="check"><input type="radio" name="ontology-scenario" value="ambiguous" ${local.ontologyScenario === 'ambiguous' ? 'checked' : ''}><span>Same word · ambiguous meaning</span></label></div></fieldset>
+      <label class="field"><span>Discussion duration</span><select id="task-duration">${[30,45,60].map(minutes => '<option value="' + minutes + '" ' + (local.durationMinutes === minutes ? 'selected' : '') + '>' + minutes + ' minutes</option>').join('')}</select></label>
+    </details>
+    ${local.mode === 'live' ? '<p class="notice live-disclosure">' + escapeHtml(modeDisclosure(local.mode)) + '</p>' : ''}
+    <label class="check"><input id="start-consent" type="checkbox" ${local.consent ? 'checked ' : ''}${local.mode === 'replay' ? 'disabled ' : ''}><span><strong>Record this fictional round for research</strong><small>Optional. Records fictional data and agent states; sharing permission is separate.</small></span></label>
+    <details class="consent-details" data-disclosure-id="audience-consent"><summary>What gets recorded?</summary><p class="muted">Researchers can review the fictional KG, data, skills, authorization, changes and understanding answers. Model secrets and raw provider conversations are excluded. No name or account is requested. Sharing permission is a separate decision. Without consent, no research record is written. Session state remains in memory until replacement, reset or expiry.</p><small>Consent version: ${escapeHtml(meta?.consentVersion || 'Loading')}</small></details>
+  </section>`;
+  view.innerHTML = renderAudienceIntroHtml({ controls: options, direct: Boolean(meta?.runtime?.peerTransport) });
+  restoreDisclosures(view, 'start');
+  restoreParticipantPosition(view, 'start', focus);
 }
 function choicesHtml(stage) {
   const initial = stage === 'initial';
@@ -302,14 +284,12 @@ function renderParticipant() {
   view.dataset.disclosureScope = 'participant:' + session.id;
   if (current.answers?.received_scope) { local.prediction = current.answers.received_scope; local.predictionSubmitted = true; }
   if (current.answers?.withdrawal) { local.revocation = current.answers.withdrawal; local.revocationSubmitted = true; }
-  $('runtime-status').textContent = 'Alice: ' + (current.runtime?.alice?.online ? 'ready' : 'offline') + ' · Bob: ' + (current.runtime?.bob?.online ? 'ready' : 'offline');
   const hasPending = pending?.sessionId === session.id;
   const endingPending = hasPending && pending.body.action === 'end';
   const stoppingPending = hasPending && pending.body.action === 'stop_sharing';
   $('end-confirm').disabled = interruptBusy;
   let outcome = '';
   if (endingPending) outcome = '<h2>Waiting for End confirmation</h2><p class="lead">The restriction request is still being confirmed. The receipt history preserves what had actually arrived.</p>';
-  else if (session.ended) outcome = '<h2>This demo has ended</h2><p class="lead">No further information will be sent. The receipts show what had already been delivered.</p>';
   else if (session.mode === 'replay' && current.task?.outcome) outcome = '<h2>Replay complete</h2><p class="lead">This saved trace illustrates a collaboration. It did not send a new payload or arrange a live meeting.</p>';
   else if (current.task?.outcome === 'arranged') outcome = '<h2>Discussion arranged</h2><p class="lead">' + escapeHtml(current.task.meeting?.day || '') + ' · ' + escapeHtml(current.task.meeting?.time || '') + '. Review what each agent actually received.</p>';
   else if (current.task?.outcome === 'alignment_rejected') outcome = '<h2>Meaning left unresolved</h2><p class="lead">The proposed interpretation was declined. The agents did not use it to exchange or interpret calendar data.</p>';
@@ -324,20 +304,18 @@ function renderParticipant() {
     outcome = '<h2>Your boundary was kept</h2><p class="lead">' + escapeHtml(reasons[current.task.reason] || 'No meeting was arranged from the information available. Review the recorded reason and receipts below.') + '</p>';
   }
   else if (current.task?.outcome === 'declined') outcome = '<h2>Calendar sharing declined</h2><p class="lead">Your decision completed this collaboration. No calendar information was authorized.</p>';
-  else if (current.task?.outcome === 'ended') outcome = '<h2>This demo has ended</h2><p class="lead">No further information will be sent. The receipts show what had already been delivered.</p>';
+  else if (session.ended || current.task?.outcome === 'ended') outcome = '<h2>This demo has ended</h2><p class="lead">No further information will be sent. The receipts show what had already been delivered.</p>';
   const waiting = current.waiting;
-  const approvalPending = current.pendingApprovals?.some(item => item.status === 'pending');
   const heading = session.stage === 'alignment' ? 'Confirm how the two assistants understand free time' : session.stage === 'initial' ? 'Choose Alice’s sharing boundary' : session.stage === 'additional' ? 'Review Bob’s additional request' : session.stage === 'replay' ? 'Labelled replay' : 'Your collaboration';
   const controls = (endingPending ? '<span class="tag warn">End needs confirmation</span>' : !session.ended ? '<button class="button quiet" data-participant-action="end" ' + (interruptBusy ? 'disabled' : '') + '>End this demo</button>' + (!current.alice.stopped && session.mode !== 'replay' ? '<button class="button" data-participant-action="stop_sharing" ' + (interruptBusy ? 'disabled' : '') + '>Stop future sharing</button>' : '') : '<button class="button" data-participant-action="fresh" ' + (requestBusy || interruptBusy || pending ? 'disabled' : '') + '>New demo</button>');
   const warnings = (hasPending && (isInterrupt(pending?.body?.action) ? interruptBusy : requestBusy) ? '<div class="notice" role="status" data-processing-choice><strong>Processing your choice</strong><p>Your original choice is being confirmed. You can stop future sharing or end this round.</p><button class="button" data-participant-action="refresh">Check session state</button></div>' : hasPending ? '<div class="notice warning" role="status"><strong>Submission outcome needs verification</strong><p>The same request ID and intent are retained. No changed sharing choice will be resubmitted automatically.</p><div class="toolbar"><button class="button" data-participant-action="verify_pending">Verify the same submission</button><button class="button" data-participant-action="refresh">Check session state</button></div></div>' : '')
     + (current.alice?.stopped ? '<div class="notice">' + (stoppingPending ? 'Waiting for Stop confirmation. ' : 'Future Alice sharing is stopped. ') + 'Previously received snapshots remain in the receipt history.</div>' : '')
-    + (session.paused ? renderRecoveryHtml(current, { busy: requestBusy || interruptBusy || recoveryBusy || hasPending }) : waiting ? '<div class="notice warning" role="status"><strong>Waiting</strong><p>' + escapeHtml(waiting.message) + '</p>' + (approvalPending || waiting.reason === 'admin' ? '<div class="toolbar"><button class="button" data-participant-action="admin_review">Open Bob owner review window</button><span class="muted">Closing it leaves the request pending.</span></div>' : '') + '</div>' : '');
+    + (session.paused ? renderRecoveryHtml(current, { busy: requestBusy || interruptBusy || hasPending, operatorOnly: true }) : waiting && waiting.reason !== 'admin' ? '<div class="notice warning" role="status"><strong>Waiting</strong><p>' + escapeHtml(waiting.message) + '</p></div>' : '');
   const replay = session.stage === 'replay' ? '<section class="panel"><h3>Saved trace · replay</h3><p class="muted">Source: ' + escapeHtml(current.replay?.source || 'Saved replay') + ' · step ' + escapeHtml(current.replay?.index ?? 0) + ' / ' + escapeHtml(current.replay?.total ?? 0) + '</p><button class="button primary section-actions" data-participant-action="replay_next" ' + (requestBusy || interruptBusy || pending || session.ended || (current.replay?.index ?? 0) >= (current.replay?.total ?? 0) ? 'disabled' : '') + '>Next replay step</button></section>' : '';
   const ontologyCard = renderOntologyHtml(current, { busy: requestBusy || interruptBusy || Boolean(pending) || session.paused || Boolean(waiting) });
   const ontology = session.stage === 'alignment' || !ontologyCard ? ontologyCard : '<details class="ontology-aligned-access" data-disclosure-id="ontology-accepted-summary"><summary><span>' + (current.ontology?.status === 'accepted' ? 'Meaning aligned for this task' : 'Alignment decision & evidence') + '</span><small>Definitions, mappings and confirmed agent dialogue</small></summary>' + ontologyCard + '</details>';
-  view.innerHTML = renderParticipantHtml({ state: current, heading, mode: modeLabel(session.mode), warnings, controls, outcome, choices: !session.ended && !session.paused && !waiting && ['initial', 'additional'].includes(session.stage) ? choicesHtml(session.stage) : '', questions: questionsHtml(), receipts: receiptsHtml(), calendar: calendarHtml(), replay, modeDisclosure: modeDisclosure(session.mode), perspective: renderPerspectiveHtml(current, { busy: perspectiveBusy || requestBusy || interruptBusy }), ontology, contribution: renderContributionHtml(current) });
+  view.innerHTML = renderParticipantHtml({ state: current, heading, mode: modeLabel(session.mode), summary: endingPending || session.ended || Boolean(current.task?.outcome), warnings, controls, outcome, choices: !session.ended && !session.paused && !waiting && ['initial', 'additional'].includes(session.stage) ? choicesHtml(session.stage) : '', questions: questionsHtml(), receipts: receiptsHtml(), calendar: calendarHtml(), replay, modeDisclosure: modeDisclosure(session.mode), ontology, contribution: renderContributionHtml(current) });
   mountAgentStates($('live-alice-state'), { Alice: current.agentStates?.Alice }, { scope: 'participant-live:' + session.id });
-  mountAgentStates($('live-bob-state'), { Bob: current.agentStates?.Bob }, { scope: 'participant-live:' + session.id });
   restoreDisclosures(view, view.dataset.disclosureScope);
   restoreParticipantPosition(view, [session.id, session.stage, current.ontology?.status, session.paused, session.ended, current.alice?.stopped, current.task?.outcome].join(':'), focus);
 }
@@ -346,12 +324,10 @@ async function startSession() {
   if (requestBusy || interruptBusy) return;
   requestBusy = true; renderParticipant();
   try {
-    const initialConditions = await conditionsController.submission();
     const previous = current ? { previousSessionId: current.session.id, previousToken: participantToken } : {};
-    const result = await api('/api/sessions', { method: 'POST', auth: false, researcher: true, body: { mode: local.mode, ontologyScenario: local.ontologyScenario, alignmentReview: true, task: { type: 'schedule', durationMinutes: local.durationMinutes }, researchConsent: local.mode !== 'replay' && local.consent, ...initialConditions, ...previous } });
-    perspective = 'owner';
+    const result = await api('/api/sessions', { method: 'POST', auth: false, body: { mode: local.mode, ontologyScenario: local.ontologyScenario, alignmentReview: true, task: { type: 'schedule', durationMinutes: local.durationMinutes }, researchConsent: local.mode !== 'replay' && local.consent, ...previous } });
     rememberPending(null); rememberSession(result.token, result.state); planningNewRound = false; clearPreview(); local.initial = null; local.additional = null; local.prediction = null; local.revocation = null; local.alignmentAnswer = null; local.moduleAnswer = null; local.predictionSubmitted = false; local.revocationSubmitted = false;
-    if (!selectedSessionId || selectedSessionId === previous.previousSessionId) selectedSessionId = current.session.id; notify('');
+    notify('');
   } catch (error) { notify(error.message, 'error'); }
   finally { requestBusy = false; renderParticipant(); }
 }
@@ -359,17 +335,13 @@ async function refreshCurrent({ quiet = false } = {}) {
   if (sessionRestore) return restoreParticipantSession({ quiet });
   if (!current || !participantToken) return;
   const sessionId = current.session.id, token = participantToken;
-  const observer = perspective === 'observer' && Boolean(adminToken);
-  const requestedPerspective = observer ? 'observer' : 'owner';
   try {
-    const next = await api('/api/sessions/' + encodeURIComponent(sessionId) + (observer ? '?perspective=observer' : ''), { token: observer ? adminToken : token, admin: observer });
+    const next = await api('/api/sessions/' + encodeURIComponent(sessionId), { token });
     if (current?.session.id !== sessionId || participantToken !== token) return;
-    if (perspective !== requestedPerspective || observer && !adminToken) return false;
     if (JSON.stringify(next) !== JSON.stringify(current)) applyState(next);
     return true;
   } catch (error) {
     if (current?.session.id !== sessionId || participantToken !== token) return;
-    if (observer && [401, 403].includes(error.status)) { perspective = 'owner'; await refreshCurrent({ quiet: true }); if (!quiet) notify('Observer access is unavailable. You remain in Alice owner view.', 'warning'); return false; }
     if ([401, 404, 410].includes(error.status)) { current = null; participantToken = null; local.consent = false; planningNewRound = false; rememberPending(null); writeStorage(sessionKey, null); clearPreview(); notify('This in-memory session is no longer available. A server restart or round reset ends the old round; start a new demo.', 'warning'); renderParticipant(); }
     else if (!quiet) notify(error.message, 'warning');
     return false;
@@ -431,7 +403,7 @@ async function performAction(actionName, extra = {}, { repeat = false } = {}) {
   } finally { if (sequence === requestSequence) requestBusy = false; renderParticipant(); }
 }
 
-$('participant-view').addEventListener('change', event => {
+$('participant-view')?.addEventListener('change', event => {
   const input = event.target;
   if (input.name === 'start-mode') { local.mode = input.value; if (local.mode === 'replay') local.consent = false; renderStart(); }
   if (input.name === 'ontology-scenario') local.ontologyScenario = input.value;
@@ -444,27 +416,23 @@ $('participant-view').addEventListener('change', event => {
     performAction(question.action, { answer: input.value });
   }
 });
-$('participant-view').addEventListener('click', event => {
+$('participant-view')?.addEventListener('click', event => {
   const button = event.target.closest('[data-participant-action]'); if (!button || button.disabled) return;
   const actionName = button.dataset.participantAction;
   if (actionName === 'start') startSession();
   else if (actionName === 'restore_session') restoreParticipantSession();
-  else if (actionName === 'recommended') startRecommended();
-  else if (actionName === 'perspective') switchPerspective(button.dataset.perspective);
   else if (actionName.startsWith('alignment_')) performAction('alignment_decision', { decision: actionName.slice('alignment_'.length), expectedAlignmentVersion: current.ontology?.revision, ...(button.dataset.bookable !== undefined ? { calendarFreeMeansBookable: button.dataset.bookable === 'true' } : {}) });
   else if (actionName === 'fresh') { if (requestBusy || interruptBusy || pending) return; local.mode = current?.session.mode || 'controlled'; local.consent = false; planningNewRound = true; rememberPending(null); clearPreview(); renderParticipant(); }
   else if (actionName === 'preview') previewChoice(button.dataset.stage);
   else if (actionName === 'confirm') { const stage = button.dataset.stage; if (local.preview && local.previewStage === stage) performAction(stage === 'initial' ? 'share_initial' : 'respond_additional', { choice: local[stage], previewHash: local.preview.payloadHash }); }
   else if (actionName === 'verify_pending') performAction(pending?.body?.action, {}, { repeat: true });
   else if (actionName === 'refresh') refreshCurrent();
-  else if (actionName === 'admin_review') openAdminDialog({ kind: 'approval', sessionId: current.session.id });
-  else if (actionName === 'recover') openAdminDialog({ kind: 'recovery', sessionId: current.session.id });
   else if (actionName === 'end') showDialog('end-dialog', button);
   else if (actionName === 'answer_prediction') performAction(actionName, { answer: local.prediction });
   else if (actionName === 'answer_revocation') performAction(actionName, { answer: local.revocation });
   else performAction(actionName);
 });
-$('end-confirm').addEventListener('click', () => { closeDialog('end-dialog'); performAction('end'); });
+$('end-confirm')?.addEventListener('click', () => { closeDialog('end-dialog'); performAction('end'); });
 
 function showDialog(id, opener = document.activeElement) {
   dialogOpener = opener; const dialog = $(id); if (!dialog.open) dialog.showModal();
@@ -475,24 +443,14 @@ function rememberApprovalDraft() {
   if (!approval || !body.querySelector('input[name="approval-field"]')) return;
   approvalDrafts.set(approval.id, { selectedFields: [...body.querySelectorAll('input[name="approval-field"]:checked')].map(node => node.value), maxUses: $('approval-max-uses')?.value, expiryMinutes: $('approval-expiry')?.value });
 }
-async function switchPerspective(next) {
-  if (!current || perspectiveBusy || requestBusy || interruptBusy) return;
-  if (next === 'observer' && !adminToken) { openAdminDialog({ kind: 'perspective', perspective: next }); return; }
-  perspectiveBusy = true;
-  const previous = perspective;
-  perspective = next;
-  renderParticipant();
-  try { if (!await refreshCurrent()) perspective = previous === 'observer' && !adminToken ? 'owner' : previous; }
-  catch { perspective = previous; }
-  finally { perspectiveBusy = false; renderParticipant(); }
+function closeDialog(id) {
+  if (id === 'admin-dialog') rememberApprovalDraft();
+  const dialog = $(id);
+  if (dialog?.open) dialog.close();
+  const fallback = operatorPage ? (adminToken ? document.querySelector('[data-view="' + activeView + '"]') : $('admin-open')) : $('participant-view').querySelector('.experience-heading h2');
+  (dialogOpener?.isConnected ? dialogOpener : fallback)?.focus();
+  if (id === 'admin-dialog') dialogContext = null;
 }
-async function startRecommended() {
-  if (requestBusy || interruptBusy || pending) return;
-  local.mode = 'controlled';
-  try { await conditionsController.selectPreset('conference'); await startSession(); }
-  catch (error) { notify(error.message, 'error'); }
-}
-function closeDialog(id) { if (id === 'admin-dialog') rememberApprovalDraft(); const dialog = $(id); if (dialog.open) dialog.close(); if (dialogOpener?.isConnected) dialogOpener.focus(); else ($('admin-open').hidden ? document.querySelector('[data-view="' + activeView + '"]') : $('admin-open'))?.focus(); if (id === 'admin-dialog') dialogContext = null; }
 for (const dialog of document.querySelectorAll('dialog')) {
   dialog.addEventListener('cancel', event => { event.preventDefault(); closeDialog(dialog.id); });
   dialog.addEventListener('keydown', event => {
@@ -524,7 +482,7 @@ function renderLogin(message = '') {
   restoreDisclosures(body, 'login');
   requestAnimationFrame(() => $('admin-pin')?.focus());
 }
-$('admin-dialog-body').addEventListener('submit', async event => {
+$('admin-dialog-body')?.addEventListener('submit', async event => {
   if (event.target.id !== 'admin-login-form') return;
   event.preventDefault(); const pin = $('admin-pin').value; $('admin-pin').value = ''; const context = dialogContext;
   event.target.querySelectorAll('button,input').forEach(node => { node.disabled = true; });
@@ -532,8 +490,7 @@ $('admin-dialog-body').addEventListener('submit', async event => {
     const result = await api('/api/admin/login', { method: 'POST', auth: false, body: { pin } }); enableControls(result.token);
     if (context?.kind === 'approval') await loadApprovals(context.sessionId);
     else if (context?.kind === 'recovery') await loadRecovery(context.sessionId);
-    else if (context?.kind === 'perspective') { closeDialog('admin-dialog'); await switchPerspective(context.perspective); }
-    else closeDialog('admin-dialog');
+    else { closeDialog('admin-dialog'); setView('console'); }
   } catch (error) { renderLogin(error.message); }
 });
 async function loadApprovals(sessionId) {
@@ -556,8 +513,7 @@ async function loadRecovery(sessionId, message = '') {
   $('admin-dialog-title').textContent = 'Recover the paused step';
   $('admin-dialog-body').innerHTML = '<p class="loading">Checking the current step and confirmed receipts…</p>';
   try {
-    const isCurrent = current?.session.id === sessionId;
-    const state = await api('/api/sessions/' + encodeURIComponent(sessionId) + (isCurrent ? '' : '?perspective=observer'), { token: isCurrent ? participantToken : adminToken, admin: !isCurrent });
+    const state = await api('/api/sessions/' + encodeURIComponent(sessionId) + '?perspective=observer', { admin: true });
     if (sequence !== adminDialogLoadSequence || dialogContext?.kind !== 'recovery' || dialogContext.sessionId !== sessionId || !$('admin-dialog').open) return;
     dialogContext.state = state;
     $('admin-dialog-body').innerHTML = state.session.paused && !state.session.ended ? renderRecoveryHtml(state, { controls: true, busy: recoveryBusy, message }) : '<p>No paused operation remains. Review the current round before taking another action.</p><button class="button section-actions" data-close-dialog="admin-dialog">Return</button>';
@@ -577,7 +533,7 @@ function renderApproval(approval, message = '') {
   body.innerHTML = renderApprovalHtml(approval, message, selections);
   restoreDisclosures(body, scope);
 }
-$('admin-dialog-body').addEventListener('click', async event => {
+$('admin-dialog-body')?.addEventListener('click', async event => {
   const recoveryButton = event.target.closest('[data-recovery-action]');
   if (recoveryButton && !recoveryButton.disabled && dialogContext?.kind === 'recovery' && !recoveryBusy) {
     const context = dialogContext, sessionId = context.sessionId, recoveryAction = recoveryButton.dataset.recoveryAction;
@@ -585,16 +541,15 @@ $('admin-dialog-body').addEventListener('click', async event => {
     if (recoveryAction === 'configure') { selectedSessionId = sessionId; closeDialog('admin-dialog'); setView('config'); return; }
     if (!['retry', 'restore_bob'].includes(recoveryAction)) return;
     recoveryBusy = true;
-    $('admin-dialog-body').innerHTML = renderRecoveryHtml(context.state, { controls: true, busy: true }); renderParticipant();
+    $('admin-dialog-body').innerHTML = renderRecoveryHtml(context.state, { controls: true, busy: true });
     let recoveryMessage = '';
     try {
       const result = await api('/api/admin/sessions/' + encodeURIComponent(sessionId) + '/intervene', { method: 'POST', body: { action: recoveryAction } });
       applyState(result.state);
-      if (current?.session.id === sessionId) await refreshCurrent({ quiet: true });
     } catch (error) {
       if (error.status === 401 && !meta?.openControls) { recoveryBusy = false; if (dialogContext?.kind === 'recovery' && dialogContext.sessionId === sessionId) renderLogin('Researcher sign-in expired. Sign in again to recover this paused step.'); return; }
       recoveryMessage = error.status ? error.message : 'The recovery outcome needs verification. Check the current step before choosing another retry. No changed sharing decision was sent.';
-    } finally { recoveryBusy = false; renderParticipant(); }
+    } finally { recoveryBusy = false; }
     if (dialogContext?.kind === 'recovery' && dialogContext.sessionId === sessionId && $('admin-dialog').open) await loadRecovery(sessionId, recoveryMessage);
     return;
   }
@@ -608,16 +563,16 @@ $('admin-dialog-body').addEventListener('click', async event => {
   try { const result = await api('/api/admin/approvals/' + encodeURIComponent(approval.id) + '/decision', { method: 'POST', body }); applyState(result.state); if (dialogContext === context) closeDialog('admin-dialog'); approvalDrafts.delete(approval.id); if (activeView === 'console') loadAdminSessions(); }
   catch (error) { if (dialogContext !== context || !$('admin-dialog').open) return; if (error.status === 401 && !meta?.openControls) { renderLogin('Researcher sign-in expired. Sign in again to review this pending request.'); } else if (error.status === 409 || !error.status) { await loadApprovals(approval.sessionId); notify(error.status === 409 ? 'The pending Bob request changed. Review its new revision; no decision was automatically resent.' : 'The approval outcome needs verification. The current pending request was checked; no approval was automatically resent.', 'warning'); } else renderApproval(approval, error.message); }
 });
-$('admin-dialog-body').addEventListener('change', event => {
+$('admin-dialog-body')?.addEventListener('change', event => {
   if (event.target.name !== 'approval-field') return;
   const body = $('admin-dialog-body'), empty = !body.querySelector('input[name="approval-field"]:checked');
   body.querySelectorAll('[data-approval-decision="allow_once"],[data-approval-decision="allow_round"]').forEach(button => { button.disabled = empty; });
   const hint = body.querySelector('[data-empty-approval]'); if (hint) hint.hidden = !empty;
   rememberApprovalDraft();
 });
-$('admin-open').addEventListener('click', () => openAdminDialog());
-$('admin-logout').addEventListener('click', async () => { try { await api('/api/admin/logout', { method: 'POST' }); } catch { /* Clearing local admin capability is still required. */ } clearAdmin(); });
-$('app-tabs').addEventListener('click', event => { const button = event.target.closest('[data-view]'); if (button) setView(button.dataset.view); });
+$('admin-open')?.addEventListener('click', () => openAdminDialog());
+$('admin-logout')?.addEventListener('click', async () => { try { await api('/api/admin/logout', { method: 'POST' }); } catch { /* Clearing local admin capability is still required. */ } clearAdmin(); });
+$('app-tabs')?.addEventListener('click', event => { const button = event.target.closest('[data-view]'); if (button) setView(button.dataset.view); });
 
 async function loadAdminSessions() {
   if (!adminToken) return;
@@ -626,28 +581,39 @@ async function loadAdminSessions() {
     const result = await api('/api/admin/sessions');
     if (sequence !== adminLoadSequence || token !== adminToken) return;
     adminSessions = result.sessions;
-    if (!selectedSessionId || !adminSessions.some(session => session.id === selectedSessionId)) selectedSessionId = current && adminSessions.some(session => session.id === current.session.id) ? current.session.id : adminSessions[0]?.id;
+    adminRuntime = result.runtime;
+    if (!selectedSessionId || !adminSessions.some(session => session.id === selectedSessionId)) selectedSessionId = adminSessions[0]?.id;
     const id = selectedSessionId;
     if (adminState?.session.id !== id) { adminState = null; if (activeView === 'console') renderConsole(); }
     const state = id ? await api('/api/sessions/' + encodeURIComponent(id) + '?perspective=observer', { admin: true }) : null;
     if (sequence !== adminLoadSequence || token !== adminToken || id !== selectedSessionId) return;
-    adminState = state;
-    renderConsole();
+    if (!state || stateCanAdvance(state, adminState)) adminState = state;
+    if (activeView === 'console') renderConsole();
   } catch (error) { if (sequence === adminLoadSequence && token === adminToken) notify(error.message, 'error'); }
 }
 function renderConsole() {
   const view = $('console-view');
+  const html = renderConsoleHtml({ state: adminState, runtime: adminRuntime, sessions: adminSessions, selectedSessionId, modeLabel, loading: Boolean(selectedSessionId && !adminState), openControls: meta?.openControls === true });
+  if (html === renderedConsole) return;
+  renderedConsole = html;
+  const focus = view.contains(document.activeElement) ? document.activeElement.dataset : null;
   rememberDisclosures(view, view.dataset.disclosureScope || 'console');
   view.dataset.disclosureScope = 'console:' + (adminState?.session.id || 'empty');
-  view.innerHTML = renderConsoleHtml({ state: adminState, sessions: adminSessions, selectedSessionId, modeLabel, loading: Boolean(selectedSessionId && !adminState), openControls: meta?.openControls === true });
+  view.innerHTML = html;
   restoreDisclosures(view, view.dataset.disclosureScope);
+  if (focus?.consoleAction || focus?.consoleSelect) {
+    [...view.querySelectorAll('button:not(:disabled)')].find(button => focus.consoleAction
+      ? button.dataset.consoleAction === focus.consoleAction
+      : button.dataset.consoleSelect === focus.consoleSelect)?.focus({ preventScroll: true });
+  }
 }
 
-$('console-view').addEventListener('click', async event => {
+$('console-view')?.addEventListener('click', async event => {
   const select = event.target.closest('[data-console-select]'); if (select) { selectedSessionId = select.dataset.consoleSelect; adminState = null; renderConsole(); await loadAdminSessions(); return; }
   const button = event.target.closest('[data-console-action]'); if (!button || button.disabled) return;
   const actionName = button.dataset.consoleAction;
   if (actionName === 'refresh') { loadAdminSessions(); return; }
+  if (actionName === 'conditions') { setView('conditions'); return; }
   if (actionName === 'config') { setView('config'); return; }
   if (actionName === 'approvals') { openAdminDialog({ kind: 'approval', sessionId: selectedSessionId }); return; }
   if (actionName === 'retry' || actionName === 'resume' && adminState?.session.paused) { openAdminDialog({ kind: 'recovery', sessionId: selectedSessionId }); return; }
@@ -655,19 +621,10 @@ $('console-view').addEventListener('click', async event => {
   try {
     const oldId = selectedSessionId;
     const result = await api('/api/admin/sessions/' + encodeURIComponent(oldId) + '/intervene', { method: 'POST', body: { action: actionName } });
-    if (result.token && current?.session.id === oldId) {
-      const target = { id: result.state.session.id, token: result.token };
-      // Preserve the replacement credential before any follow-up read can fail.
-      perspective = 'owner'; participantToken = result.token; writeStorage(sessionKey, target); sessionRestore = target; current = null;
-      requestSequence++; interruptSequence++; requestBusy = false; interruptBusy = false;
-      rememberPending(null); clearPreview(); local.initial = null; local.additional = null; local.prediction = null; local.revocation = null; local.alignmentAnswer = null; local.moduleAnswer = null; local.predictionSubmitted = false; local.revocationSubmitted = false; renderParticipant();
-      if (result.state?.perspective === 'owner') rememberSession(result.token, result.state);
-      else await restoreParticipantSession();
-      renderParticipant();
-    }
-    else applyState(result.state);
-    selectedSessionId = result.state?.session.id || oldId; await loadAdminSessions(); notify('');
-  } catch (error) { notify(error.message, 'error'); renderConsole(); }
+    if (selectedSessionId === oldId) applyState(result.state);
+    await loadAdminSessions(); notify('');
+  } catch (error) { notify(error.message, 'error'); }
+  finally { button.disabled = false; }
 });
 
 async function loadResearch() {
@@ -696,19 +653,27 @@ async function researchAction(format, button) {
   finally { button.disabled = false; }
 }
 
-configController = mountBobConfig($('config-view'), { api, getSessionId: () => selectedSessionId || current?.session.id, onApplied: result => { if (result.state) applyState(result.state); if (activeView === 'console') loadAdminSessions(); } });
-modelController = mountModelConfig($('models-view'), { api, getCurrentRevision: () => current?.session.modelRevision, onApplied: async () => { try { meta = await api('/api/meta', { auth: false }); enableControls(); if (!current || planningNewRound) renderParticipant(); } catch (error) { notify(error.message, 'error'); } } });
-conditionsController = createInitialConditions({ api, isResearcher: () => Boolean(adminToken), isOpenControls: () => meta?.openControls === true, onChange: updateStartControls, onSignIn: () => openAdminDialog() });
-
-window.addEventListener('pagehide', () => modelController?.clearSecret());
+if (operatorPage) {
+  configController = mountBobConfig($('config-view'), { api, getSessionId: () => selectedSessionId, onApplied: result => { if (result.state) applyState(result.state); } });
+  modelController = mountModelConfig($('models-view'), { api, getCurrentRevision: () => adminState?.session.modelRevision, onApplied: async () => {
+    try { meta = await api('/api/meta', { auth: false }); enableControls(); }
+    catch (error) { notify(error.message, 'error'); }
+  } });
+  conditionsController = createInitialConditions({ api, isResearcher: () => Boolean(adminToken), isOpenControls: () => meta?.openControls === true });
+  conditionsController.attach($('initial-conditions-builder'));
+  window.addEventListener('pagehide', () => modelController.clearSecret());
+}
 
 async function boot() {
   try {
     meta = await api('/api/meta', { auth: false });
-    enableControls();
-    $('connection-status').textContent = meta.live?.harness === 'hermes' ? 'Hermes · Agent Comm' : 'Local demo';
-    $('connection-status').className = 'tag good';
-    $('runtime-status').textContent = 'Alice: ' + (meta.runtime?.alice?.online ? 'ready' : 'offline') + ' · Bob: ' + (meta.runtime?.bob?.online ? 'ready' : 'offline');
+    if (operatorPage) {
+      $('retry-boot')?.remove();
+      $('console-access-copy').textContent = 'Sign in to manage agent defaults and review active rounds.';
+      enableControls();
+      if (adminToken) setView('console');
+      return;
+    }
     const stored = readStorage(sessionKey);
     if (stored?.id && stored?.token) {
       participantToken = stored.token;
@@ -717,15 +682,34 @@ async function boot() {
       if (current && pending?.sessionId !== current.session.id) rememberPending(null);
     } else rememberPending(null);
     renderParticipant();
-    await conditionsController.load();
-  } catch (error) { $('connection-status').textContent = 'Unavailable'; $('connection-status').className = 'tag warn'; $('participant-view').innerHTML = '<section class="panel"><h2>Demo service unavailable</h2><p class="lead">' + escapeHtml(error.message) + '</p><button class="button" id="retry-boot">Reconnect</button></section>'; $('retry-boot').addEventListener('click', boot); }
+  } catch (error) {
+    if (operatorPage) {
+      $('console-access-copy').textContent = 'Demo service unavailable';
+      if (!$('retry-boot')) $('console-access').insertAdjacentHTML('beforeend', '<button class="button" id="retry-boot">Reconnect</button>');
+    } else {
+      $('participant-view').innerHTML = '<section class="panel"><h2>Demo service unavailable</h2><p class="lead">' + escapeHtml(error.message) + '</p><button class="button" id="retry-boot">Reconnect</button></section>';
+    }
+    $('retry-boot').onclick = boot;
+  }
 }
 setInterval(async () => {
   if (pollBusy || document.hidden) return; pollBusy = true;
-  try { if (current) await refreshCurrent({ quiet: true }); if (adminToken && activeView === 'console') await loadAdminSessions(); }
+  try {
+    if (operatorPage) { if (adminToken && activeView === 'console') await loadAdminSessions(); }
+    else if (current) await refreshCurrent({ quiet: true });
+    if (!operatorPage && meta && (!current || planningNewRound) && !sessionRestore && !requestBusy) {
+      const previous = meta;
+      const next = await api('/api/meta', { auth: false }).catch(() => null);
+      if (next && meta === previous && !requestBusy && (!current || planningNewRound)) {
+        meta = next;
+        if (JSON.stringify(next) !== JSON.stringify(previous)) renderStart();
+      }
+    }
+  }
   finally { pollBusy = false; }
 }, 2500);
 for (const id of ['participant-view', 'console-view', 'admin-dialog-body']) {
-  const view = $(id); observeDisclosures(view, () => view.dataset.disclosureScope || id);
+  const view = $(id);
+  if (view) observeDisclosures(view, () => view.dataset.disclosureScope || id);
 }
 boot();

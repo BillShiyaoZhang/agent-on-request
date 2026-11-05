@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { createDemoServer } from '../src/server.mjs';
 import { renderUnderstandingHtml, renderAnswerComparisonHtml, UNDERSTANDING_QUESTIONS } from '../public/understanding.js';
 import { renderParticipantHtml } from '../public/participant-ui.js';
+import { reveal } from './disclosure-helpers.mjs';
 
 // Pure rendering must not disclose which option is expected before confirmation.
 const initialState = { session: { id: 'qa-render', mode: 'controlled', ended: false, researchConsent: true }, task: { outcome: 'boundary_kept' }, answers: {} };
@@ -33,10 +34,10 @@ assert.match(waitingBrief, /Shared time confirmed/);
 assert.match(waitingBrief, /15:00–15:30/);
 assert.equal(waitingBrief.split('participant-inspection-stack')[0].includes('OLD wider request'), false, 'A pending brief replaces the old wider-calendar request in the main flow.');
 const pausedProgress = participantRender({ session: { mode: 'controlled', stage: 'paused', paused: true }, choices: { initial: 'free' }, task: {} });
-assert.match(pausedProgress, /<li class="current"><span>2<\/span><strong>Follow progress<\/strong>/);
-assert.match(pausedProgress, /<li class=""><span>3<\/span><strong>See the result<\/strong>/);
-assert.equal(participantRender({ session: { mode: 'replay', stage: 'replay' }, task: {} }).includes('class="experience-progress"'), false);
-assert.equal((participantRender({ session: { mode: 'controlled', stage: 'ended', ended: true }, task: { outcome: 'ended' } }).match(/class="skipped"/g) || []).length, 2);
+assert.match(pausedProgress, /data-audience-step="collaboration"/);
+assert.match(pausedProgress, /aria-current="step"><span aria-hidden="true">2<\/span><strong>Collaborate/);
+assert.match(participantRender({ session: { mode: 'replay', stage: 'replay' }, task: {} }), /data-audience-step="collaboration"/);
+assert.match(participantRender({ session: { mode: 'controlled', stage: 'ended', ended: true }, task: { outcome: 'ended' } }), /data-audience-step="summary"/);
 
 const require = createRequire(import.meta.url);
 const playwright = require(process.env.DEMO_PLAYWRIGHT_MODULE || 'playwright');
@@ -63,7 +64,9 @@ async function start(consent) {
   await page.locator('#start-consent').waitFor();
   await page.waitForFunction(() => !document.querySelector('[data-participant-action="start"]').disabled);
   if (consent) await page.locator('#start-consent').check();
-  await act('start').click(); await page.locator('input[name="initial-choice"]').first().waitFor();
+  await act('start').click();
+  await act('alignment_accept').click();
+  await page.locator('input[name="initial-choice"]').first().waitFor();
 }
 async function finishWithNoSharing() {
   await page.locator('input[name="initial-choice"][value="none"]').check();
@@ -75,7 +78,7 @@ async function finishWithNoSharing() {
     return document.activeElement === heading && bounds.top >= 0 && bounds.bottom <= innerHeight;
   });
   const sent = postResponse('/api/sessions/' + stored.id + '/actions'); await act('confirm').click(); await sent;
-  await page.locator('input[name="prediction-answer"]').first().waitFor();
+  await reveal(page.locator('input[name="prediction-answer"]').first());
 }
 async function share(stage, choice) {
   await page.locator('input[name="' + stage + '-choice"][value="' + choice + '"]').check();
@@ -90,7 +93,8 @@ async function share(stage, choice) {
   });
 }
 async function assertCleanParticipant() {
-  for (const id of ['participant-Alice', 'participant-Bob', 'participant-evidence']) assert.equal(await page.locator('[data-disclosure-id="' + id + '"]').getAttribute('open'), null, id + ' starts collapsed.');
+  for (const id of ['participant-Alice', 'participant-evidence']) assert.equal(await page.locator('[data-disclosure-id="' + id + '"]').getAttribute('open'), null, id + ' starts collapsed.');
+  assert.equal(await page.locator('[data-disclosure-id="participant-Bob"]').count(), 0);
   assert.equal(await page.locator('#participant-view pre:visible').count(), 0, 'Raw JSON is not in the main flow.');
   assert.equal(await page.locator('#participant-view .knowledge-svg:visible').count(), 0, 'Large knowledge graphs do not precede the choice.');
 }
@@ -123,7 +127,7 @@ try {
     replacement.remove(); return retained;
   }, initial.agentStates.Alice);
   assert.equal(retainedCategory, true, 'Detached category events cannot overwrite the live disclosure state.');
-  assert.equal(await page.locator('#participant-view .agent-section').count(), 8, 'All four real sections remain for each agent.');
+  assert.equal(await page.locator('#participant-view .agent-section').count(), 4, 'All four sections remain for Alice.');
   assert.equal(await page.locator('#participant-view .state-category[open]').count(), 0, 'Every internal state category starts collapsed.');
   const aliceInspection = page.locator('[data-disclosure-id="participant-Alice"]');
   await aliceInspection.locator(':scope > summary').click();
@@ -140,11 +144,11 @@ try {
   checked.push('Choosing a sharing option retains keyboard focus; a confirmed step change brings its heading into view and focuses it.');
   await assertCleanParticipant();
   assert.equal(await page.locator('[data-disclosure-id="participant-Alice"] [data-state-category="knowledge"]').evaluate(node => node.open), true, 'The selected category survives participant state rerendering.');
-  checked.push('Each agent starts with four colored closed categories and a closed calendar; real counts and expansion survive rerenders; stale detached toggles are ignored.');
+  checked.push('Alice starts with four closed categories and a closed calendar. Counts and expansion survive rerenders, and stale detached toggles are ignored.');
   await page.screenshot({ path: resolve(artifacts, 'participant-additional.png'), fullPage: true });
-  await share('additional', 'keep'); await page.locator('input[name="prediction-answer"]').first().waitFor();
+  await share('additional', 'keep'); await reveal(page.locator('input[name="prediction-answer"]').first());
   await assertCleanParticipant();
-  checked.push('Initial and additional choices precede optional Alice/Bob/evidence details; no visible raw JSON or large graphs. Direct pre-outcome API answers are rejected with ANSWER_STAGE.');
+  checked.push('Initial and additional choices precede optional Alice and trace details. Direct pre-outcome API answers are rejected with ANSWER_STAGE.');
   assert.equal(await page.locator('[data-understanding-expected]').count(), 0);
   assert.equal(await page.locator('[data-participant-action="answer_prediction"], [data-participant-action="answer_revocation"]').count(), 0, 'Unanswered questions need only a selection.');
   const stored = await credentials(), actionPath = '/api/sessions/' + stored.id + '/actions';
@@ -203,7 +207,7 @@ try {
   await page.waitForFunction(() => document.documentElement.lang === 'zh-CN');
   assert.match(await page.locator('[data-understanding-feedback="withdrawal"]').innerText(), /不确定/);
   assert.equal(await page.locator('input[name="prediction-answer"][value="outside_scope"]').isChecked(), true);
-  await page.reload(); await page.locator('[data-understanding-feedback="received_scope"]').waitFor();
+  await page.reload(); await reveal(page.locator('[data-understanding-feedback="received_scope"]'));
   assert.equal((await state()).session.id, stored.id);
   assert.equal(await page.locator('input[name="prediction-answer"][value="outside_scope"]').isChecked(), true);
   assert.equal(app.research.list().runs.length, 1);
@@ -220,7 +224,7 @@ try {
   }
   await page.emulateMedia({ colorScheme: 'light' }); await page.setViewportSize({ width: 1280, height: 900 });
   await page.screenshot({ path: resolve(artifacts, 'understanding-feedback.png'), fullPage: true });
-  await end(); await page.locator('[data-understanding-feedback="received_scope"]').waitFor();
+  await end(); await reveal(page.locator('[data-understanding-feedback="received_scope"]'));
   assert.equal(await act('answer_prediction').count(), 0);
   assert.equal(await page.locator('[data-understanding-received="received_scope"]').count(), 1, 'Confirmed answers show a compact received state instead of a submission button.');
   checked.push('Chinese feedback, light/dark at 320/736/1280, refresh recovery and closed-round review preserve original choices and do not duplicate records.');
@@ -239,6 +243,7 @@ try {
   assert.equal(await page.locator('input[name="prediction-answer"][value="approved_snapshot"]').isDisabled(), true);
   assert.deepEqual((await state()).answers, {});
   await page.reload(); await act('verify_pending').waitFor();
+  await reveal(page.locator('input[name="prediction-answer"][value="outside_scope"]'));
   assert.equal(await page.locator('input[name="prediction-answer"][value="outside_scope"]').isChecked(), true, 'Unconfirmed original answer recovers from pending intent after refresh.');
   assert.equal(await page.locator('[data-understanding-expected="received_scope"]').count(), 0, 'Unknown submission recovery does not reveal the expected answer.');
   assert.deepEqual(await page.evaluate(() => JSON.parse(sessionStorage.getItem('agent-on-request.pending')).body), unknownSubmission);

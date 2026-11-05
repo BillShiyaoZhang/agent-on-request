@@ -1,4 +1,5 @@
 export const messages = {
+  'The operator can review the paused step in the console.': '操作员可在控制台检查暂停的步骤。',
   'Confirm how the two assistants understand free time': '确认两位助理对空闲时间的理解',
   'The assistants agreed how to look for a time': '两位助理已同意如何寻找时间',
   'The free-time rule was declined': '空闲时间规则已被拒绝',

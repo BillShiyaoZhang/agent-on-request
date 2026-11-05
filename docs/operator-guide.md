@@ -6,7 +6,7 @@ Use Node.js 26 or newer for the isolated Agent runtime. Production uses built-in
 npm run demo
 ```
 
-The demo opens at `http://127.0.0.1:4327` with all controls available directly, without researcher sign-in. It loads `MINIMAX_TOKEN_PLAN_KEY` from the project `.env`, which Git ignores; existing saved demo keys migrate automatically. `DEMO_PORT` changes the local demo port. The separate `npm start` event mode uses port `4317`, optional `HOST` / `PORT`, and PIN sign-in.
+Open the audience demo at [http://127.0.0.1:4327/](http://127.0.0.1:4327/) and keep the [operator console](http://127.0.0.1:4327/console) in a separate tab or on a separate operator screen. The local console opens without a PIN. It loads `MINIMAX_TOKEN_PLAN_KEY` from the Git-ignored `.env`. `DEMO_PORT` changes the local demo port. The `npm start` event mode uses port `4317` by default and requires the researcher PIN on `/console`.
 
 ```sh
 AGENT_DEMO_ADMIN_PIN='a-dedicated-demo-pin' npm start
@@ -22,18 +22,18 @@ New model configurations default to `retryLimit: 1`: each planning request can m
 
 Before admitting a participant, rehearse these paths using research consent off:
 
-1. Open initialization and review both agents' synthetic preset, KG, data, skills and authorization cards. Try an Alice-only component change, then a Bob change using the directly available controls. Resolve and review again after modifying the owner template; the reference preset uses its current values.
+1. Open **Initial KG and skills** in the console and review both agents' synthetic KG, data, skills and authorization cards. Edit each agent, validate the draft and save it as the default. Start a new audience round to use that default. Existing rounds retain the original conditions.
 2. Start a Guided round; alignment review appears automatically. Inspect selected interval/status modules, weekday and minute conversion, and the task-scoped Free correspondence. Accept and confirm the signed peer dialogue completes before data sharing.
 3. Start the ambiguous scenario. Request clarification; verify no mapping/facts are accepted yet. Confirm the meaning for this invitation, then try a separate rejected-alignment round. A rejection must complete with an alignment-specific explanation, without sending a calendar snapshot.
 4. Preview Tue–Wed free slots. Confirm the preview does not populate Bob's receipt store. Send once and check the approved hash matches the received hash and semantic facts reference the accepted mapping version.
 5. Add only the requested free slots. The default requests Thursday; change Bob availability to Friday in another synthetic round and check the request follows that date. Confirm Bob receives no titles/notes and can use the mapped common interval.
 6. Decline an initial sharing request and an additional sharing request in separate rounds. Compare their explanations with a no-common-time fixture; these must not all be described as rejection.
-7. Where Bob's optional brief needs permission, explicitly act for Bob's owner. Confirm closing the approval leaves it pending, narrowing to topic excludes agenda, and denial does not undo an already arranged meeting. The brief has a separate semantic task module.
-8. Inspect the default Alice owner view and then the authenticated observer view. Owner responses must not expose Bob's unshared initial profile. Observer inspection must be visibly identified as research access, not Alice's authority.
+7. Where Bob's optional brief needs permission, use **Review Bob approvals** in the console. Confirm closing the approval leaves it pending, narrowing to topic excludes agenda, and denying it preserves an already arranged meeting. The brief has a separate semantic task module.
+8. Check that the audience summary shows the result and an expandable collaboration trace. Open the trace to check both the agents' messages and confirmed receipts. Alice can inspect her own state and confirmed exchanges.
 9. Withdraw Alice's future sharing. Confirm the existing Bob receipt and semantic provenance remain visible and subsequent sharing is blocked.
 10. Disconnect Bob, restore connectivity and then explicitly retry. Confirm restoration itself does not disclose anything. A retry must reuse the same approved operation and cannot duplicate a receipt or widen the payload.
 11. Test reviewed Live alignment with a valid model result, a none/rejection result and a technical failure. Failure must stay visible; switching to Guided requires an explicit new round.
-12. Reset the round. Confirm a fresh epoch/token, both stores cleared, the prior token rejected and research consent off.
+12. End the round on the audience screen, then start a new one. Confirm a fresh epoch/token, both stores initialized from the current default, the prior token rejected and research consent off.
 13. Finish one explicitly consented v2 rehearsal and inspect its research timeline and export. Step through selected modules, mapping decision, actual reception, narrowed approval and revoked state; confirm semantic facts link to receipt/mapping versions, ontology safe export survives reload, expired permissions retain the recorded timestamp and credentials/raw provider messages are absent. Keep rehearsal collection separate from participant data. Deleting a rehearsal currently requires trusted operator maintenance through `ResearchStore.deleteRun()`; there is no research-panel deletion button or HTTP delete endpoint.
 
 ## Initial conditions and visible state
@@ -42,11 +42,11 @@ Follow the participant page from the main collaboration flow into optional detai
 
 A plain explanation of the alignment card is: “The assistants agree how to read a date, a time and the word Free.” Alice's Tuesday clock range must become Bob's weekday number and minute values. An empty calendar alone may not mean the owner wants an invitation. Accepting that interpretation does not send calendar data; the person still chooses the exact sharing preview afterward.
 
-When a participant wants more context, open **Inside Alice · optional** to inspect their own agent's calendar, knowledge, skills and permissions. Bob's unshared initial state is excluded from the default owner HTTP response. A researcher can explicitly select the observer perspective to inspect both synthetic agents; identify that role switch before using it. Use receipt details for the exact fields actually received. Inspectors are read-only; opening a graph or card never sends information or expands either owner's authority.
+When a participant wants more context, open Alice's optional details to inspect her calendar, knowledge, skills and permissions. Use receipt details for the exact fields actually received. The console uses the researcher observer view to inspect a selected round. Opening a graph, card or receipt leaves permissions and delivery unchanged.
 
 Choose a complete preset or compose each agent's KG, data, skills and authorization components. There is at most one component per category per role. Custom JSON patches apply last; arrays replace the selected array. The from-scratch preset starts with empty data/graphs/skills/scopes and still requires complete, validated synthetic conditions before running. Invalid time intervals, duplicate graph IDs, missing edge endpoints, wrong-role registered skills/components and credentials are rejected. Safe custom skill labels are metadata; they do not create new runtime actions. The catalog and JSON Schema are served by the backend, and the preview uses the same resolver as session creation.
 
-Participants may change Alice's initial conditions. The local demo also permits direct changes to Bob's KG, data, skills and authorization. The optional PIN event mode requires a researcher token obtained through sign-in for those Bob changes. API integrations send that token in `X-Researcher-Token` while retaining the participant token for any previous-session replacement. A resolve preview supplies `hash` and `requiresResearcher`; creation sends `expectedConditionsHash` and fails if effective conditions have changed. Re-preview after an owner-template update instead of guessing the current baseline values.
+Use the console to edit either agent's initial KG, data, skills and authorization. After validation, **Save as demo default** applies the reviewed configuration to new rounds. Restore the built-in conference preset if you want future rounds to follow the current Bob owner template. API integrations that explicitly override Bob's starting conditions in PIN mode send `X-Researcher-Token` with the researcher credential and retain the participant token for any previous-session replacement.
 
 Review the graph and category cards inside the optional Alice and Bob sections during a round. Own knowledge and confirmed received knowledge have distinct origins; a received node carries receipt provenance. Bob cannot gain Alice's private rows or initial KG through the state visualization. Initial KG enters only its owning model context. Each agent's skills card reflects its actual current configuration, and authorization cards expose allowed fields/dates, budget consumption, remaining uses, expiry and owner-review requests. Alice read/preview/send skills and field/date/usage/expiry limits are enforced in the runtime as well as the controller. Taking a preview consumes no send budget; allocating an authorized transmission consumes a use even if receipt confirmation is delayed.
 
@@ -58,9 +58,9 @@ The reference task is 30 minutes. The task selector also supports 45 and 60 minu
 
 Local demo controls are available directly. The optional PIN event mode uses sign-in. Access to these controls does not create any Alice sharing permission.
 
-The operator console starts with the selected round, confirmed submission and receipt counts, its outcome, and the pause/resume, approval, new-round and Bob configuration actions. Open the session switcher when changing rounds. Connection simulation, retries, injected requests, technical identity and exact receipt JSON are separate optional sections.
+The operator console starts with links to agent defaults, connection cards for Agent Comm A and B, and the selected round's submitted action, confirmed receipts and outcome. Open the session switcher when changing rounds. Pause and resume, Bob approval and Bob configuration act on the selected round. Connection simulation, retries, injected requests, technical identity and exact receipt JSON are optional sections. In Hermes direct mode the cards show both local TCP listeners. The regular runtime uses process IPC and shows the direct endpoints as inactive.
 
-The Bob template is the starting configuration for future rounds. Editing/applying it leaves an existing participant round on its original snapshot. A session-targeted apply is a temporary override for that round: it pauses Bob at a safe point, supersedes changed pending Bob approvals and rechecks the new policy before resume. Received snapshots are immutable. A saved profile is reusable configuration, not a participant research record.
+The Bob owner template supplies built-in starting conditions. A saved demo default supplies its own resolved KG, skills, data and authorization to new rounds. A session-targeted Bob apply pauses the selected round at a safe point, supersedes changed pending Bob approvals and rechecks the new policy before resume. Received snapshots are immutable. A saved profile stores reusable configuration separately from research records.
 
 Review the validation errors and diff before apply. Unknown ordinary config keys survive editing, saving and reload. Keep `data.synthetic: true` and use legal `{day,time}` availability objects. Custom capabilities are configuration names; only registered executor capabilities can run. Never paste personal Agent stores, real API keys or private calendars into this demonstration.
 
@@ -73,7 +73,6 @@ Recovery operations have distinct meanings:
 | Pause / resume | Stop scheduling and continue after policy/state checks |
 | Disconnect / restore Bob | Change transport availability; restoring does not send |
 | Retry | Reconcile/reuse an existing approved operation |
-| Reset | End the previous epoch, clear both synthetic stores and issue a new participant token; consent resets off |
 | Inject request | Explicit researcher intervention, marked in consented research metadata |
 
 When model planning fails, inspect the displayed step and safe reason before explicitly resuming or retrying. A model correction requests a fresh proposal; a delivery retry reconciles the same already-authorized operation and payload. Neither creates a new disclosure grant. Keep confirmed received snapshots and their provenance visible during recovery; do not restart simply to hide a failed model step. If the participant chooses Guided instead, start a new round explicitly and keep the mode change identifiable in any consented research interpretation.

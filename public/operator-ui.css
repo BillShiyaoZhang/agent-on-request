@@ -53,13 +53,19 @@
 .operator-signal > div { min-width:0; overflow-wrap:anywhere; }
 .operator-signal strong { display:block; margin-top:3px; }
 .operator-main-actions { gap:10px; }
+.operator-setup .panel-heading { margin-bottom:0; }
+.operator-setup small, .operator-connections .panel-heading small { margin-top:4px; }
+.operator-connection-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.operator-connection { display:flex; align-items:flex-start; gap:12px; min-width:0; padding:14px; background:var(--soft); border-radius:12px; }
+.operator-connection h4 { margin:0 0 5px; }
+.operator-connection code, .operator-connection small { display:block; margin-top:5px; }
 .operator-detail-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:18px; align-items:start; }
 .operator-detail-grid .session-list { max-height:350px; overflow:auto; }
 .operator-detail-grid .session-row { gap:10px; }
 @media (max-width:736px) {
   .operator-signals { grid-template-columns:1fr; gap:8px; margin:18px 0; }
   .operator-signal { padding:12px; }
-  .operator-detail-grid { grid-template-columns:1fr; }
+  .operator-detail-grid, .operator-connection-grid { grid-template-columns:1fr; }
   .operator-round-heading { flex-wrap:wrap; }
   .operator-round-heading > .tag { margin-left:59px; }
   .operator-value-grid { grid-template-columns:1fr; }

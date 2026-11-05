@@ -105,7 +105,8 @@ test('paused alignment stays on the meaning step and does not repeat an old Bob 
   state.ontology.status = 'accepted';
   state.messages = [{ from: 'Bob', text: 'Stale request to widen sharing', kind: 'status' }];
   const html = renderParticipantHtml({ state, heading: 'Paused', mode: 'Live', warnings: renderRecoveryHtml(state) });
-  assert.match(html, /class="current"><span>1<\/span><strong>Confirm free-time meaning/);
+  assert.match(html, /data-audience-step="collaboration"/);
+  assert.match(html, /aria-current="step"><span aria-hidden="true">2<\/span><strong>Collaborate/);
   assert.doesNotMatch(html, /data-agent-facing-message/);
   assert.equal((html.match(/Stale request to widen sharing/g) || []).length, 1, 'history retains the old request only once');
 });

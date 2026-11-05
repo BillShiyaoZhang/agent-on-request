@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Operator console · Agent on Request</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/operator-ui.css">
+  <link rel="stylesheet" href="/research-ui.css">
+  <link rel="stylesheet" href="/agent-state-details.css">
+  <link rel="stylesheet" href="/config-refinement.css">
+  <link rel="stylesheet" href="/bob-config-ux.css">
+  <link rel="stylesheet" href="/model-config-ux.css">
+  <link rel="stylesheet" href="/conditions-config-ux.css">
+  <link rel="stylesheet" href="/ontology-ui.css">
+</head>
+<body data-surface="operator">
+  <div class="app-shell">
+    <header class="app-header">
+      <a class="brand" href="/console"><span class="brand-mark" aria-hidden="true">AR</span><span><strong>Agent on Request</strong><small>Operator console</small></span></a>
+      <div class="toolbar"><a class="button" href="/" target="_blank" rel="noopener">Open audience demo</a><button class="button" id="language-toggle" type="button" data-i18n-ignore aria-label="Switch to Chinese" title="Switch to Chinese" lang="zh-CN">中文</button><button class="button" id="admin-logout" hidden>Sign out</button></div>
+    </header>
+    <nav class="app-tabs" aria-label="Operator console views" id="app-tabs" hidden>
+      <button class="tab" data-view="console" data-admin-nav aria-current="page">Round monitor</button>
+      <button class="tab" data-view="conditions" data-admin-nav>Initial KG and skills</button>
+      <button class="tab" data-view="config" data-admin-nav>Bob configuration</button>
+      <button class="tab" data-view="models" data-admin-nav>Model configuration</button>
+      <button class="tab" data-view="research" data-admin-nav>Research review</button>
+    </nav>
+    <div id="global-notice" class="notice" role="status" hidden></div>
+    <main>
+      <section id="console-access" class="panel">
+        <h1>Operator console</h1>
+        <p class="lead" id="console-access-copy">Connecting to the demo service…</p>
+        <button class="button primary" id="admin-open" hidden>Researcher sign in</button>
+      </section>
+      <section id="console-view" class="view" aria-label="Round monitor" hidden></section>
+      <section id="conditions-view" class="view" aria-label="Initial KG and skills" hidden><div id="initial-conditions-builder"></div></section>
+      <section id="config-view" class="view" aria-label="Bob configuration" hidden></section>
+      <section id="models-view" class="view" aria-label="Model configuration" hidden></section>
+      <section id="research-view" class="view" aria-label="Research review" hidden></section>
+    </main>
+  </div>
+  <dialog id="admin-dialog" class="small-dialog" aria-labelledby="admin-dialog-title"><div class="dialog-header"><h2 id="admin-dialog-title">Researcher sign in</h2><button class="button icon-button" data-close-dialog="admin-dialog" aria-label="Close researcher window">×</button></div><div id="admin-dialog-body"></div></dialog>
+  <noscript><p class="notice error">JavaScript is required for this local demonstration.</p></noscript>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

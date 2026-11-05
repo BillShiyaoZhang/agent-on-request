@@ -5,7 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { canonicalStringify, DEFAULT_BOB_CONFIG, hashValue } from './config.mjs';
 import { AppError, requireThat } from './errors.mjs';
-import { resolveConditions } from './condition-service.mjs';
+import { conditionBobConfig, resolveConditions } from './condition-service.mjs';
 
 const MAX_BUNDLES = 100;
 const MAX_FILE_BYTES = 64 * 1024 * 1024;
@@ -32,6 +32,7 @@ export class ConditionStore {
     this.filename = this.directory ? path.join(this.directory, 'conditions.json') : null;
     this.persist = persist;
     this.bundles = new Map();
+    this.default = { revision: 0, conditions: null };
     this.queue = Promise.resolve();
   }
 
@@ -82,7 +83,7 @@ export class ConditionStore {
       const stat = await handle.stat();
       requireThat(stat.isFile() && stat.size <= MAX_FILE_BYTES && stat.ino === expected.ino && stat.dev === expected.dev, 'CONDITION_FILE', 'The condition bundle file changed while opening.', 500);
       const saved = JSON.parse(await handle.readFile('utf8'));
-      if (!plainObject(saved) || Object.keys(saved).some(key => !['schemaVersion', 'bundles'].includes(key)) || saved.schemaVersion !== 1 || !Array.isArray(saved.bundles) || saved.bundles.length > MAX_BUNDLES) throw fileError();
+      if (!plainObject(saved) || Object.keys(saved).some(key => !['schemaVersion', 'bundles', 'default'].includes(key)) || saved.schemaVersion !== 1 || !Array.isArray(saved.bundles) || saved.bundles.length > MAX_BUNDLES) throw fileError();
       const bundles = new Map(), names = new Set();
       for (const entry of saved.bundles) {
         if (!plainObject(entry) || Object.keys(entry).length !== BUNDLE_KEYS.length || Object.keys(entry).some(key => !BUNDLE_KEYS.includes(key)) || !UUID.test(entry.id) || !validName(entry.name) || entry.name !== entry.name.trim() || !Number.isSafeInteger(entry.revision) || entry.revision < 1 || typeof entry.hash !== 'string' || !/^[0-9a-f]{64}$/.test(entry.hash) || typeof entry.createdAt !== 'string' || !Number.isFinite(Date.parse(entry.createdAt)) || bundles.has(entry.id) || names.has(entry.name)) throw fileError();
@@ -95,6 +96,13 @@ export class ConditionStore {
         bundles.set(entry.id, clone({ ...entry, conditions }));
         names.add(entry.name);
       }
+      if (Object.hasOwn(saved, 'default')) {
+        const entry = saved.default;
+        if (!plainObject(entry) || Object.keys(entry).length !== 2 || !Number.isSafeInteger(entry.revision) || entry.revision < 1 || !Object.hasOwn(entry, 'conditions')) throw fileError();
+        const conditions = entry.conditions === null ? null : resolveConditions(entry.conditions);
+        if (canonicalStringify(conditions) !== canonicalStringify(entry.conditions)) throw fileError();
+        this.default = { revision: entry.revision, conditions };
+      }
       this.bundles = bundles;
     } catch (error) {
       if (error instanceof AppError && error.code === 'CONDITION_FILE') throw error;
@@ -104,10 +112,11 @@ export class ConditionStore {
   }
 
   list() { return clone([...this.bundles.values()]); }
+  getDefault() { return clone(this.default); }
 
-  async persistSnapshot(bundles) {
+  async persistSnapshot(bundles, defaultEntry = this.default) {
     if (!this.persist) return;
-    const serialized = stringify({ schemaVersion: 1, bundles: [...bundles.values()] });
+    const serialized = stringify({ schemaVersion: 1, bundles: [...bundles.values()], ...(defaultEntry.revision ? { default: defaultEntry } : {}) });
     requireThat(Buffer.byteLength(serialized, 'utf8') <= MAX_FILE_BYTES, 'CONDITION_LIMIT', 'Saved condition bundles exceed the file size limit.', 422);
     await this.ensureDirectory();
     await this.assertFile();
@@ -131,6 +140,21 @@ export class ConditionStore {
     const result = this.queue.then(operation);
     this.queue = result.catch(() => {});
     return result;
+  }
+
+  async setDefault(request, bobTemplate = DEFAULT_BOB_CONFIG) {
+    requireThat(plainObject(request) && Object.keys(request).length === 2 && Object.hasOwn(request, 'initialConditions') &&
+      Number.isSafeInteger(request.expectedRevision) && request.expectedRevision >= 0, 'CONDITION_DEFAULT',
+      'Provide initialConditions and a nonnegative expectedRevision.', 422);
+    const conditions = request.initialConditions === null ? null : resolveConditions(request.initialConditions, bobTemplate);
+    if (conditions) conditionBobConfig(conditions, bobTemplate);
+    return this.mutate(async () => {
+      requireThat(request.expectedRevision === this.default.revision, 'STALE_CONDITION_DEFAULT', 'The default changed. Reload it before saving.', 409);
+      const next = { revision: this.default.revision + 1, conditions };
+      await this.persistSnapshot(this.bundles, next);
+      this.default = next;
+      return this.getDefault();
+    });
   }
 
   async save(request, bobTemplate = DEFAULT_BOB_CONFIG) {

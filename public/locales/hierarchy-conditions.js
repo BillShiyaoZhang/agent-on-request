@@ -1,6 +1,23 @@
 // Presentation only: identifiers, fixtures and submitted configuration remain unchanged.
 export const messages = {
   'Choose a starting scenario': '选择一个起始场景',
+  'New demos use the saved default. Active rounds keep their starting profiles.': '新演示采用已保存的默认配置。已开始的轮次保留启动时的配置。',
+  'Defaults unavailable': '暂时无法获取默认配置',
+  'Built-in default': '内置默认配置',
+  'Reload saved default': '重新载入已保存的默认配置',
+  'Restore built-in default': '恢复内置默认配置',
+  'Edit agent profiles': '编辑智能体配置',
+  'Knowledge graphs, skills, data and authorization': '知识图谱、技能、数据与授权',
+  'Load a starter kit into the draft.': '将一个入门套装载入草稿。',
+  'Save as demo default': '保存为演示默认配置',
+  'Saving the demo default…': '正在保存演示默认配置…',
+  'Restoring the built-in default…': '正在恢复内置默认配置…',
+  'Draft changed. Validate and preview the initial state before saving.': '草稿已更改。保存前请校验并预览初始状态。',
+  'This is the starting state defined by the validated draft.': '这是已校验草稿所定义的初始状态。',
+  'Validated. Review the starting state of both agents below.': '校验通过。请查看下方两个智能体的初始状态。',
+  'Saved the default for new demos.': '已保存。新演示将使用此默认配置。',
+  'Restored the built-in default for new demos.': '已恢复。新演示将使用内置默认配置。',
+  'The default changed. Reload it before saving.': '默认配置已变更，请重新载入再保存。',
   'A starter kit is enough to begin. Details are optional.': '选一个套装就能开始，感兴趣时再细调。',
   'Try the full scheduling scenario.': '体验完整的会议安排场景。',
   'Start with availability and a shared time.': '从可用时间和共同空档开始。',
@@ -84,6 +101,7 @@ export const messages = {
 };
 
 export const patterns = [
+  ['Custom default · revision {revision}', '自定义默认配置 · 第 {revision} 版'],
   ['Entries {start}–{end} of {total}', '第 {start}–{end} 项，共 {total} 项'],
   ['{uses} maximum uses · {fields}', '最多使用 {uses} 次 · {fields}'],
   ['{count} time entries', '{count} 个时间条目'],

@@ -42,10 +42,10 @@ Alice 和 Bob 各自运行一个 Hermes profile。Live 规划提交到对应 pro
 
 ## 启动和验证
 
-运行 `npm run demo:hermes`，或在 Windows 运行 `powershell -ExecutionPolicy Bypass -File scripts/start-demo.ps1 -Hermes`。打开 [http://127.0.0.1:4327](http://127.0.0.1:4327)。演示配置和已同意的研究记录保存于 `.data/demo-hermes`。
+运行 `npm run demo:hermes`，或在 Windows 运行 `powershell -ExecutionPolicy Bypass -File scripts/start-demo.ps1 -Hermes`。观众打开[演示首页](http://127.0.0.1:4327/)，操作员打开[控制台](http://127.0.0.1:4327/console)。演示配置和已同意的研究记录保存于 `.data/demo-hermes`。
 
-1. 选 Live 和默认研究会议。Alice 和 Bob 分别通过自己的 Hermes profile 产生提案。通过本体对齐后，预览并批准空闲时间，再按需补充周四范围。
-2. 展开确认回执。预览阶段没有数据交付。业务回执由接收端签署，确认内容与实际批准的一致。到了 Bob 的简报确认，取消议程、只允许主题一次，检查接收结果。
-3. 在研究者控制台断开 Bob，选择分享，然后停止分享并恢复连接。直连桥没有离线投递队列，恢复连接本身不重发。若在途的操作已由接收端确认，历史回执会保留。
+1. 阅读架构介绍后选择 Live。Alice 和 Bob 分别通过自己的 Hermes profile 产生提案。通过本体对齐后，预览并批准空闲时间，再按需补充周四范围。
+2. 到了 Bob 的简报确认，在控制台取消议程并只允许主题一次。观众在总结页查看接收结果与协作记录。业务回执由接收端签署，确认实际批准的内容。
+3. 在控制台检查 Agent Comm A 和 B 的本机监听状态。模拟断开 Bob 后，选择分享，再停止分享并恢复连接。恢复连接需要显式重试才会继续未完成的发送。若在途操作已由接收端确认，历史回执会保留。
 
 Controlled 使用确定性规则走同一条直连数据路径，方便在 gateway 启动后排查模型推理。Replay 只展示参考轨迹。直连桥一次处理一项传输，建议现场只运行一轮。`npm run demo` 可启动独立的原演示。两端的 profile、模型和 API 密钥在 Hermes 中维护，Hermes 直连模式下的演示页不开放原模型配置。

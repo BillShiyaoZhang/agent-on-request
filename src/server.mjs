@@ -60,7 +60,7 @@ export async function createDemoServer(options = {}) {
   if (failure) { await runtime.close(); throw failure.reason; }
   try { await runtime.configureModels?.(models.snapshot()); await runtime.start(); }
   catch (error) { await runtime.close(); throw error; }
-  const engine = new SessionEngine({ runtime, profiles, research });
+  const engine = new SessionEngine({ runtime, profiles, research, conditionsStore });
   const adminTokens = new Map();
   const loginAttempts = new Map();
   const creations = new Map();
@@ -122,10 +122,12 @@ export async function createDemoServer(options = {}) {
       if (route === '/api/sessions' && req.method === 'POST') {
         limit(creations, req.socket.remoteAddress, 100, 60_000, 'CREATE_LIMIT');
         const input = await body(req);
-        const conditions = resolveConditions(input.initialConditions, profiles.template);
-        if (!openControls && hashValue(conditions.agents.Bob) !== hashValue(resolveConditions(undefined, profiles.template).agents.Bob)) {
-          const token = req.headers['x-researcher-token'] ?? bearer(req);
-          requireThat(typeof token === 'string' && adminTokens.get(token) > Date.now(), 'BOB_CONDITIONS_AUTH', 'Sign in as researcher to initialize Bob with different knowledge, data, skills or authorization.', 401);
+        if (!openControls && Object.hasOwn(input, 'initialConditions')) {
+          const conditions = resolveConditions(input.initialConditions, profiles.template);
+          if (hashValue(conditions.agents.Bob) !== hashValue(resolveConditions(undefined, profiles.template).agents.Bob)) {
+            const token = req.headers['x-researcher-token'] ?? bearer(req);
+            requireThat(typeof token === 'string' && adminTokens.get(token) > Date.now(), 'BOB_CONDITIONS_AUTH', 'Sign in as researcher to initialize Bob with different knowledge, data, skills or authorization.', 401);
+          }
         }
         const created = await engine.create(input);
         created.state = engine.view(engine.get(created.state.session.id), { perspective: 'owner' });
@@ -144,6 +146,9 @@ export async function createDemoServer(options = {}) {
         const token = requireAdmin(req);
         if (route === '/api/admin/logout' && req.method === 'POST') { adminTokens.delete(token); return json(res, { ok: true }); }
         if (route === '/api/admin/sessions' && req.method === 'GET') return json(res, engine.list());
+        if (route === '/api/admin/runtime' && req.method === 'GET') return json(res, runtime.status());
+        if (route === '/api/admin/conditions/default' && req.method === 'GET') return json(res, conditionsStore.getDefault());
+        if (route === '/api/admin/conditions/default' && req.method === 'PUT') return json(res, await conditionsStore.setDefault(await body(req), profiles.template));
         if (route === '/api/admin/conditions' && req.method === 'GET') return json(res, { bundles: conditionsStore.list() });
         if (route === '/api/admin/conditions' && req.method === 'POST') return json(res, { bundle: await conditionsStore.save(await body(req), profiles.template), bundles: conditionsStore.list() });
         const conditionMatch = /^\/api\/admin\/conditions\/([a-f0-9-]{36})$/.exec(route);
@@ -220,7 +225,7 @@ export async function createDemoServer(options = {}) {
       }
       if (route.startsWith('/api/')) throw new AppError('NOT_FOUND', 'The API route does not exist.', 404);
       requireThat(req.method === 'GET' || req.method === 'HEAD', 'METHOD', 'The request method is not supported.', 405);
-      const relative = route === '/' ? 'index.html' : decodeURIComponent(route.slice(1));
+      const relative = route === '/' ? 'index.html' : route === '/console' || route === '/console/' ? 'console.html' : decodeURIComponent(route.slice(1));
       requireThat(/^[A-Za-z0-9_./-]+$/.test(relative) && !relative.split('/').includes('..') && !relative.startsWith('.'), 'NOT_FOUND', 'The file does not exist.', 404);
       const filename = path.join(root, 'public', relative);
       const type = MIME[path.extname(filename)]; requireThat(type, 'NOT_FOUND', 'The file does not exist.', 404);

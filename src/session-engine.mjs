@@ -46,10 +46,11 @@ const SAFE_MODEL_DIAGNOSTICS = new Set([
 ]);
 
 export class SessionEngine {
-  constructor({ runtime, profiles, research, maxSessions = 100, sessionTtlMs = 2 * 60 * 60 * 1000 }) {
+  constructor({ runtime, profiles, research, conditionsStore, maxSessions = 100, sessionTtlMs = 2 * 60 * 60 * 1000 }) {
     this.runtime = runtime;
     this.profiles = profiles;
     this.research = research;
+    this.conditionsStore = conditionsStore;
     this.sessions = new Map();
     this.epoch = 0;
     this.cleanupPending = new Map();
@@ -147,7 +148,8 @@ export class SessionEngine {
     const ontology = mode === 'replay' ? null : (alignmentReview || ontologyScenario === 'ambiguous' ? startOntologyDialogue : createOntologyDialogue)({ scenario: ontologyScenario, task, mode });
     const ownerTemplate = clone(this.profiles.template);
     const templateRevision = this.profiles.templateRevision;
-    const conditions = resolveConditions(initialConditions, ownerTemplate);
+    const configuredDefault = initialConditions === undefined ? this.conditionsStore?.getDefault().conditions : null;
+    const conditions = resolveConditions(configuredDefault ?? initialConditions, ownerTemplate);
     const conditionsHash = hashValue(conditions);
     requireThat(expectedConditionsHash === undefined || expectedConditionsHash === conditionsHash, 'STALE_CONDITIONS', 'Initial conditions changed. Review the configuration preview again.', 409);
     const bobConfig = conditionBobConfig(conditions, ownerTemplate);

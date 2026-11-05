@@ -3,6 +3,7 @@ import { mountAgentStates } from './agent-state.js';
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const clone = value => JSON.parse(JSON.stringify(value));
 const array = value => Array.isArray(value) ? value : [];
+const starterDraft = preset => ({ presetId: preset?.id ?? 'conference', componentIds: clone(preset?.componentIds ?? { Alice: [], Bob: [] }), custom: {} });
 const nextRowId = (rows, prefix) => { let index = rows.length + 1; const used = new Set(rows.map(row => row.id)); while (used.has(prefix + index)) index++; return prefix + index; };
 const getPath = (value, path) => path.split('.').reduce((node, key) => node?.[key], value);
 function setPath(value, path, next) { const keys = path.split('.'); let node = value; for (const key of keys.slice(0, -1)) node = node[key] ||= {}; node[keys.at(-1)] = next; }
@@ -34,19 +35,20 @@ function conditionIcon(kind) {
   return '<svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (shapes[kind] || shapes.context) + '</svg>';
 }
 
-export function createInitialConditions({ api, isResearcher, isOpenControls = () => false, onChange, onSignIn }) {
-  let container, catalog, schema, draft = { presetId: 'conference', componentIds: { Alice: [], Bob: [] }, custom: {} }, resolved, reviewedStamp, generation = 0, busy = false, message = '', error = false, role = 'Alice', editor = {}, rawDirty = false, rawBuffer = '', bundles = [], bundleName = '', selectedBundleId = '';
+export function createInitialConditions({ api, isResearcher, isOpenControls = () => false }) {
+  let container, catalog, draft = starterDraft(), resolved, reviewedStamp, generation = 0, busy = false, message = '', error = false, role = 'Alice', editor = {}, rawDirty = false, rawBuffer = '', bundles = [], bundleName = '', selectedBundleId = '';
+  let savedDefault = null, savedHash = null, authorizationGeneration = 0;
   let validationIssues = [], pendingValidationFocus = false;
   let rawCompleteMode = false;
   const extensionDrafts = { Alice: {}, Bob: {} };
-  const disclosureState = new Map();
+  const disclosureState = new Map([['composition', true]]);
   function rememberDisclosures() { container?.querySelectorAll('details[data-conditions-disclosure]').forEach(node => disclosureState.set(node.dataset.conditionsDisclosure, node.open)); }
   function restoreDisclosures() { container?.querySelectorAll('details[data-conditions-disclosure]').forEach(node => { if (disclosureState.has(node.dataset.conditionsDisclosure)) node.open = disclosureState.get(node.dataset.conditionsDisclosure); }); }
   const stamp = () => JSON.stringify(draft);
   const query = selector => container?.querySelector(selector);
-  const ready = () => Boolean(resolved && reviewedStamp === stamp() && !rawDirty && !busy && (!resolved.requiresResearcher || isResearcher()));
+  const ready = () => Boolean(resolved && reviewedStamp === stamp() && !rawDirty && !busy);
   function announce(text, failed = false) { message = text; error = failed; updateControls(); }
-  function invalidate() { reviewedStamp = null; validationIssues = []; pendingValidationFocus = false; message = 'Draft changed. Validate & preview the resulting initial state before starting.'; error = false; updateControls(); }
+  function invalidate() { reviewedStamp = null; validationIssues = []; pendingValidationFocus = false; message = 'Draft changed. Validate and preview the initial state before saving.'; error = false; updateControls(); }
   function updateControls() {
     const notice = query('[data-conditions-notice]'); if (notice) { notice.textContent = message; notice.className = 'notice ' + (error ? 'error' : ''); notice.setAttribute('role', error ? 'alert' : 'status'); notice.hidden = !message; }
     const validate = query('[data-conditions-action="validate"]'); if (validate) { validate.disabled = busy || rawDirty || !catalog; validate.textContent = busy ? 'Resolving initial conditions…' : 'Validate & preview initial state'; }
@@ -56,13 +58,14 @@ export function createInitialConditions({ api, isResearcher, isOpenControls = ()
     container?.querySelectorAll('[data-conditions-action="add-row"],[data-conditions-action="remove-row"],[data-conditions-action="clear-custom"],[data-conditions-action="load-bundle"],[data-conditions-action="add-skill"],[data-conditions-action="add-auth-field"],[data-conditions-action="edit-brief-json"]').forEach(node => { node.disabled = busy || rawDirty || node.dataset.owner === 'Bob' && !isResearcher(); });
     container?.querySelectorAll('[data-conditions-preset]').forEach(node => { const preset = catalog?.presets.find(item => item.id === node.dataset.conditionsPreset); node.checked = !draft.agents && draft.presetId === preset?.id && !Object.values(draft.custom || {}).some(profile => Object.keys(profile || {}).length) && JSON.stringify(draft.componentIds) === JSON.stringify(preset?.componentIds || { Alice: [], Bob: [] }); });
     const summaryStatus = query('[data-conditions-summary-status]'); if (summaryStatus) summaryStatus.textContent = resolved && reviewedStamp === stamp() && !rawDirty ? 'Validated initial snapshot' : 'Previous preview · draft has changed';
-    const previewDescription = query('[data-conditions-preview-description]'); if (previewDescription) previewDescription.textContent = resolved && reviewedStamp === stamp() && !rawDirty ? 'This is the exact validated draft that will create the next round.' : 'These are the last validated states. Validate again to see your latest edits.';
-    const restriction = query('[data-conditions-researcher-needed]'); if (restriction) restriction.hidden = !resolved?.requiresResearcher || isResearcher();
+    const previewDescription = query('[data-conditions-preview-description]'); if (previewDescription) previewDescription.textContent = resolved && reviewedStamp === stamp() && !rawDirty ? 'This is the starting state defined by the validated draft.' : 'These are the last validated states. Validate again to see your latest edits.';
     const save = query('[data-conditions-action="save-bundle"]'); if (save) save.disabled = busy || rawDirty || !resolved || reviewedStamp !== stamp();
     const download = query('[data-conditions-action="download"]'); if (download) download.disabled = busy || rawDirty || !resolved || reviewedStamp !== stamp();
+    const saveDefault = query('[data-conditions-action="save-default"]'); if (saveDefault) saveDefault.disabled = !savedDefault || !isResearcher() || !ready() || savedHash === resolved.hash;
+    const resetDefault = query('[data-conditions-action="reset-default"]'); if (resetDefault) resetDefault.disabled = busy || !isResearcher() || !savedDefault?.conditions;
+    const reloadDefault = query('[data-conditions-action="reload-default"]'); if (reloadDefault) reloadDefault.disabled = busy || !isResearcher();
     refreshDraftVisuals();
     applyValidationIssues();
-    onChange?.();
   }
   function textField(path, label, type = 'text', owner = role) {
     const value = getPath(editor[owner], path);
@@ -215,10 +218,16 @@ export function createInitialConditions({ api, isResearcher, isOpenControls = ()
   function savedBundlesHtml() {
     return '<details class="advanced-condition-editor saved-condition-bundles condition-detail" data-conditions-disclosure="reuse"><summary><span>Save, reuse or import initial conditions</span><small>Files & reusable bundles</small></summary><p class="muted">Download the validated fictional fixture for reproducible reuse. Researcher bundles are reusable configurations stored separately from participant research records.</p><div class="toolbar section-actions"><button class="button" data-conditions-action="download">Download validated fixture</button><label class="button import-fixture-label">Import fixture or composition<input type="file" accept="application/json,.json" data-conditions-import></label></div>' + (isResearcher() ? '<div class="form-grid"><label class="field"><span>Saved researcher bundle</span><select data-conditions-bundle><option value="">Choose a bundle</option>' + bundles.map(bundle => '<option value="' + escapeHtml(bundle.id) + '" ' + (bundle.id === selectedBundleId ? 'selected' : '') + '>' + escapeHtml(bundle.name) + ' · r' + bundle.revision + '</option>').join('') + '</select></label><label class="field"><span>Bundle name</span><input data-conditions-bundle-name value="' + escapeHtml(bundleName) + '" placeholder="Availability baseline"></label></div><div class="toolbar section-actions"><button class="button" data-conditions-action="load-bundle">Load selected bundle</button><button class="button" data-conditions-action="save-bundle">' + (bundles.some(bundle => bundle.name === bundleName.trim()) ? 'Save next bundle revision' : 'Save validated bundle') + '</button><button class="button" data-conditions-action="refresh-bundles">Refresh bundles</button></div><small>Reusing an existing name creates a new revision only when the current revision still matches.</small>' : '<small>Sign in as a researcher to save shared reusable bundles on this server.</small>') + '</details>';
   }
+  function defaultStatusHtml() {
+    const status = !savedDefault ? 'Defaults unavailable'
+      : savedDefault.conditions ? 'Custom default · revision ' + escapeHtml(savedDefault.revision) : 'Built-in default';
+    return '<div class="conditions-default-status"><span class="tag ' + (savedDefault ? 'good' : 'warn') + '" data-conditions-default-status>' + status + '</span>'
+      + '<div class="toolbar"><button class="button" data-conditions-action="reload-default">Reload saved default</button><button class="button" data-conditions-action="reset-default">Restore built-in default</button></div></div>';
+  }
   function render() {
     if (!container) return;
     rememberDisclosures();
-    if (!catalog) { container.innerHTML = '<section class="panel"><h3>Initial conditions</h3><p class="loading">' + escapeHtml(message || 'Loading starter kits and components…') + '</p><button class="button" data-conditions-action="reload">Reload catalog</button></section>'; return; }
+    if (!catalog) { container.innerHTML = '<section class="panel"><h2>Agent defaults</h2><p class="loading" role="' + (error ? 'alert' : 'status') + '">' + escapeHtml(message || 'Loading starter kits and components…') + '</p><button class="button" data-conditions-action="reload"' + (busy ? ' disabled' : '') + '>Reload catalog</button></section>'; return; }
     const definitions = rawCompleteMode ? editor : draft.agents || draft.custom;
     const customRoles = Object.keys(draft.custom || {}).filter(owner => Object.keys(draft.custom[owner] || {}).length);
     const kits = catalog.presets.map(preset => {
@@ -227,8 +236,11 @@ export function createInitialConditions({ api, isResearcher, isOpenControls = ()
     }).join('');
     const custom = '<details class="custom-condition-editor condition-detail" data-conditions-disclosure="custom"><summary><span>Customize ' + role + ' · skills, authorization, data & KG</span><small>Edit individual values</small></summary>' + (customRoles.length ? '<div class="notice">Custom overrides active for ' + escapeHtml(customRoles.join(' and ')) + '. They take precedence over components.<button class="button section-actions" data-conditions-action="clear-custom" data-owner="' + role + '">Clear ' + role + ' overrides</button></div>' : '') + roleEditorHtml() + '</details>';
     const json = '<details class="advanced-condition-editor condition-detail" data-conditions-disclosure="json"><summary><span>Complete custom definition · JSON & schema</span><small>Advanced</small></summary><p class="muted">' + (rawCompleteMode ? 'Edit the complete profiles below. Removing a brief key keeps it removed after validation.' : draft.agents ? 'This imported fixture keeps complete profiles exactly as defined. Editing a profile replaces its definition; selecting a component replaces only that category. Choose a starter kit to build a new composition.' : 'All custom profile fields are available here. Arrays replace preset arrays; objects merge. Start from any kit, then customize the values you want to change.') + (isOpenControls() ? ' Alice and Bob can both be configured directly in this demo.' : ' Bob changes require researcher sign-in.') + '</p><label class="field"><span>' + (draft.agents || rawCompleteMode ? 'Complete profiles for ' : 'Custom overrides for ') + (isResearcher() ? 'Alice and Bob' : 'Alice') + '</span><textarea class="mono" rows="10" spellcheck="false" data-conditions-json>' + escapeHtml(rawDirty ? rawBuffer : JSON.stringify(isResearcher() ? definitions : { Alice: definitions.Alice || {} }, null, 2)) + '</textarea></label><div class="toolbar section-actions"><button class="button" data-conditions-action="parse-json">Use JSON definition</button><button class="button" data-conditions-action="discard-json">Discard JSON buffer</button><a class="button" href="/api/conditions/schema" target="_blank" rel="noopener">Open configuration schema</a></div></details>';
-    const composition = '<details class="conditions-composition configuration-disclosure" data-conditions-disclosure="composition"><summary><span><strong>Fine-tune the starter kit</strong><small>Components, agent profiles & reusable files</small></span><span class="disclosure-level">Optional details</span></summary><div class="disclosure-body"><p class="muted">Keep the starter kit as it is, or adjust one part at a time.</p><div class="role-switch toolbar" aria-label="Agent to configure"><button class="button ' + (role === 'Alice' ? 'primary' : '') + '" data-conditions-role="Alice" aria-pressed="' + (role === 'Alice') + '">Alice · your agent</button><button class="button ' + (role === 'Bob' ? 'primary' : '') + '" data-conditions-role="Bob" aria-pressed="' + (role === 'Bob') + '">' + (isOpenControls() ? 'Bob · peer agent' : 'Bob · researcher control') + '</button></div>' + (role === 'Bob' && !isResearcher() ? '<div class="notice">Bob’s initial profile is visible for review. Sign in as a researcher to change his components or custom profile. <button class="button" data-conditions-action="sign-in">Researcher sign in</button></div>' : '') + '<div class="conditions-composition-heading"><strong>Profile overview</strong><span data-conditions-draft-status></span></div>' + componentsHtml() + custom + json + savedBundlesHtml() + '</div></details>';
-    container.innerHTML = '<section class="panel initial-conditions"><div class="panel-heading"><div><p class="eyebrow">Before this round</p><h3>Choose a starting scenario</h3><small>A starter kit is enough to begin. Details are optional.</small></div><span class="tag" data-conditions-review-status></span></div><div class="preset-grid condition-kit-grid">' + kits + '</div><div class="conditions-customize-kit"><button class="button" data-conditions-action="customize-kit">Customize the current kit</button><small>Keep its starting values and edit any category.</small></div>' + composition + '<div class="notice" id="conditions-validation-notice" data-conditions-notice role="status"></div><div class="notice warning" data-conditions-researcher-needed hidden>The selected initial conditions also change Bob. A researcher must sign in before this round can start. <button class="button" data-conditions-action="sign-in">Researcher sign in</button></div><div class="toolbar section-actions"><button class="button" data-conditions-action="validate">Validate & preview initial state</button><small>Previewing is read-only. Starting creates isolated stores from this validated draft.</small></div><div data-conditions-summary></div><div data-conditions-preview></div></section>';
+    const composition = '<details class="conditions-composition configuration-disclosure" data-conditions-disclosure="composition"><summary><span><strong>Edit agent profiles</strong><small>Knowledge graphs, skills, data and authorization</small></span></summary><div class="disclosure-body"><div class="role-switch toolbar" aria-label="Agent to configure"><button class="button ' + (role === 'Alice' ? 'primary' : '') + '" data-conditions-role="Alice" aria-pressed="' + (role === 'Alice') + '">Agent A · Alice</button><button class="button ' + (role === 'Bob' ? 'primary' : '') + '" data-conditions-role="Bob" aria-pressed="' + (role === 'Bob') + '">Agent B · Bob</button></div><div class="conditions-composition-heading"><strong>Profile overview</strong><span data-conditions-draft-status></span></div>' + componentsHtml() + custom + json + savedBundlesHtml() + '</div></details>';
+    const starterKits = '<details class="configuration-disclosure" data-conditions-disclosure="kits"><summary><span><strong>Choose a starting scenario</strong><small>Load a starter kit into the draft.</small></span></summary><div class="disclosure-body"><div class="preset-grid condition-kit-grid">' + kits + '</div></div></details>';
+    container.innerHTML = '<section class="panel initial-conditions"><div class="panel-heading"><div><h2>Agent defaults</h2><small>New demos use the saved default. Active rounds keep their starting profiles.</small></div><span class="tag" data-conditions-review-status></span></div>'
+      + defaultStatusHtml() + composition + starterKits
+      + '<div class="notice" id="conditions-validation-notice" data-conditions-notice role="status"></div><div class="toolbar section-actions"><button class="button" data-conditions-action="validate">Validate & preview initial state</button><button class="button primary" data-conditions-action="save-default">Save as demo default</button></div><div data-conditions-summary></div><div data-conditions-preview></div></section>';
     restoreDisclosures();
     updateControls(); renderPreview();
   }
@@ -244,10 +256,10 @@ export function createInitialConditions({ api, isResearcher, isOpenControls = ()
         ['skills', 'skills', array(profile.skills).length, 'Skills'],
         ['authorization', 'shield', array(profile.authorization?.fields).length, 'Allowed fields']
       ];
-      return '<article class="condition-overview-card" data-agent="' + owner + '"><div class="condition-agent-heading"><span class="condition-avatar">' + conditionIcon('person') + '</span><div><strong>' + owner + '</strong><small>' + (owner === 'Alice' ? 'Your agent' : isOpenControls() ? 'Peer agent' : 'Researcher-controlled agent') + '</small></div></div><div class="condition-metrics">' + metrics.map(([category, icon, count, label]) => '<div class="condition-metric" data-metric="' + category + '"><span class="condition-metric-icon">' + conditionIcon(icon) + '</span><strong>' + count + '</strong><small>' + label + '</small></div>').join('') + '</div><small class="condition-ceiling">' + (profile.authorization?.maxUses ?? 0) + ' maximum uses · ' + escapeHtml(array(profile.authorization?.fields).map(field => fieldLabels[field] || field).join(', ') || 'None') + '</small></article>';
+      return '<article class="condition-overview-card" data-agent="' + owner + '"><div class="condition-agent-heading"><span class="condition-avatar">' + conditionIcon('person') + '</span><strong>' + (owner === 'Alice' ? 'Agent A · Alice' : 'Agent B · Bob') + '</strong></div><div class="condition-metrics">' + metrics.map(([category, icon, count, label]) => '<div class="condition-metric" data-metric="' + category + '"><span class="condition-metric-icon">' + conditionIcon(icon) + '</span><strong>' + count + '</strong><small>' + label + '</small></div>').join('') + '</div><small class="condition-ceiling">' + (profile.authorization?.maxUses ?? 0) + ' maximum uses · ' + escapeHtml(array(profile.authorization?.fields).map(field => fieldLabels[field] || field).join(', ') || 'None') + '</small></article>';
     }).join('') + '</div><p class="condition-boundary-note">Alice confirms each exact calendar snapshot. These are sharing limits; no information has been authorized or sent.</p></div>';
     holder.innerHTML = '<details class="conditions-state-details configuration-disclosure" data-conditions-disclosure="states"><summary><span><strong>Explore both agent states</strong><small>Knowledge graphs, capabilities, data & authorization</small></span><span class="disclosure-level">Full preview</span></summary><div class="disclosure-body"><div data-conditions-full-states></div><details class="condition-detail conditions-definition-details" data-conditions-disclosure="identity"><summary>Snapshot identity & resolved definition</summary><code>' + escapeHtml(resolved.hash) + '</code><pre>' + escapeHtml(JSON.stringify(resolved.conditions, null, 2)) + '</pre></details></div></details>';
-    mountAgentStates(query('[data-conditions-full-states]'), resolved.agentStates, { scope: 'initial-preview', heading: 'Preview both initial agent states', description: valid ? 'This is the exact validated draft that will create the next round.' : 'These are the last validated states. Validate again to see your latest edits.' });
+    mountAgentStates(query('[data-conditions-full-states]'), resolved.agentStates, { scope: 'initial-preview', heading: 'Preview both initial agent states', description: valid ? 'This is the starting state defined by the validated draft.' : 'These are the last validated states. Validate again to see your latest edits.' });
     query('[data-conditions-full-states] .agent-observatory > .panel-heading > div > small')?.setAttribute('data-conditions-preview-description', '');
     restoreDisclosures();
   }
@@ -258,7 +270,8 @@ export function createInitialConditions({ api, isResearcher, isOpenControls = ()
       const value = await api('/api/conditions/resolve', { method: 'POST', auth: false, body: clone(input) });
       if (ownGeneration !== generation || ownStamp !== stamp()) return;
       if (adopt) draft = clone(Object.prototype.hasOwnProperty.call(input, 'agents') ? value.conditions : input);
-      resolved = value; reviewedStamp = stamp(); validationIssues = []; pendingValidationFocus = false; editor = clone(value.conditions.agents); error = false; message = 'Validated. Review both states below; nothing has been authorized or sent.'; rawDirty = false; rawCompleteMode = false; render();
+      resolved = value; reviewedStamp = stamp(); validationIssues = []; pendingValidationFocus = false; editor = clone(value.conditions.agents); error = false; message = 'Validated. Review the starting state of both agents below.'; rawDirty = false; rawCompleteMode = false; render();
+      return value;
     } catch (reason) { if (ownGeneration === generation) { reviewedStamp = null; const errors = Array.isArray(reason.details) ? reason.details : reason.details?.errors || [];
       validationIssues = input === draft ? [...errors, ...(reason.details?.path ? [{ path: reason.details.path }] : [])].flatMap(item => { const match = /^\$\.(?:custom|agents)\.(Alice|Bob)\.(.+)$/.exec(item.path || ''); return match ? [{ owner: match[1], path: match[2] }] : []; }) : [];
       pendingValidationFocus = validationIssues.length > 0;
@@ -267,16 +280,77 @@ export function createInitialConditions({ api, isResearcher, isOpenControls = ()
     } }
     finally { if (ownGeneration === generation) { busy = false; updateControls(); if (pendingValidationFocus) { applyValidationIssues({ focus: true }); pendingValidationFocus = false; } } }
   }
-  async function load() {
-    busy = true; message = ''; render(); onChange?.();
+  function adoptDefault(value) {
+    savedDefault = value;
+    savedHash = null;
+    draft = value?.conditions ? clone(value.conditions) : starterDraft(catalog?.presets.find(item => item.id === catalog.defaultPresetId));
+    resolved = null;
+    reviewedStamp = null;
+    editor = {};
+    rawDirty = false;
+    rawBuffer = '';
+    rawCompleteMode = false;
+    validationIssues = [];
+    pendingValidationFocus = false;
+    for (const owner of Object.keys(extensionDrafts)) extensionDrafts[owner] = {};
+  }
+  async function load({ force = false } = {}) {
+    if (!isResearcher() || busy || savedDefault && !force) return;
+    const ownGeneration = ++generation;
+    busy = true;
+    message = '';
+    error = false;
+    render();
     try {
-      const result = await Promise.allSettled([api('/api/conditions/catalog', { auth: false }), api('/api/conditions/schema', { auth: false })]);
-      if (result[0].status === 'rejected') throw result[0].reason;
-      catalog = result[0].value; schema = result[1].status === 'fulfilled' ? result[1].value : null;
-      const preset = catalog.presets.find(item => item.id === draft.presetId) || catalog.presets[0]; if (!preset) throw new Error('No initial-condition starter kits are available.');
-      if (!draft.agents) { draft.presetId = preset.id; draft.componentIds = clone(preset.componentIds || { Alice: [], Bob: [] }); }
-      render(); await resolve({ quiet: true });
-    } catch (reason) { busy = false; message = reason.message; error = true; render(); onChange?.(); }
+      const [catalogResult, defaultResult] = await Promise.allSettled([
+        api('/api/conditions/catalog', { auth: false }),
+        api('/api/admin/conditions/default')
+      ]);
+      if (ownGeneration !== generation) return;
+      if (catalogResult.status === 'rejected') throw catalogResult.reason;
+      if (defaultResult.status === 'rejected') throw defaultResult.reason;
+      catalog = catalogResult.value;
+      const value = defaultResult.value;
+      adoptDefault(value);
+      render();
+      const reviewed = await resolve({ quiet: true });
+      if (reviewed && savedDefault === value && value.conditions) {
+        savedHash = reviewed.hash;
+        updateControls();
+      }
+    } catch (reason) {
+      if (ownGeneration !== generation) return;
+      busy = false;
+      message = reason.message;
+      error = true;
+      render();
+    }
+  }
+  async function applyDefault(reset) {
+    if (!isResearcher() || busy || !savedDefault || !reset && !ready()) return;
+    const ownGeneration = ++generation;
+    busy = true;
+    announce(reset ? 'Restoring the built-in default…' : 'Saving the demo default…');
+    try {
+      const value = await api('/api/admin/conditions/default', { method: 'PUT',
+        body: { expectedRevision: savedDefault.revision, initialConditions: reset ? null : clone(resolved.conditions) } });
+      if (ownGeneration !== generation) return;
+      if (reset) {
+        adoptDefault(value);
+        render();
+        const reviewed = await resolve({ quiet: true });
+        if (reviewed && savedDefault === value) announce('Restored the built-in default for new demos.');
+      } else {
+        savedDefault = value;
+        savedHash = resolved.hash;
+        announce('Saved the default for new demos.');
+        render();
+      }
+    } catch (reason) {
+      if (ownGeneration === generation) announce(reason.message, true);
+    } finally {
+      if (ownGeneration === generation) { busy = false; updateControls(); }
+    }
   }
   function commitPath(owner, path, value) {
     if (!editor[owner] || owner === 'Bob' && !isResearcher() || busy || rawDirty) return;
@@ -287,8 +361,15 @@ export function createInitialConditions({ api, isResearcher, isOpenControls = ()
   }
   async function refreshBundles() {
     if (!isResearcher()) return;
-    try { const result = await api('/api/admin/conditions'); if (!isResearcher()) return; bundles = array(result.bundles); render(); }
-    catch (reason) { announce(reason.message, true); }
+    const ownAuthorization = authorizationGeneration;
+    try {
+      const result = await api('/api/admin/conditions');
+      if (ownAuthorization !== authorizationGeneration) return;
+      bundles = array(result.bundles);
+      render();
+    } catch (reason) {
+      if (ownAuthorization === authorizationGeneration) announce(reason.message, true);
+    }
   }
   function adoptInput(value) {
     const input = value?.conditions || value;
@@ -323,7 +404,7 @@ export function createInitialConditions({ api, isResearcher, isOpenControls = ()
       const node = event.target;
       if (node.matches('[data-conditions-bundle]')) { selectedBundleId = node.value; const bundle = bundles.find(item => item.id === selectedBundleId); if (bundle) { bundleName = bundle.name; query('[data-conditions-bundle-name]').value = bundleName; } return; }
       if (node.matches('[data-conditions-import]')) { try { const file = node.files?.[0]; if (!file) return; if (file.size > 4 * 1024 * 1024) throw new Error('Fixture files must be at most 4 MiB; their compact JSON request must fit within 256 KiB.'); adoptInput(JSON.parse(await file.text())); } catch (reason) { announce('Import error: ' + reason.message, true); } return; }
-      if (node.dataset.conditionsPreset) { const preset = catalog.presets.find(item => item.id === node.dataset.conditionsPreset); draft = { presetId: preset.id, componentIds: clone(preset.componentIds || { Alice: [], Bob: [] }), custom: {} }; rawDirty = false; rawCompleteMode = false; resolved = null; editor = {}; invalidate(); render(); resolve(); return; }
+      if (node.dataset.conditionsPreset) { const preset = catalog.presets.find(item => item.id === node.dataset.conditionsPreset); draft = starterDraft(preset); rawDirty = false; rawCompleteMode = false; resolved = null; editor = {}; invalidate(); render(); resolve(); return; }
       if (node.dataset.conditionsComponent) { const owner = node.dataset.owner; if (owner === 'Bob' && !isResearcher()) return; const component = catalog.components.find(item => item.id === node.dataset.conditionsComponent); draft.componentIds[owner] = array(draft.componentIds[owner]).filter(id => catalog.components.find(component => component.id === id)?.category !== node.dataset.category); draft.componentIds[owner].push(node.dataset.conditionsComponent); if (draft.agents) draft.agents[owner][component.category] = clone(component.patch[component.category]);
         if (component.category === 'skills') { const skills = draft.agents ? component.patch.skills : draft.custom?.[owner]?.skills || component.patch.skills; if (draft.agents && component.patch.skillDefinitions) draft.agents[owner].skillDefinitions = clone(component.patch.skillDefinitions); else if (draft.agents?.[owner]?.skillDefinitions) draft.agents[owner].skillDefinitions = draft.agents[owner].skillDefinitions.filter(item => skills.includes(item.id)); if (draft.custom?.[owner]?.skillDefinitions) draft.custom[owner].skillDefinitions = draft.custom[owner].skillDefinitions.filter(item => skills.includes(item.id)); }
         invalidate(); resolve(); return; }
@@ -333,22 +414,28 @@ export function createInitialConditions({ api, isResearcher, isOpenControls = ()
       if (node.dataset.conditionsAuthField) commitPath(node.dataset.owner, 'authorization.fields', [...container.querySelectorAll('[data-conditions-auth-field]:checked')].filter(input => input.dataset.owner === node.dataset.owner).map(input => input.dataset.conditionsAuthField));
     });
     container.addEventListener('click', async event => {
-      const roleButton = event.target.closest('[data-conditions-role]'); if (roleButton) { role = roleButton.dataset.conditionsRole; render(); return; }
+      const roleButton = event.target.closest('[data-conditions-role]');
+      if (roleButton) {
+        role = roleButton.dataset.conditionsRole;
+        render();
+        query('[data-conditions-role="' + role + '"]')?.focus({ preventScroll: true });
+        return;
+      }
       const button = event.target.closest('[data-conditions-action]'); if (!button || button.disabled) return;
       const action = button.dataset.conditionsAction;
-      if (action === 'customize-kit' || action === 'edit-category') { event.preventDefault(); openCustomEditor(button.dataset.category); return; }
-      if (action === 'reload') { load(); return; }
-      if (action === 'sign-in') { onSignIn?.(); return; }
+      if (action === 'edit-category') { event.preventDefault(); openCustomEditor(button.dataset.category); return; }
+      if (action === 'reload' || action === 'reload-default') { load({ force: true }); return; }
+      if (action === 'save-default' || action === 'reset-default') { applyDefault(action === 'reset-default'); return; }
       if (action === 'validate') { resolve(); return; }
       if (action === 'refresh-bundles') { refreshBundles(); return; }
       if (action === 'load-bundle') { const bundle = bundles.find(item => item.id === selectedBundleId); if (!bundle) { announce('Choose a saved researcher bundle first.', true); return; } adoptInput(bundle.conditions); return; }
       if (action === 'download') { if (!resolved || reviewedStamp !== stamp() || rawDirty) return; const url = URL.createObjectURL(new Blob([JSON.stringify(resolved.conditions, null, 2)], { type: 'application/json' })); const link = document.createElement('a'); link.href = url; link.download = 'agent-initial-conditions.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000); return; }
       if (action === 'save-bundle') {
         if (!isResearcher() || !resolved || reviewedStamp !== stamp() || rawDirty || busy) return;
-        const existing = bundles.find(bundle => bundle.name === bundleName.trim()); busy = true; updateControls();
-        try { const result = await api('/api/admin/conditions', { method: 'POST', body: { name: bundleName.trim(), input: clone(resolved.conditions), ...(existing ? { expectedRevision: existing.revision } : {}) } }); if (!isResearcher()) return; bundles = array(result.bundles); selectedBundleId = result.bundle?.id || ''; announce('Saved researcher bundle ' + result.bundle?.name + ' · revision ' + result.bundle?.revision + '.'); render(); }
-        catch (reason) { announce(reason.message, true); }
-        finally { busy = false; updateControls(); } return;
+        const existing = bundles.find(bundle => bundle.name === bundleName.trim()), ownAuthorization = authorizationGeneration; busy = true; updateControls();
+        try { const result = await api('/api/admin/conditions', { method: 'POST', body: { name: bundleName.trim(), input: clone(resolved.conditions), ...(existing ? { expectedRevision: existing.revision } : {}) } }); if (ownAuthorization !== authorizationGeneration) return; bundles = array(result.bundles); selectedBundleId = result.bundle?.id || ''; announce('Saved researcher bundle ' + result.bundle?.name + ' · revision ' + result.bundle?.revision + '.'); render(); }
+        catch (reason) { if (ownAuthorization === authorizationGeneration) announce(reason.message, true); }
+        finally { if (ownAuthorization === authorizationGeneration) { busy = false; updateControls(); } } return;
       }
       if (action === 'discard-json') { rawDirty = false; rawBuffer = ''; rawCompleteMode = false; invalidate(); render(); return; }
       if (action === 'parse-json') {
@@ -386,19 +473,25 @@ export function createInitialConditions({ api, isResearcher, isOpenControls = ()
   return {
     load,
     attach(next) { if (container !== next) { rememberDisclosures(); container = next; bind(); } render(); },
-    ready,
-    canSelectPreset(id) { return Boolean(catalog?.presets.some(preset => preset.id === id) && !busy); },
-    async selectPreset(id) {
-      if (!catalog || busy) throw new Error('Wait until the starting states are available.');
-      const preset = catalog.presets.find(item => item.id === id);
-      if (!preset) throw new Error('The recommended scenario is unavailable.');
-      draft = { presetId: preset.id, componentIds: clone(preset.componentIds || { Alice: [], Bob: [] }), custom: {} };
-      rawDirty = false; rawCompleteMode = false; resolved = null; editor = {}; invalidate(); render();
-      await resolve();
-      if (!ready()) throw new Error('Validate the recommended starting states before beginning.');
-    },
-    async submission() { if (!resolved || reviewedStamp !== stamp() || rawDirty || busy) throw new Error('Validate and review your initial conditions before starting.'); if (resolved.requiresResearcher && !isResearcher()) throw new Error('Researcher sign-in is required for the selected Bob initial conditions.'); return { initialConditions: clone(draft), expectedConditionsHash: resolved.hash }; },
-    authorizationChanged() { if (!isResearcher()) { bundles = []; bundleName = ''; selectedBundleId = ''; } render(); if (isResearcher()) refreshBundles(); },
-    async refresh() { await resolve({ quiet: true }); }
+    authorizationChanged() {
+      authorizationGeneration++;
+      if (!isResearcher()) {
+        generation++;
+        adoptDefault(null);
+        catalog = null;
+        busy = false;
+        message = '';
+        error = false;
+        bundles = [];
+        bundleName = '';
+        selectedBundleId = '';
+        role = 'Alice';
+        container?.replaceChildren();
+        disclosureState.clear();
+        disclosureState.set('composition', true);
+      }
+      render();
+      if (isResearcher()) refreshBundles();
+    }
   };
 }

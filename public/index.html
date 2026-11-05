@@ -8,40 +8,23 @@
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/participant-ui.css">
-  <link rel="stylesheet" href="/operator-ui.css">
   <link rel="stylesheet" href="/understanding.css">
-  <link rel="stylesheet" href="/research-ui.css">
   <link rel="stylesheet" href="/agent-state-details.css">
   <link rel="stylesheet" href="/config-refinement.css">
-  <link rel="stylesheet" href="/bob-config-ux.css">
-  <link rel="stylesheet" href="/model-config-ux.css">
-  <link rel="stylesheet" href="/conditions-config-ux.css">
   <link rel="stylesheet" href="/ontology-ui.css">
 </head>
 <body>
   <div class="app-shell">
     <header class="app-header">
       <a class="brand" href="/" aria-label="Agent on Request home"><span class="brand-mark" aria-hidden="true">AR</span><span><strong>Agent on Request</strong><small>Two owners. Shared meaning. Your boundary.</small></span></a>
-      <div class="toolbar"><button class="button" id="language-toggle" type="button" data-i18n-ignore aria-label="Switch to Chinese" title="Switch to Chinese" lang="zh-CN">中文</button><span class="tag" id="connection-status">Connecting</span><button class="button" id="admin-open" hidden>Researcher sign in</button><button class="button" id="admin-logout" hidden>Sign out</button></div>
+      <button class="button" id="language-toggle" type="button" data-i18n-ignore aria-label="Switch to Chinese" title="Switch to Chinese" lang="zh-CN">中文</button>
     </header>
-    <nav class="app-tabs" aria-label="Application views" id="app-tabs">
-      <button class="tab" data-view="participant" aria-current="page">Participant</button>
-      <button class="tab" data-view="console" data-admin-nav hidden>Operator console</button>
-      <button class="tab" data-view="config" data-admin-nav hidden>Bob configuration</button>
-      <button class="tab" data-view="models" data-admin-nav hidden>Model configuration</button>
-      <button class="tab" data-view="research" data-admin-nav hidden>Research review</button>
-    </nav>
     <div id="global-notice" class="notice" role="status" hidden></div>
     <main>
       <section id="participant-view" class="view" aria-label="Participant experience"><div class="panel loading">Connecting to the isolated demo agents…</div></section>
-      <section id="console-view" class="view" aria-label="Operator console" hidden></section>
-      <section id="config-view" class="view" aria-label="Bob configuration" hidden></section>
-      <section id="models-view" class="view" aria-label="Model configuration" hidden></section>
-      <section id="research-view" class="view" aria-label="Research review" hidden></section>
     </main>
-    <footer class="app-footer"><span>Fictional names and calendar data · Alice and Bob have separate stores</span><span id="runtime-status">Checking runtime</span></footer>
+    <footer class="app-footer"><span>Fictional names and calendar data · Alice and Bob have separate stores</span></footer>
   </div>
-  <dialog id="admin-dialog" class="small-dialog" aria-labelledby="admin-dialog-title"><div class="dialog-header"><h2 id="admin-dialog-title">Researcher sign in</h2><button class="button icon-button" data-close-dialog="admin-dialog" aria-label="Close researcher window">×</button></div><div id="admin-dialog-body"></div></dialog>
   <dialog id="end-dialog" class="small-dialog" aria-labelledby="end-dialog-title"><div class="dialog-header"><h2 id="end-dialog-title">End this demo?</h2><button class="button icon-button" data-close-dialog="end-dialog" aria-label="Close end confirmation">×</button></div><p>No further information will be sent. Information already received remains in this demo’s receipt history.</p><div class="toolbar dialog-actions"><button class="button" data-close-dialog="end-dialog">Continue the demo</button><button class="button primary" id="end-confirm">End now</button></div></dialog>
   <noscript><p class="notice error">JavaScript is required for this local demonstration.</p></noscript>
   <script type="module" src="/app.js"></script>

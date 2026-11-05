@@ -1,6 +1,6 @@
 # Demo 操作、用户心智与验收
 
-验收日期：2026-10-08（Asia/Shanghai）。矩阵列出 75 项当前界面可达的参与者、研究者、初始化、Bob 配置、模型配置和研究回顾操作；自由输入按合法、空值、非法、超限、冲突和迟到响应等价类验证。默认数据全部虚构。
+下方矩阵保留 2026-10-08（Asia/Shanghai）合并界面的验收记录。当前演示使用独立的观众和操作员入口。默认数据全部虚构。
 
 ## 直接演示
 
@@ -12,23 +12,23 @@ powershell -ExecutionPolicy Bypass -File scripts/start-demo.ps1
 
 已安装 Node.js 26+ 时也可运行 `npm run demo`。Windows 启动器优先选择已安装的 Node 26+，也支持 `AGENT_DEMO_NODE` 指定路径；本机已准备的 `artifacts/qa-runtime/node.exe` 可用于当前演练。启动器不下载软件。
 
-打开 <http://127.0.0.1:4327>，操作控制台、Bob 配置、模型配置、研究回顾直接可用，无需登录。演示数据及公开配置使用独立的 `.data/demo` 目录；MiniMax Key 使用 Git 忽略的项目根目录 `.env` 中的 `MINIMAX_TOKEN_PLAN_KEY`，启动自动加载。原有 4317 活动模式保留可选 PIN 流程。演示只监听本机，`DEMO_PORT` 可指定端口。停止服务会关闭两个 Worker；研究回顾保留，运行会话不能跨服务重启恢复。
+观众打开[演示首页](http://127.0.0.1:4327/)，操作员打开[控制台](http://127.0.0.1:4327/console)。本机模式的控制台无需登录。演示数据及公开配置使用独立的 `.data/demo` 目录，启动时从 Git 忽略的 `.env` 加载 `MINIMAX_TOKEN_PLAN_KEY`。4317 活动模式在控制台要求 PIN。演示只监听本机，可用 `DEMO_PORT` 指定端口。重启会保留已保存的初始条件和已记录的研究回顾。
 
 建议的 3–5 分钟路径：
 
-1. 中文首页选择「引导体验」和「研究会议」，介绍 Alice/Bob 各自拥有独立信息、参与者决定共享边界。需要展示回顾时勾选虚构演练记录。
-2. 选择「仅空闲时间」，预览周二、周三两行；指出预览时双方确认接收数仍为 0。确认发送。
-3. Bob 找不到交集。选择「仅周四的空闲时间」，预览 `15:00–15:30`，确认发送；标题和备注未分享。
-4. 打开研究者审阅窗口，查看实际待发送主题/议程；取消议程，只允许主题一次。演示关闭窗口会保留请求，然后重新打开并批准。
-5. 主流程显示周四共同时间与 Alice 实际收到的主题。展开双方的知识、数据、skills、授权和精确回执，确认排除的议程未收到。
-6. 回答可选理解题，看到原答案与说明；停止后续共享，已有回执仍保留。结束，展示新的空白轮次和默认关闭的记录同意。
-7. 研究者进入研究记录审阅，选择已结束的演练，回看状态时间轴并导出 JSONL。
+1. 操作员在控制台查看 Agent Comm A 和 B 的状态。打开「初始条件」，选择套装或编辑两方的 KG、技能与数据，校验后保存为下一轮的默认值。
+2. 观众在首页了解 Alice 和 Bob 各自的 KG、虚构协作平台示例和本次的实际连接路径。开始引导体验并审阅本体对齐。需要展示研究回顾时，可自愿勾选虚构演练记录。
+3. 选择「仅空闲时间」，预览周二、周三两行。预览时双方确认接收数仍为 0。确认发送。
+4. Bob 找不到交集。选择「仅周四的空闲时间」，预览 `15:00–15:30`，确认发送。
+5. 操作员在控制台打开 Bob 审批，查看实际待发送的主题和议程。取消议程，只允许主题一次。
+6. 观众在总结页查看周四共同时间与 Alice 实际收到的主题。展开协作记录，查看双方消息和精确回执。可选回答理解题，看到原答案与说明。结束后可返回架构页开始下一轮。
+7. 操作员进入研究回顾，选择已结束且获得记录同意的演练，回看状态时间轴并导出 JSONL。
 
 另一条一分钟路径：初次选择「不共享任何信息」，确认不分享，即可正常完成。另一条边界路径：分享周二/周三后保持当前范围，展示没有会议也是被尊重的有效结果。
 
 Live 使用已保存的 MiniMax Key 与 Alice/Bob 参数。连接探针使用虚构数据，但确实访问配置的模型服务。正式开始 Live 前分别测试两个角色；当前轮次固定其创建时的模型版本。引导体验适合作为现场主流程，Live 用于演示真实模型规划。网络/额度/模型输出失败会明确暂停，不自动扩大分享或伪装成成功。
 
-免登录更新：打开页面即显示全部五个视图，可直接修改 Bob 初态、配置模型、审批具体出站内容及回顾研究记录；页面刷新、服务重新连接都自动恢复。已有 MiniMax Key 已迁入 `.env`，两次实际服务启动均自动加载，模型 JSON 只保留环境来源标记。新的开放控制浏览器回归覆盖 6 组路径，登录请求为 0、页面异常为 0。环境加载后的真实 Alice 连接探针成功，耗时 2574 毫秒；证据：`artifacts/demo-acceptance/open-controls-model-iab.png`。
+分离界面的浏览器验收见 `scripts/open-controls-browser-smoke.mjs`。脚本使用隔离的本机测试服务，覆盖独立入口、默认初始条件、连接状态、跨窗口审批和观众总结。
 
 本次真实 MiniMax 验收已通过：Alice/Bob 连接探针成功，完整 Live 经由周二/周三最小快照、周四补充快照、共同时间确认、一次议程审批、两道理解题和结束闭环。最终共同时间为周四 `15:00–15:30`；Alice→Bob 和 Bob→Alice 各有 2 个实际确认快照。研究回顾保留 12 个事件、21 个状态快照，最终结果与两道原答案一致。证据：`artifacts/demo-acceptance/live-result-iab.png`。此前失败的诊断演练保留为真实研究记录，不混入成功结果。
 
@@ -163,7 +163,13 @@ Live 使用已保存的 MiniMax Key 与 Alice/Bob 参数。连接探针使用虚
 | 密钥不在环境文件 | 演示迁移或重启时依赖旧存储设置 | Key 迁入 Git 忽略的 .env，启动自动加载；模型 JSON 只记来源 |
 | 旧验收脚本落后于理解题 UI | 等待已移除提交按钮而误报 | 等待已确认原答案标志 |
 
-## 证据与复跑
+## 当前分屏流程的验证
+
+- `scripts/open-controls-browser-smoke.mjs` 验证两个独立入口、两方默认配置、连接状态、跨窗口审批和观众总结。设置 `DEMO_TEST_AGENT_COMM_DIRECT` 指向已构建的 bridge 可用真实 Agent Comm SDK 运行完整受控轮次。
+- `scripts/experience-browser-smoke.mjs` 验证观众页的键盘焦点、中英切换、窄屏、刷新和同请求核验。
+- `test/open-controls.test.mjs` 验证默认配置的鉴权、版本冲突、重启持久化和生效范围。
+
+## 合并界面的历史证据
 
 Node 26.10.0；Windows Chrome。所有自动化回归使用独立内存服务和本地模型夹具，不读取活动 Key、不调用付费模型。真实 MiniMax 验收单独通过内置浏览器执行。
 
@@ -180,7 +186,7 @@ Node 26.10.0；Windows Chrome。所有自动化回归使用独立内存服务和
 | 模型配置/Key/连接快照 | `scripts/model-browser-smoke.mjs` |
 | 研究者与回顾12组路径、真实导出 | `scripts/operator-browser-smoke.mjs`；`artifacts/operator-browser/operator-browser-report.json` |
 | 中英文完整流程与多尺寸 | `scripts/language-browser-smoke.mjs` |
-| 无登录全部控制、初态、精确审批、刷新/重连6组 | `scripts/open-controls-browser-smoke.mjs`；`artifacts/open-controls-browser/open-controls-browser-report.json` |
+| 独立入口、默认初始状态、连接、跨窗口审批与观众总结 | `scripts/open-controls-browser-smoke.mjs`；`artifacts/open-controls-browser/open-controls-browser-report.json` |
 | env迁移、重启加载、更新/清除及端点隔离 | `test/demo-environment.test.mjs`；`test/open-controls.test.mjs` |
 
 浏览器脚本需要现有 Playwright/Chrome，可通过 `NODE_PATH`、`DEMO_PLAYWRIGHT_MODULE`、`DEMO_BROWSER_EXECUTABLE` 指定。完整及中断脚本需要临时 `ADMIN_PIN`；只用于该脚本自己的内存服务。截图和报告保存在忽略 Git 的 `artifacts/`；运行代码与验收脚本在仓库内。
