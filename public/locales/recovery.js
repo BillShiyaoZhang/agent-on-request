@@ -1,4 +1,5 @@
 export const messages = {
+  'The native KG update needs verification. Confirmed deliveries remain recorded by the receiver. Restore the KG service and retry the same operation.': '原生 KG 写入需要核实。接收方保留已确认送达的记录。恢复 KG 服务后，请重试同一操作。',
   'The operator can review the paused step in the console.': '操作员可在控制台检查暂停的步骤。',
   'Confirm how the two assistants understand free time': '确认两位助理对空闲时间的理解',
   'The assistants agreed how to look for a time': '两位助理已同意如何寻找时间',

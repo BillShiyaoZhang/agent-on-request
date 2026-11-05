@@ -1,5 +1,11 @@
 # Exhibition operator guide
 
+For the dual-Hermes deployment with persistent KG-plugin data, follow [Docker setup](hermes-docker-demo.md). The audience uses `/` and the operator uses `/console`. The console's role-specific native-management links open each KG-plugin workbench and Hermes Dashboard. Use KG-plugin to edit the starting graph, calendar, availability and brief. Use Hermes to edit that role's skills, model and tools. Start a new audience round after saving changes so it captures the current native records and enabled skills.
+
+The native workbench and the demonstration read the same role-local KG storage. Initialized rounds retain their own session/epoch snapshot. Preview leaves the recipient store unchanged. Once the receiver confirms delivery, its exact approved content is recorded in that round's native KG and becomes visible in the audience summary. A narrowed Bob approval writes only the selected fields to Alice's received records. Open **View collaboration trace** on the summary to inspect the persisted result, agent updates and receipt provenance. Native KG business records persist independently of the optional research-recording choice.
+
+The instructions below also describe the standalone local-process mode. Its reusable fixture editor remains available when the native KG services are absent.
+
 Use Node.js 26 or newer for the isolated Agent runtime. Production uses built-in Node modules and has no npm dependencies. Launch the app from the repository root:
 
 ```sh
@@ -22,7 +28,7 @@ New model configurations default to `retryLimit: 1`: each planning request can m
 
 Before admitting a participant, rehearse these paths using research consent off:
 
-1. Open **Initial KG and skills** in the console and review both agents' synthetic KG, data, skills and authorization cards. Edit each agent, validate the draft and save it as the default. Start a new audience round to use that default. Existing rounds retain the original conditions.
+1. In the native deployment, open each role's KG-plugin workbench and Hermes Dashboard from the console. Inspect the starting data and enabled skills there, then start a new audience round. In standalone mode, open **Initial KG and skills**, edit each agent, validate the draft and save the default. Existing rounds retain their original initialization.
 2. Start a Guided round; alignment review appears automatically. Inspect selected interval/status modules, weekday and minute conversion, and the task-scoped Free correspondence. Accept and confirm the signed peer dialogue completes before data sharing.
 3. Start the ambiguous scenario. Request clarification; verify no mapping/facts are accepted yet. Confirm the meaning for this invitation, then try a separate rejected-alignment round. A rejection must complete with an alignment-specific explanation, without sending a calendar snapshot.
 4. Preview Tue–Wed free slots. Confirm the preview does not populate Bob's receipt store. Send once and check the approved hash matches the received hash and semantic facts reference the accepted mapping version.
@@ -46,7 +52,7 @@ When a participant wants more context, open Alice's optional details to inspect 
 
 Choose a complete preset or compose each agent's KG, data, skills and authorization components. There is at most one component per category per role. Custom JSON patches apply last; arrays replace the selected array. The from-scratch preset starts with empty data/graphs/skills/scopes and still requires complete, validated synthetic conditions before running. Invalid time intervals, duplicate graph IDs, missing edge endpoints, wrong-role registered skills/components and credentials are rejected. Safe custom skill labels are metadata; they do not create new runtime actions. The catalog and JSON Schema are served by the backend, and the preview uses the same resolver as session creation.
 
-Use the console to edit either agent's initial KG, data, skills and authorization. After validation, **Save as demo default** applies the reviewed configuration to new rounds. Restore the built-in conference preset if you want future rounds to follow the current Bob owner template. API integrations that explicitly override Bob's starting conditions in PIN mode send `X-Researcher-Token` with the researcher credential and retain the participant token for any previous-session replacement.
+In native KG mode, use the corresponding native workbench to edit either agent's initial KG and data, and Hermes Dashboard for skills. The next round reads these stores and freezes its initialization. In standalone mode, **Save as demo default** applies the reviewed console fixture to new rounds. Restore the built-in conference preset if you want future rounds to follow the current Bob owner template. Standalone API integrations that explicitly override Bob's starting conditions in PIN mode send `X-Researcher-Token` with the researcher credential and retain the participant token for any previous-session replacement.
 
 Review the graph and category cards inside the optional Alice and Bob sections during a round. Own knowledge and confirmed received knowledge have distinct origins; a received node carries receipt provenance. Bob cannot gain Alice's private rows or initial KG through the state visualization. Initial KG enters only its owning model context. Each agent's skills card reflects its actual current configuration, and authorization cards expose allowed fields/dates, budget consumption, remaining uses, expiry and owner-review requests. Alice read/preview/send skills and field/date/usage/expiry limits are enforced in the runtime as well as the controller. Taking a preview consumes no send budget; allocating an authorized transmission consumes a use even if receipt confirmation is delayed.
 

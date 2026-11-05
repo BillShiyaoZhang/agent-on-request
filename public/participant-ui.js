@@ -110,6 +110,7 @@ export function renderParticipantHtml({ state, heading, mode, summary = state.se
   const action = (session.stage === 'alignment' || session.paused || session.stage === 'replay' ? '' : messageHtml(state)) + ontology + choices + replay + received;
   return '<div data-audience-step="' + (summary ? 'summary' : 'collaboration') + '">' + audienceProgress(summary ? 3 : 2)
     + '<div class="panel-heading experience-heading"><div><p class="eyebrow">' + escapeHtml(mode) + ' · fictional scenario</p><h2>' + (summary ? 'Collaboration summary' : heading) + '</h2></div><div class="toolbar">' + controls + '</div></div>' + warnings
+    + (summary && state.knowledge ? '<p class="notice" data-kg-source>Results and confirmed receipts are read from the agents’ KG-plugin stores.</p>' : '')
     + (summary ? '<div class="participant-main-flow">' + result + trace + questions + '</div>' : '<div class="audience-workspace"><div class="participant-main-flow">' + action + '</div>' + observationHtml(state, messages) + '</div>')
     + '<div class="participant-inspection-stack">' + inspectionHtml(state, calendar) + (summary ? '' : trace) + '</div></div>';
 }

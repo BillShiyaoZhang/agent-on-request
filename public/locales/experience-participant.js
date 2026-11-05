@@ -1,4 +1,7 @@
 export const messages = {
+  'This demo saves its fictional starting data, confirmed exchanges and results in the agents’ KG-plugin stores.': '本演示会将虚构初始数据、已确认的信息交换和结果保存到双方的 KG-plugin 存储中。',
+  'This demo stores its starting snapshots, confirmed deliveries and results in each agent’s KG-plugin store. Research consent separately controls research records and understanding answers.': '演示初始快照、已确认送达的信息与结果会保存在各智能体的 KG-plugin 中。研究记录与理解题回答另由研究同意选项控制。',
+  'Results and confirmed receipts are read from the agents’ KG-plugin stores.': '结果与已确认回执读取自双方的 KG-plugin 存储。',
   'Demo steps': '演示步骤',
   'Demo options': '演示选项',
   'Meaning to align': '需要对齐的含义',

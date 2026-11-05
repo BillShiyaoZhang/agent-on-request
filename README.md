@@ -6,7 +6,7 @@
 
 ## 运行
 
-在项目根目录的 `.env` 填好 `MINIMAX_CN_API_KEY`，运行 `docker compose up -d --build --wait` 即可启动双 Hermes 本机直连演示。默认入口为 [http://127.0.0.1:4327](http://127.0.0.1:4327)。[Docker 启动与管理](docs/hermes-docker-demo.md)
+在项目根目录的 `.env` 填好 `MINIMAX_CN_API_KEY`，将 KG-plugin 源码放在旁边的 `../hermes-kg-plugin`（或设置 `KG_PLUGIN_SOURCE`），运行 `docker compose up -d --build --wait` 即可启动双 Hermes、真实 KG-plugin 与 Neo4j。观众打开[演示首页](http://127.0.0.1:4327/)，操作员打开[控制台](http://127.0.0.1:4327/console)。控制台提供双方原生 KG 工作台（默认端口 8765、8766）和 Hermes 管理面板（9119、9121）的入口。初始数据和技能修改从下一轮读取，本轮快照、已确认回执和结果保存在同一份真实 KG 中。KG 业务持久化独立于可选研究记录。[Docker 启动与管理](docs/hermes-docker-demo.md)
 
 双 Hermes 演示使用 `npm run demo:hermes`。Windows 启动器加 `-Hermes` 参数即可选择同一模式。先按[双 Hermes 本机直连指南](docs/hermes-direct-demo.md)准备两个独立 profile 和 agent-comm bridge。Live 规划由 Hermes 执行，双方通过 agent-comm 的两个回环端口交换签名消息，字段授权和回执校验由演示控制器执行。这个模式无需协作平台、Web 配对或公网消息服务。
 
@@ -53,6 +53,8 @@ AGENT_DEMO_ADMIN_PIN=your-event-pin npm start
 管理员批准的是 Bob 的具体出站内容。管理员账户不能代替参与者提交 Alice 的分享选择。拒绝可选说明不会取消已经获得双方确认的会议。
 
 ## 初始化与双方状态
+
+Docker 原生 KG 模式通过 KG-plugin 管理初始知识与数据，通过 Hermes 管理角色技能与模型。以下套装和初始化工作台说明适用于独立的 `npm run demo` 模式。
 
 初始化服务提供研究会议、最小分享、共享研究背景、逐次主人审核和从零构建套装。每个角色均有 KG、数据、skills、授权四类组件；组件替换对应类别，自定义补丁最后生效，数组整体替换。技能可使用自定义 ID，并附可选的 `skillDefinitions` 名称和描述；注册技能仍受角色限制。完全自定义须遵守合成数据、合法时间段和完整图引用等约束。默认套装与 Bob 的“当前主人模板”组件使用当前模板，因此研究者修改模板后应重新预览。
 

@@ -23,6 +23,20 @@ const [aliceKey, bobKey] = await Promise.all(['alice', 'bob'].map(async role => 
   return key;
 }));
 if (aliceKey === bobKey) throw new Error('The Docker demo requires distinct gateway keys.');
+const [aliceKGToken, bobKGToken] = await Promise.all(['alice', 'bob'].map(async role => {
+  const token = (await readFile(`/run/demo-gateway-auth/${role}/kg-token`, 'utf8')).trim();
+  if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) throw new Error(`Invalid ${role} KG token file.`);
+  return token;
+}));
+if (aliceKGToken === bobKGToken) throw new Error('The Docker demo requires distinct KG console tokens.');
+const [aliceKGServiceToken, bobKGServiceToken] = await Promise.all(['alice', 'bob'].map(async role => {
+  const token = (await readFile(`/run/demo-gateway-auth/${role}/kg-service-token`, 'utf8')).trim();
+  if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) throw new Error(`Invalid ${role} KG service token file.`);
+  return token;
+}));
+if (new Set([aliceKGToken, bobKGToken, aliceKGServiceToken, bobKGServiceToken]).size !== 4) {
+  throw new Error('The Docker demo requires separate role and native/service KG credentials.');
+}
 const servers = [
   forward(ingress, 4328, '127.0.0.1', 4327),
   forward('127.0.0.1', 8643, 'hermes-alice', 8642),
@@ -32,7 +46,9 @@ await Promise.all(servers.map(server => once(server, 'listening')));
 
 const demo = spawn(process.execPath, ['scripts/demo.mjs', '--hermes'], {
   stdio: 'inherit',
-  env: { ...process.env, DEMO_HERMES_ALICE_KEY: aliceKey, DEMO_HERMES_BOB_KEY: bobKey },
+  env: { ...process.env, DEMO_HERMES_ALICE_KEY: aliceKey, DEMO_HERMES_BOB_KEY: bobKey,
+    DEMO_KG_ALICE_TOKEN: aliceKGToken, DEMO_KG_BOB_TOKEN: bobKGToken,
+    DEMO_KG_ALICE_SERVICE_TOKEN: aliceKGServiceToken, DEMO_KG_BOB_SERVICE_TOKEN: bobKGServiceToken },
 });
 let stopping = false;
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {

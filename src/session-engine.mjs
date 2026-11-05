@@ -24,7 +24,8 @@ const PUBLIC_WAIT = { admin: 'Bob’s owner needs to decide whether to share thi
   model_timeout: 'The model request timed out. Received snapshots remain; retry the unfinished step explicitly.',
   model_output: 'The model proposal did not pass validation. Received snapshots remain; retry the unfinished step explicitly.',
   model_connection: 'The model service could not complete the request. Received snapshots remain; check the saved connection and retry explicitly.',
-  configuration_changed: 'Bob’s configuration changed in this round. Recheck the policy before resuming.', researcher: 'The researcher paused this round.' };
+  configuration_changed: 'Bob’s configuration changed in this round. Recheck the policy before resuming.', researcher: 'The researcher paused this round.',
+  kg_storage: 'The native KG update needs verification. Confirmed deliveries remain recorded by the receiver. Restore the KG service and retry the same operation.' };
 // Only controller-defined diagnostics are public; never copy arbitrary provider text or thrown messages.
 const SAFE_MODEL_DIAGNOSTICS = new Set([
   'The model proposal is missing the required action object.',
@@ -46,11 +47,12 @@ const SAFE_MODEL_DIAGNOSTICS = new Set([
 ]);
 
 export class SessionEngine {
-  constructor({ runtime, profiles, research, conditionsStore, maxSessions = 100, sessionTtlMs = 2 * 60 * 60 * 1000 }) {
+  constructor({ runtime, profiles, research, conditionsStore, knowledge, maxSessions = 100, sessionTtlMs = 2 * 60 * 60 * 1000 }) {
     this.runtime = runtime;
     this.profiles = profiles;
     this.research = research;
     this.conditionsStore = conditionsStore;
+    this.knowledge = knowledge;
     this.sessions = new Map();
     this.epoch = 0;
     this.cleanupPending = new Map();
@@ -113,7 +115,40 @@ export class SessionEngine {
     if (session.messages.length > 100) session.messages.shift();
   }
   async event(session, kind, data = {}) { await this.research.append(session, { kind, ...data }, buildTraceSnapshot(session)); }
-  async checkpoint(session, kind) { await this.research.checkpoint?.(session, kind, buildTraceSnapshot(session)); }
+  knowledgeResult(session) {
+    return { version: session.version, stage: session.stage, ended: session.ended, task: session.task, messages: session.messages,
+      ontology: session.ontology ? sanitizeOntologyDialogue(session.ontology) : null,
+      briefOntology: session.briefOntology ? sanitizeOntologyDialogue(session.briefOntology) : null };
+  }
+  async checkpoint(session, kind) {
+    if (this.knowledge && session.mode !== 'replay') {
+      for (const direction of ['aliceToBob', 'bobToAlice']) {
+        for (const receipt of session.receipts[direction]) await this.knowledge.recordReceipt({
+          sessionId: session.id, epoch: session.epoch, direction, receipt
+        });
+      }
+      await this.knowledge.finish({ sessionId: session.id, epoch: session.epoch, result: this.knowledgeResult(session) });
+      await this.refreshKnowledge(session);
+    }
+    await this.research.checkpoint?.(session, kind, buildTraceSnapshot(session));
+  }
+  async refreshKnowledge(session) {
+    if (!this.knowledge || session.mode === 'replay') return;
+    const snapshots = await this.knowledge.snapshots({ sessionId: session.id, epoch: session.epoch });
+    for (const role of ['Alice', 'Bob']) {
+      const native = snapshots[role];
+      requireThat(native && hashValue(native.profile) === hashValue(session.conditions.agents[role]), 'KG_ROUND_CHANGED',
+        'The stored round snapshot changed. Review its native KG records before continuing.', 409);
+      const incoming = session.receipts[role === 'Alice' ? 'bobToAlice' : 'aliceToBob'];
+      requireThat(hashValue(native.receipts) === hashValue(incoming), 'KG_RECEIPT_MISMATCH',
+        'The native KG receipt state needs verification before the round can continue.', 503);
+      requireThat(!session.nativeKnowledge?.[role]?.result || native.result, 'KG_RESULT_MISSING',
+        'The stored native result is unavailable. Restore it before reviewing this round.', 503);
+      if (native.result) requireThat(hashValue(native.result) === hashValue(this.knowledgeResult(session)), 'KG_RESULT_MISMATCH',
+        'The native KG result needs verification before it can be displayed.', 503);
+    }
+    session.nativeKnowledge = snapshots;
+  }
   view(session, { perspective = 'observer' } = {}) {
     const status = this.runtime.status();
     const result = structuredClone({
@@ -127,6 +162,27 @@ export class SessionEngine {
       initialConditions: session.conditions, conditionsHash: session.conditionsHash, agentStates: buildAgentStates(session),
       ontology: session.ontology ?? null, briefOntology: session.briefOntology ?? null, additionalRequest: session.additionalRequest ?? null, perspective
     });
+    if (this.knowledge && session.mode !== 'replay') {
+      result.knowledge = { provider: 'kg-plugin', persistent: true };
+      if (session.nativeKnowledge?.Alice?.result) {
+        const nativeResult = session.nativeKnowledge.Alice.result;
+        result.task = clone(nativeResult.task);
+        result.messages = clone(nativeResult.messages);
+        result.ontology = clone(nativeResult.ontology);
+        result.briefOntology = clone(nativeResult.briefOntology);
+      }
+      for (const role of ['Alice', 'Bob']) {
+        const native = session.nativeKnowledge?.[role];
+        if (native?.graph) {
+          result.agentStates[role].kg = clone(native.graph);
+          result.agentStates[role].stats = { ...result.agentStates[role].stats,
+            ownNodes: native.graph.nodes.filter(node => node.origin === 'own').length,
+            receivedNodes: native.graph.nodes.filter(node => node.origin === 'received').length,
+            edges: native.graph.edges.length };
+        }
+        if (native?.provenance) result.agentStates[role].provenance = clone(native.provenance);
+      }
+    }
     if (perspective === 'owner') {
       // The owner endpoint never returns the peer's unshared starting data or policies.
       result.initialConditions = { schemaVersion: session.conditions.schemaVersion, presetId: session.conditions.presetId,
@@ -148,8 +204,11 @@ export class SessionEngine {
     const ontology = mode === 'replay' ? null : (alignmentReview || ontologyScenario === 'ambiguous' ? startOntologyDialogue : createOntologyDialogue)({ scenario: ontologyScenario, task, mode });
     const ownerTemplate = clone(this.profiles.template);
     const templateRevision = this.profiles.templateRevision;
+    requireThat(!this.knowledge || mode === 'replay' || initialConditions === undefined, 'NATIVE_CONDITIONS_MANAGED',
+      'Edit starting data in the native KG and Hermes management interfaces.', 409);
+    const nativeDefaults = this.knowledge && mode !== 'replay' ? await this.knowledge.defaults() : null;
     const configuredDefault = initialConditions === undefined ? this.conditionsStore?.getDefault().conditions : null;
-    const conditions = resolveConditions(configuredDefault ?? initialConditions, ownerTemplate);
+    const conditions = resolveConditions(nativeDefaults?.conditions ?? configuredDefault ?? initialConditions, ownerTemplate);
     const conditionsHash = hashValue(conditions);
     requireThat(expectedConditionsHash === undefined || expectedConditionsHash === conditionsHash, 'STALE_CONDITIONS', 'Initial conditions changed. Review the configuration preview again.', 409);
     const bobConfig = conditionBobConfig(conditions, ownerTemplate);
@@ -179,6 +238,10 @@ export class SessionEngine {
       pendingDelivery: null, continuation: null, savedStage: null, preparedMeeting: null, requestSequence: 0,
       replay: mode === 'replay' ? { source: 'synthetic-reference-v1', index: 0, total: REPLAY_STEPS.length, steps: REPLAY_STEPS } : null
     };
+    if (this.knowledge && mode !== 'replay') {
+      session.nativeKnowledge = await this.knowledge.begin({ sessionId: session.id, epoch: session.epoch, conditions });
+      await this.refreshKnowledge(session);
+    }
     const initialized = await this.runtime.initialize({ sessionId: session.id, epoch: session.epoch, mode, aliceData: session.aliceCalendar, aliceProfile: conditions.agents.Alice, bobProfile: conditions.agents.Bob, bobConfig: session.config, configRevision: session.configRevision,
       ontologyDialogue: session.ontology, alignReview: session.stage === 'alignment' });
     if (initialized?.ontologyDialogue) session.ontology = initialized.ontologyDialogue;
@@ -191,8 +254,13 @@ export class SessionEngine {
     }
     catch (error) { this.sessions.delete(session.id); await this.runtime.clear({ sessionId: session.id, epoch: session.epoch }); throw error; }
     this.message(session, 'system', mode === 'replay' ? 'This is a synthetic reference replay. It produces no actual messages or research records.' : 'Alice and Bob are ready. All calendar data is fictional. Choose a sharing scope first.');
-    if (mode === 'live') { session.continuation = 'intro'; await this.continuePlan(session); }
-    await this.checkpoint(session, 'ready');
+    try {
+      if (mode === 'live') { session.continuation = 'intro'; await this.continuePlan(session); }
+      await this.checkpoint(session, 'ready');
+    } catch (error) {
+      await this.remove(session).catch(() => {});
+      throw error;
+    }
     return { token, state: this.view(session) };
   }
   async expire(session) {
@@ -232,6 +300,7 @@ export class SessionEngine {
     return { ...validation, diff: validation.valid ? diffConfig(sessionId ? this.get(sessionId).config : this.profiles.template, config) : [] };
   }
   async applyConfig({ config, target, sessionId, expectedRevision }) {
+    requireThat(!this.knowledge, 'NATIVE_CONDITIONS_MANAGED', 'Edit data and skills in the native management interfaces, then start a new round.', 409);
     const validation = validateConfig(config);
     requireThat(validation.valid, 'CONFIG_INVALID', 'Configuration validation failed.', 422, validation.errors);
     requireThat(['template', 'session'].includes(target), 'CONFIG_TARGET', 'Choose a next-round template or a current-round override.');
@@ -365,9 +434,9 @@ export class SessionEngine {
           session.task = { outcome: meeting ? 'arranged' : 'ended', meeting };
         }
         const cleared = await this.clearContexts(session);
+        this.message(session, 'system', cleared ? 'This round ended. Both agents’ temporary contexts have been cleared.' : 'This round ended and further actions stopped. Bob’s remote cleanup is unconfirmed; restore the connection before starting a new round.', cleared ? 'status' : 'technical');
         await this.checkpoint(session, 'ended');
         await this.research.finish(session, session.task.outcome, cleared ? [] : ['cleanup_uncertain']);
-        this.message(session, 'system', cleared ? 'This round ended. Both agents’ temporary contexts have been cleared.' : 'This round ended and further actions stopped. Bob’s remote cleanup is unconfirmed; restore the connection before starting a new round.', cleared ? 'status' : 'technical');
       } else if (type === 'stop_sharing') {
         requireThat(session.mode !== 'replay', 'REPLAY', 'Replay cannot modify actual sharing permissions.');
         session.stopped = true;
@@ -443,7 +512,8 @@ export class SessionEngine {
     session.paused = true; session.stage = 'paused';
     const diagnostic = modelOutputDiagnostic(error);
     const hermesIssue = error.code?.startsWith('HERMES_');
-    const reason = ['MODEL_INVALID_OUTPUT', 'MODEL_INVALID_MEETING'].includes(error.code) ? 'model_output'
+    const knowledgeIssue = error.code?.startsWith('KG_');
+    const reason = knowledgeIssue ? 'kg_storage' : ['MODEL_INVALID_OUTPUT', 'MODEL_INVALID_MEETING'].includes(error.code) ? 'model_output'
       : hermesIssue || ['MODEL_PROVIDER_ERROR', 'MODEL_UNAVAILABLE', 'MODEL_CONFIGURATION_ERROR'].includes(error.code) ? 'model_connection'
       : /OFFLINE|TRANSPORT|PEER|CONNECTION|ECONN/i.test(error.code ?? '') ? 'peer_offline' : 'model_timeout';
     const inferredStep = session.pendingDelivery ? session.pendingDelivery.direction === 'bob' ? 'calendar_delivery'
@@ -535,6 +605,9 @@ export class SessionEngine {
         }
         await this.event(session, 'delivery', { fields: operation.fields, window: operation.window, recipient: operation.direction === 'bob' ? 'Bob' : 'Alice', operationId: operation.operationId, payloadHash: operation.payloadHash });
       }
+      if (this.knowledge) await this.knowledge.recordReceipt({ sessionId: session.id, epoch: session.epoch,
+        direction: operation.direction === 'bob' ? 'aliceToBob' : 'bobToAlice',
+        receipt: list.find(receipt => receipt.operationId === operation.operationId) });
       if (session.pendingDelivery === operation) session.pendingDelivery = null;
       this.message(session, 'system', `${operation.direction === 'bob' ? 'Bob' : 'Alice'} confirmed receipt of this exact snapshot.`, 'receipt');
       if (!this.planningCurrent(session, generation)) {

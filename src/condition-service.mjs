@@ -168,13 +168,17 @@ function validators(errors, bobTemplate = DEFAULT_BOB_CONFIG) {
       const ids = new Set();
       for (const [index, item] of items.entries()) {
         const itemPath = `${target}[${index}]`;
-        if (!object(item, itemPath, kind === 'nodes' ? ['id', 'label', 'type'] : ['id', 'source', 'target', 'label'])) continue;
+        const keys = kind === 'nodes' ? ['id', 'label', 'type', 'properties'] : ['id', 'source', 'target', 'label'];
+        if (!object(item, itemPath, keys, keys.filter(key => key !== 'properties'))) continue;
         text(item.id, `${itemPath}.id`, 80);
         if (typeof item.id === 'string' && /\s/.test(item.id)) add(`${itemPath}.id`, 'IDs cannot contain whitespace.');
         if (ids.has(item.id)) add(`${itemPath}.id`, 'Graph IDs must be unique within this collection.', 'DUPLICATE');
         ids.add(item.id);
         text(item.label, `${itemPath}.label`, 200);
-        if (kind === 'nodes') text(item.type, `${itemPath}.type`, 64);
+        if (kind === 'nodes') {
+          text(item.type, `${itemPath}.type`, 64);
+          if (Object.hasOwn(item, 'properties') && (!item.properties || typeof item.properties !== 'object' || Array.isArray(item.properties))) add(`${itemPath}.properties`, 'Node properties must be a JSON object.');
+        }
         else for (const key of ['source', 'target']) text(item[key], `${itemPath}.${key}`, 80);
       }
     }
@@ -405,7 +409,7 @@ export function conditionSchema(bobTemplate = DEFAULT_BOB_CONFIG) {
   const object = (properties, required = Object.keys(properties)) => ({ type: 'object', additionalProperties: false, properties, required: [...required] });
   const interval = { type: 'string', pattern: '^\\d{2}:\\d{2}[–-]\\d{2}:\\d{2}$', description: 'A valid within-day time interval with end after start; semantic validation applies.' };
   const kg = object({
-    nodes: { type: 'array', maxItems: 200, items: object({ id: string(80), label: string(200), type: string(64) }) },
+    nodes: { type: 'array', maxItems: 200, items: object({ id: string(80), label: string(200), type: string(64), properties: { type: 'object', description: 'Native KG fact properties. Credential and JSON validation applies.' } }, ['id', 'label', 'type']) },
     edges: { type: 'array', maxItems: 400, items: object({ id: string(80), source: string(80), target: string(80), label: string(200) }) }
   });
   const calendar = { type: 'array', maxItems: 500, items: object({ day: { enum: DAYS }, time: interval, status: { enum: ['Free', 'Busy'] }, title: { type: 'string', maxLength: 500 }, note: { type: 'string', maxLength: 2000 } }) };

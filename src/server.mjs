@@ -55,12 +55,16 @@ export async function createDemoServer(options = {}) {
   const profiles = options.profiles ?? new ProfileStore({ directory, persist: options.persist !== false });
   const research = options.research ?? new ResearchStore({ directory: path.join(directory, 'research'), persist: options.persist !== false });
   const conditionsStore = options.conditionsStore ?? new ConditionStore({ directory, persist: options.persist !== false });
+  const knowledge = options.knowledge;
   const initialized = await Promise.allSettled([models.init(), profiles.init(), research.init(), conditionsStore.init()]);
   const failure = initialized.find(result => result.status === 'rejected');
   if (failure) { await runtime.close(); throw failure.reason; }
-  try { await runtime.configureModels?.(models.snapshot()); await runtime.start(); }
+  try {
+    if (knowledge) await knowledge.initialize(resolveConditions(conditionsStore.getDefault().conditions ?? undefined, profiles.template));
+    await runtime.configureModels?.(models.snapshot()); await runtime.start();
+  }
   catch (error) { await runtime.close(); throw error; }
-  const engine = new SessionEngine({ runtime, profiles, research, conditionsStore });
+  const engine = new SessionEngine({ runtime, profiles, research, conditionsStore, knowledge });
   const adminTokens = new Map();
   const loginAttempts = new Map();
   const creations = new Map();
@@ -107,7 +111,8 @@ export async function createDemoServer(options = {}) {
           { id: 'live', label: 'Live', available: status.live.available, description: useHermes
             ? 'Planning in two local Hermes profiles with direct agent-comm delivery.' : 'Configured model planning; the session controller still enforces permissions.' },
           { id: 'replay', label: 'Replay', available: true, description: 'A synthetic reference trace; no messages or research records.' }
-        ], live: status.live, openControls, consentVersion: 'research-v2', runtime: status });
+        ], live: status.live, openControls, consentVersion: 'research-v2', runtime: status,
+          ...(knowledge ? { knowledge: { provider: 'kg-plugin', persistent: true } } : {}) });
       }
       if (route === '/api/conditions/catalog' && req.method === 'GET') return json(res, { ...conditionCatalog(profiles.template), templateRevision: profiles.templateRevision });
       if (route === '/api/conditions/schema' && req.method === 'GET') return json(res, conditionSchema(profiles.template));
@@ -144,10 +149,16 @@ export async function createDemoServer(options = {}) {
       }
       if (route.startsWith('/api/admin/')) {
         const token = requireAdmin(req);
+        if (route === '/api/admin/native' && req.method === 'GET') return json(res, {
+          enabled: Boolean(knowledge), agents: options.nativeInterfaces ?? {}
+        });
+        if (knowledge && req.method !== 'GET' && /^\/api\/admin\/(?:conditions|config|profiles)(?:\/|$)/.test(route)) {
+          throw new AppError('NATIVE_CONDITIONS_MANAGED', 'Manage data in the native KG workbench and skills in Hermes, then start a new round.', 409);
+        }
         if (route === '/api/admin/logout' && req.method === 'POST') { adminTokens.delete(token); return json(res, { ok: true }); }
         if (route === '/api/admin/sessions' && req.method === 'GET') return json(res, engine.list());
         if (route === '/api/admin/runtime' && req.method === 'GET') return json(res, runtime.status());
-        if (route === '/api/admin/conditions/default' && req.method === 'GET') return json(res, conditionsStore.getDefault());
+        if (route === '/api/admin/conditions/default' && req.method === 'GET') return json(res, knowledge ? await knowledge.defaults() : conditionsStore.getDefault());
         if (route === '/api/admin/conditions/default' && req.method === 'PUT') return json(res, await conditionsStore.setDefault(await body(req), profiles.template));
         if (route === '/api/admin/conditions' && req.method === 'GET') return json(res, { bundles: conditionsStore.list() });
         if (route === '/api/admin/conditions' && req.method === 'POST') return json(res, { bundle: await conditionsStore.save(await body(req), profiles.template), bundles: conditionsStore.list() });
@@ -212,6 +223,7 @@ export async function createDemoServer(options = {}) {
           const perspective = url.searchParams.get('perspective') ?? 'owner';
           requireThat(['owner', 'observer'].includes(perspective), 'PERSPECTIVE', 'Choose owner or observer view.');
           if (perspective === 'observer') requireAdmin(req);
+          await engine.refreshKnowledge(session);
           return json(res, engine.view(session, { perspective }));
         }
         if (match[2] === 'preview' && req.method === 'POST') return json(res, await engine.preview(session, await body(req)));
@@ -219,6 +231,7 @@ export async function createDemoServer(options = {}) {
           // Administrators never impersonate Alice to authorize participant sharing.
           engine.authorize(match[1], bearer(req));
           const result = await engine.action(session, await body(req));
+          await engine.refreshKnowledge(session);
           result.state = engine.view(session, { perspective: 'owner' });
           return json(res, result);
         }

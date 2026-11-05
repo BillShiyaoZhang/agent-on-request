@@ -23,12 +23,13 @@ const pendingKey = 'agent-on-request.pending';
 // This is a UI capability marker, not a credential. Only the server's explicit
 // local open-controls mode accepts unauthenticated control requests.
 const openControlsMarker = 'local-demo-open-controls-access';
-let meta, current, participantToken, adminToken, adminState, adminRuntime, selectedSessionId, activeView = operatorPage ? 'console' : 'participant';
+let meta, current, participantToken, adminToken, adminState, adminRuntime, nativeManagement, selectedSessionId, activeView = operatorPage ? 'console' : 'participant';
 let configController, modelController, conditionsController;
 let recoveryBusy = false;
 let sessionRestore = null, sessionRestoreBusy = false;
 let adminSessions = [], research = null, dialogContext = null, dialogOpener = null, requestBusy = false, interruptBusy = false, requestSequence = 0, interruptSequence = 0, pollBusy = false, planningNewRound = false;
 let renderedConsole = '';
+let followLatestRound = true;
 let pending = operatorPage ? null : readStorage(pendingKey);
 const local = { mode: 'controlled', ontologyScenario: 'distinct', durationMinutes: 30, consent: false, initial: null, additional: null, preview: null, previewStage: null, previewChoice: null, prediction: null, revocation: null, alignmentAnswer: null, moduleAnswer: null, predictionSubmitted: false, revocationSubmitted: false };
 const researchFilters = { mode: 'all', status: 'all', quality: 'all' };
@@ -131,7 +132,8 @@ function enableControls(token = adminToken) {
   const changed = adminToken !== next;
   adminToken = next;
   document.querySelectorAll('[data-admin-nav]').forEach(node => {
-    node.hidden = !next || (node.dataset.view === 'models' && meta?.live?.harness === 'hermes');
+    node.hidden = !next || (meta?.knowledge && ['conditions', 'config', 'models'].includes(node.dataset.view))
+      || (node.dataset.view === 'models' && meta?.live?.harness === 'hermes');
   });
   $('app-tabs').hidden = !next;
   $('console-access').hidden = Boolean(next);
@@ -144,7 +146,8 @@ function clearAdmin() {
   if (meta?.openControls) { enableControls(); return; }
   adminLoadSequence++;
   approvalDrafts.clear();
-  adminToken = null; adminState = null; adminRuntime = null; adminSessions = []; research = null; selectedSessionId = null;
+  adminToken = null; adminState = null; adminRuntime = null; nativeManagement = null; adminSessions = []; research = null; selectedSessionId = null;
+  followLatestRound = true;
   renderedConsole = '';
   $('console-view').replaceChildren();
   $('research-view').replaceChildren();
@@ -156,6 +159,7 @@ function clearAdmin() {
 }
 function setView(view) {
   if (!operatorPage || !adminToken || !operatorViews.includes(view)) return;
+  if (meta?.knowledge && ['conditions', 'config', 'models'].includes(view)) return;
   if (activeView === 'models' && view !== 'models') modelController?.clearSecret();
   activeView = view;
   for (const name of operatorViews) $(name + '-view').hidden = name !== view;
@@ -208,6 +212,7 @@ function renderStart() {
   const ready = modes.some(mode => mode.id === local.mode && mode.available)
     && (local.mode === 'replay' || (meta.runtime?.alice?.online !== false && meta.runtime?.bob?.online !== false));
   const options = `<section class="panel audience-start-options">
+    ${meta?.knowledge ? '<p class="muted">This demo saves its fictional starting data, confirmed exchanges and results in the agents’ KG-plugin stores.</p>' : ''}
     <div class="toolbar"><button class="button primary" data-participant-action="start" ${!ready || requestBusy ? 'disabled' : ''}>${requestBusy ? 'Starting isolated agents…' : 'Start the demo'}</button>${!ready ? '<span class="muted">Waiting for an available mode and both agents.</span>' : ''}</div>
     <details data-disclosure-id="audience-options"><summary>Demo options</summary>
       <fieldset><legend>Choose your experience</legend><div class="toolbar">${modes.map(mode => '<label class="check"><input type="radio" name="start-mode" value="' + escapeHtml(mode.id) + '" ' + (local.mode === mode.id ? 'checked ' : '') + (!mode.available ? 'disabled ' : '') + '><span>' + escapeHtml(mode.label) + '</span></label>').join('')}</div></fieldset>
@@ -216,7 +221,7 @@ function renderStart() {
     </details>
     ${local.mode === 'live' ? '<p class="notice live-disclosure">' + escapeHtml(modeDisclosure(local.mode)) + '</p>' : ''}
     <label class="check"><input id="start-consent" type="checkbox" ${local.consent ? 'checked ' : ''}${local.mode === 'replay' ? 'disabled ' : ''}><span><strong>Record this fictional round for research</strong><small>Optional. Records fictional data and agent states; sharing permission is separate.</small></span></label>
-    <details class="consent-details" data-disclosure-id="audience-consent"><summary>What gets recorded?</summary><p class="muted">Researchers can review the fictional KG, data, skills, authorization, changes and understanding answers. Model secrets and raw provider conversations are excluded. No name or account is requested. Sharing permission is a separate decision. Without consent, no research record is written. Session state remains in memory until replacement, reset or expiry.</p><small>Consent version: ${escapeHtml(meta?.consentVersion || 'Loading')}</small></details>
+    <details class="consent-details" data-disclosure-id="audience-consent"><summary>What gets recorded?</summary><p class="muted">${meta?.knowledge ? 'This demo stores its starting snapshots, confirmed deliveries and results in each agent’s KG-plugin store. Research consent separately controls research records and understanding answers.' : 'Researchers can review the fictional KG, data, skills, authorization, changes and understanding answers. Model secrets and raw provider conversations are excluded. No name or account is requested. Sharing permission is a separate decision. Without consent, no research record is written. Session state remains in memory until replacement, reset or expiry.'}</p><small>Consent version: ${escapeHtml(meta?.consentVersion || 'Loading')}</small></details>
   </section>`;
   view.innerHTML = renderAudienceIntroHtml({ controls: options, direct: Boolean(meta?.runtime?.peerTransport) });
   restoreDisclosures(view, 'start');
@@ -582,7 +587,13 @@ async function loadAdminSessions() {
     if (sequence !== adminLoadSequence || token !== adminToken) return;
     adminSessions = result.sessions;
     adminRuntime = result.runtime;
-    if (!selectedSessionId || !adminSessions.some(session => session.id === selectedSessionId)) selectedSessionId = adminSessions[0]?.id;
+    if (meta?.knowledge && !nativeManagement) nativeManagement = await api('/api/admin/native');
+    if (sequence !== adminLoadSequence || token !== adminToken) return;
+    if (followLatestRound || !adminSessions.some(session => session.id === selectedSessionId)) {
+      followLatestRound = true;
+      const newestFirst = [...adminSessions].reverse();
+      selectedSessionId = newestFirst.find(session => session.stage !== 'complete')?.id ?? newestFirst[0]?.id;
+    }
     const id = selectedSessionId;
     if (adminState?.session.id !== id) { adminState = null; if (activeView === 'console') renderConsole(); }
     const state = id ? await api('/api/sessions/' + encodeURIComponent(id) + '?perspective=observer', { admin: true }) : null;
@@ -593,7 +604,7 @@ async function loadAdminSessions() {
 }
 function renderConsole() {
   const view = $('console-view');
-  const html = renderConsoleHtml({ state: adminState, runtime: adminRuntime, sessions: adminSessions, selectedSessionId, modeLabel, loading: Boolean(selectedSessionId && !adminState), openControls: meta?.openControls === true });
+  const html = renderConsoleHtml({ state: adminState, runtime: adminRuntime, native: nativeManagement ?? (meta?.knowledge ? { enabled: true } : undefined), sessions: adminSessions, selectedSessionId, modeLabel, loading: Boolean(selectedSessionId && !adminState), openControls: meta?.openControls === true });
   if (html === renderedConsole) return;
   renderedConsole = html;
   const focus = view.contains(document.activeElement) ? document.activeElement.dataset : null;
@@ -609,7 +620,7 @@ function renderConsole() {
 }
 
 $('console-view')?.addEventListener('click', async event => {
-  const select = event.target.closest('[data-console-select]'); if (select) { selectedSessionId = select.dataset.consoleSelect; adminState = null; renderConsole(); await loadAdminSessions(); return; }
+  const select = event.target.closest('[data-console-select]'); if (select) { followLatestRound = false; selectedSessionId = select.dataset.consoleSelect; adminState = null; renderConsole(); await loadAdminSessions(); return; }
   const button = event.target.closest('[data-console-action]'); if (!button || button.disabled) return;
   const actionName = button.dataset.consoleAction;
   if (actionName === 'refresh') { loadAdminSessions(); return; }

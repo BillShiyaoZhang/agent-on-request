@@ -1,4 +1,11 @@
 export const messages = {
+  'Off · research recording disabled': '关闭 · 未启用研究记录',
+  'Native agent management': '原生智能体管理',
+  'KG workbenches manage starting data. Hermes manages each agent’s skills and model settings.': 'KG 工作台管理初始数据，Hermes 管理各智能体的技能与模型设置。',
+  'Open KG workbench': '打开 KG 工作台',
+  'Open Hermes management': '打开 Hermes 管理界面',
+  'Loading native interfaces…': '正在加载原生管理入口…',
+  'Changes to starting data and skills apply to new rounds. This round’s stored snapshot and confirmed receipts remain available in its KG.': '初始数据和技能的修改用于新一轮。本轮的快照和已确认回执保存在对应 KG 中。',
   'Manage demo defaults and Bob’s requests': '管理演示默认配置和 Bob 的请求',
   'Alice keeps control of her own sharing.': 'Alice 的分享仍由参与者决定。',
   'What researcher access allows': '研究者可以做什么',
