@@ -36,6 +36,8 @@ services:
     <<: *hermes
     environment:
       DEMO_HERMES_ROLE: Alice
+      HERMES_RESEARCH_ENABLED: ${HERMES_RESEARCH_ENABLED:-1}
+      DEMO_RESEARCH_GATEWAY_URL: http://demo:4330
     depends_on:
       neo4j:
         condition: service_healthy
@@ -55,6 +57,8 @@ services:
     <<: *hermes
     environment:
       DEMO_HERMES_ROLE: Bob
+      HERMES_RESEARCH_ENABLED: ${HERMES_RESEARCH_ENABLED:-1}
+      DEMO_RESEARCH_GATEWAY_URL: http://demo:4330
       HERMES_DASHBOARD_PORT: 9121
     depends_on:
       neo4j:
@@ -93,6 +97,7 @@ services:
     depends_on:
       hermes-alice:
         condition: service_healthy
+        restart: true
     healthcheck:
       test: [CMD, python, -c, "import json; from pathlib import Path; from urllib.request import Request,urlopen; r=urlopen(Request('http://127.0.0.1:8765/api/v1/status',headers={'Authorization':'Bearer '+Path('/opt/data/kg-console.token').read_text().strip()}),timeout=4); assert r.status==200 and json.load(r).get('connected') is True"]
       interval: 5s
@@ -122,6 +127,7 @@ services:
     depends_on:
       hermes-bob:
         condition: service_healthy
+        restart: true
     healthcheck:
       test: [CMD, python, -c, "import json; from pathlib import Path; from urllib.request import Request,urlopen; r=urlopen(Request('http://127.0.0.1:8765/api/v1/status',headers={'Authorization':'Bearer '+Path('/opt/data/kg-console.token').read_text().strip()}),timeout=4); assert r.status==200 and json.load(r).get('connected') is True"]
       interval: 5s
@@ -143,6 +149,7 @@ services:
       - no-new-privileges:true
     environment:
       DEMO_HERMES_ALICE_URL: http://127.0.0.1:8643
+      HERMES_RESEARCH_ENABLED: ${HERMES_RESEARCH_ENABLED:-1}
       DEMO_HERMES_BOB_URL: http://127.0.0.1:8644
       DEMO_KG_ALICE_URL: http://hermes-alice:8765
       DEMO_KG_BOB_URL: http://hermes-bob:8765
@@ -174,7 +181,7 @@ services:
       - alice_gateway_auth:/run/demo-gateway-auth/alice:ro
       - bob_gateway_auth:/run/demo-gateway-auth/bob:ro
     healthcheck:
-      test: [CMD, node, -e, "fetch('http://127.0.0.1:4327/api/meta').then(async r => { if (!r.ok || !(await r.json()).live.available) process.exitCode=1 }).catch(() => { process.exitCode=1 })"]
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4327/api/meta').then(async r => { const v=await r.json(); if (!r.ok || !(v.collaboration?.nativeAvailable || v.live.available)) process.exitCode=1 }).catch(() => { process.exitCode=1 })"]
       interval: 5s
       timeout: 4s
       retries: 12

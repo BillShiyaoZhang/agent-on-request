@@ -5,14 +5,20 @@ import { loadDemoEnvironment } from '../src/demo-environment.mjs';
 import { createHermesDemoClient } from '../src/hermes-demo-client.mjs';
 import { createAgentCommDirect } from '../src/agent-comm-direct.mjs';
 import { createKGClient } from '../src/kg-client.mjs';
+import { createHermesResearchClient } from '../src/hermes-research-client.mjs';
+import { createResearchKGClient } from '../src/research-kg-client.mjs';
 
 // A separate event workspace keeps rehearsals away from existing research data.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const useHermes = process.argv.includes('--hermes');
+const researchNative = useHermes && process.env.HERMES_RESEARCH_ENABLED === '1';
 let app;
 try {
   await loadDemoEnvironment({ root, migrate: !useHermes });
-  const hermesOptions = useHermes ? {
+  const endpoints = { alice: { url: process.env.DEMO_HERMES_ALICE_URL, apiKey: process.env.DEMO_HERMES_ALICE_KEY },
+    bob: { url: process.env.DEMO_HERMES_BOB_URL, apiKey: process.env.DEMO_HERMES_BOB_KEY } };
+  const hermesOptions = researchNative ? { researchNative: createHermesResearchClient({ endpoints }),
+    researchAgentTokens: { Alice: process.env.DEMO_KG_ALICE_SERVICE_TOKEN, Bob: process.env.DEMO_KG_BOB_SERVICE_TOKEN } } : useHermes ? {
     hermes: createHermesDemoClient({ endpoints: {
       alice: { url: process.env.DEMO_HERMES_ALICE_URL, apiKey: process.env.DEMO_HERMES_ALICE_KEY },
       bob: { url: process.env.DEMO_HERMES_BOB_URL, apiKey: process.env.DEMO_HERMES_BOB_KEY },
@@ -32,11 +38,15 @@ try {
   const knowledge = useKnowledge ? createKGClient({ endpoints: Object.fromEntries(['Alice', 'Bob'].map(role => [role, {
     url: process.env['DEMO_KG_' + role.toUpperCase() + '_URL'], token: process.env['DEMO_KG_' + role.toUpperCase() + '_SERVICE_TOKEN']
   }])) }) : undefined;
+  const researchKnowledge = useKnowledge ? createResearchKGClient({ endpoints: Object.fromEntries(['Alice', 'Bob'].map(role => [role, {
+    url: process.env['DEMO_KG_' + role.toUpperCase() + '_URL'], token: process.env['DEMO_KG_' + role.toUpperCase() + '_SERVICE_TOKEN']
+  }])) }) : undefined;
   app = await createDemoServer({ host: '127.0.0.1', port: Number(process.env.DEMO_PORT || 4327),
-    directory: path.join(root, '.data', workspace), openControls: true, ...hermesOptions, knowledge, nativeInterfaces,
+    directory: path.join(root, '.data', workspace), openControls: true, ...hermesOptions, knowledge, researchKnowledge, nativeInterfaces,
     minimaxApiKey: '', environmentApiKey: useHermes ? '' : process.env.MINIMAX_TOKEN_PLAN_KEY ?? '' });
   const address = await app.listen();
   console.log(`Demo ready: http://127.0.0.1:${address.port}`);
+  console.log(`Research collaboration: http://127.0.0.1:${address.port}/research.html${researchNative ? ' (native Hermes skills and tools)' : ' (guided rehearsal)'}`);
   console.log(`Separate demo workspace: .data/${workspace} · Research controls are available without sign-in.`);
   console.log(useHermes ? 'Live uses two local Hermes profiles. Agent-comm connects the two local peers directly.'
     : app.models.view().keyConfigured ? 'Live uses the saved provider configuration.' : 'Controlled is ready. Configure MINIMAX_TOKEN_PLAN_KEY in .env for Live.');

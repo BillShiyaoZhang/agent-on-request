@@ -14,6 +14,8 @@ import { buildAgentStates } from './agent-observability.mjs';
 import { ConditionStore } from './condition-store.mjs';
 import { ModelStore, DEFAULT_MODEL_CONFIG } from './model-store.mjs';
 import { probeModel } from './model-provider.mjs';
+import { ResearchEngine } from './research-engine.mjs';
+import { resolveResearchCommand } from './research-commands.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const digest = text => createHash('sha256').update(String(text)).digest();
@@ -65,11 +67,15 @@ export async function createDemoServer(options = {}) {
   }
   catch (error) { await runtime.close(); throw error; }
   const engine = new SessionEngine({ runtime, profiles, research, conditionsStore, knowledge });
+  const collaboration = new ResearchEngine({ directory: path.join(directory, 'collaboration'), persist: options.persist !== false,
+    nativeClient: options.researchNative, knowledge: options.researchKnowledge, agentTokens: options.researchAgentTokens });
+  try { await collaboration.init(); } catch (error) { await engine.close(); await collaboration.close(); throw error; }
   const adminTokens = new Map();
   const loginAttempts = new Map();
   const creations = new Map();
   const pinHash = digest(adminPin);
   let closing = false;
+  let shutdownPromise;
   let modelUpdates = Promise.resolve();
   const probes = new Set();
 
@@ -104,6 +110,43 @@ export async function createDemoServer(options = {}) {
       if (req.method !== 'GET' && req.headers.origin) {
         requireThat(new URL(req.headers.origin).host === req.headers.host, 'ORIGIN', 'The request origin does not match.', 403);
       }
+      if (route === '/api/research/catalog' && req.method === 'GET') return json(res, collaboration.catalog());
+      if (route === '/api/research/workspaces' && req.method === 'POST') {
+        limit(creations, `research:${req.socket.remoteAddress}`, 30, 60_000, 'CREATE_LIMIT');
+        await body(req); return json(res, await collaboration.create(), 201);
+      }
+      if (route === '/api/research/agent-context' && req.method === 'GET') return json(res, collaboration.agentContext(bearer(req)));
+      if (route === '/api/research/agent-tools' && req.method === 'POST') return json(res, await collaboration.agentTool(bearer(req), await body(req)));
+      const researchOwnerClaim = /^\/api\/admin\/research\/workspaces\/([a-f0-9-]{36})\/claim\/Bob$/.exec(route);
+      if (researchOwnerClaim && req.method === 'POST') { requireAdmin(req); await body(req); return json(res, await collaboration.claimOwner(researchOwnerClaim[1], 'Bob')); }
+      const researchWorkspace = /^\/api\/research\/workspaces\/([a-f0-9-]{36})(?:\/(tasks|commands|policies|revoke|query|decisions|end|research-task|policy-candidates)(?:\/([A-Za-z0-9_:-]+))?(?:\/(resume|decision))?)?$/.exec(route);
+      if (researchWorkspace) {
+        const { w, role } = collaboration.authorize(researchWorkspace[1], bearer(req));
+        const section = researchWorkspace[2], recordId = researchWorkspace[3];
+        if (!section && req.method === 'GET') return json(res, collaboration.view(w, role));
+        if (section === 'commands' && !recordId && req.method === 'POST') {
+          requireThat(role === 'Alice', 'RESEARCH_OWNER_ROLE', 'Send shared collaboration commands to Alice.', 403);
+          const input = resolveResearchCommand(await body(req), { nativeAvailable: Boolean(options.researchNative) });
+          await collaboration.start(w.id, input, role); return json(res, collaboration.view(w, role), 201);
+        }
+        if (section === 'end' && req.method === 'POST') { requireThat(role === 'Alice', 'RESEARCH_OWNER_ROLE', 'Alice ends this shared experience.', 403); await body(req); return json(res, await collaboration.end(w.id)); }
+        if (section === 'research-task' && req.method === 'POST') { const input = await body(req); await collaboration.start(w.id, { type: 'research_work', mode: 'native', goal: input.goal }, role); return json(res, collaboration.view(w, role), 201); }
+        if (section === 'policy-candidates' && recordId && researchWorkspace[4] === 'decision' && req.method === 'POST') return json(res, await collaboration.decidePolicy(w.id, role, recordId, await body(req)));
+        if (section === 'tasks' && req.method === 'POST' && !recordId) {
+          requireThat(role === 'Alice', 'RESEARCH_OWNER_ROLE', 'Alice initiates this shared collaboration task.', 403);
+          await collaboration.start(w.id, await body(req)); return json(res, collaboration.view(w, role), 201);
+        }
+        if (section === 'tasks' && recordId && researchWorkspace[4] === 'resume' && req.method === 'POST') {
+          requireThat(collaboration.task(w, recordId).type !== 'research_work' || collaboration.task(w, recordId).initiator === role, 'RESEARCH_PRIVATE_TASK', 'This task belongs to the other owner.', 403);
+          await body(req); await collaboration.resume(w.id, recordId); return json(res, collaboration.view(w, role));
+        }
+        if (section === 'decisions' && recordId && req.method === 'POST') return json(res, await collaboration.decide(w.id, role, recordId, await body(req)));
+        if (section === 'policies' && req.method === 'POST') return json(res, await collaboration.ownerPolicy(w.id, role, await body(req)));
+        if (section === 'revoke' && req.method === 'POST') return json(res, await collaboration.revoke(w.id, role, (await body(req)).id));
+        if (section === 'query' && req.method === 'POST') {
+          const input = await body(req); return json(res, await collaboration.toolUnlocked(w, { id: 'query', type: 'prepare_discussion' }, role, 'knowledge_search', input));
+        }
+      }
       if (route === '/api/meta' && req.method === 'GET') {
         const status = runtime.status();
         return json(res, { title: 'Agent on Request', modes: [
@@ -112,6 +155,7 @@ export async function createDemoServer(options = {}) {
             ? 'Planning in two local Hermes profiles with direct agent-comm delivery.' : 'Configured model planning; the session controller still enforces permissions.' },
           { id: 'replay', label: 'Replay', available: true, description: 'A synthetic reference trace; no messages or research records.' }
         ], live: status.live, openControls, consentVersion: 'research-v2', runtime: status,
+          collaboration: { url: '/research.html', nativeAvailable: Boolean(options.researchNative) },
           ...(knowledge ? { knowledge: { provider: 'kg-plugin', persistent: true } } : {}) });
       }
       if (route === '/api/conditions/catalog' && req.method === 'GET') return json(res, { ...conditionCatalog(profiles.template), templateRevision: profiles.templateRevision });
@@ -258,9 +302,9 @@ export async function createDemoServer(options = {}) {
   }, 60_000);
   cleanup.unref();
   return {
-    server, engine, runtime, research, profiles, models, conditionsStore, adminPin,
+    server, engine, runtime, research, collaboration, profiles, models, conditionsStore, adminPin,
     async listen() { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); }); return server.address(); },
-    async close() { closing = true; clearInterval(cleanup); for (const probe of probes) probe.abort('service_closing'); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await engine.close(); }
+    close() { return shutdownPromise ??= (async () => { closing = true; clearInterval(cleanup); for (const probe of probes) probe.abort('service_closing'); await collaboration.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await engine.close(); })(); }
   };
 }
 

@@ -1,0 +1,16 @@
+{
+  "id": "SEM-HCI-2026", "title": "Fictional Symposium on Semantics and Human-AI Collaboration", "synthetic": true, "timezone": "Asia/Shanghai", "week": "fictional-conference-week",
+  "reports": [
+    {"id": "R1", "conferenceId": "SEM-HCI-2026", "sessionId": "S1", "title": "大规模 Ontology Alignment 的性能评估", "day": "Wed", "time": "10:00–10:30", "attendanceMode": "in-person", "kind": "research-presentation", "abstract": "Compare ontology-term correspondences using benchmark datasets and precision/recall. No user interaction study is presented.", "topics": {"Alice": ["alice:topic-alignment"], "Bob": []}, "source": "synthetic:conference:program:1", "version": "1"},
+    {"id": "R2", "conferenceId": "SEM-HCI-2026", "sessionId": "S2", "title": "用户心理模型与 AI 助手能力的 Alignment", "day": "Wed", "time": "11:00–11:30", "attendanceMode": "in-person", "kind": "research-presentation", "abstract": "Study agreement between people's mental models and assistant capabilities. Alignment here does not mean ontology correspondence.", "topics": {"Alice": [], "Bob": ["bob:topic-alignment", "bob:topic-transparency"]}, "source": "synthetic:conference:program:1", "version": "1"},
+    {"id": "R3", "conferenceId": "SEM-HCI-2026", "sessionId": "S3", "title": "让用户理解并审阅 Agent 的语义映射", "day": "Thu", "time": "14:00–14:30", "attendanceMode": "in-person", "kind": "research-presentation", "abstract": "Expose source definitions and mapping provenance in an interface where people inspect, modify or reject semantic correspondences. Discuss both semantic validity and understandable human control.", "topics": {"Alice": ["alice:topic-alignment", "alice:topic-review", "alice:topic-provenance"], "Bob": ["bob:topic-control", "bob:topic-transparency"]}, "source": "synthetic:conference:program:1", "version": "1"}
+  ],
+  "sessions": [
+    {"id": "S1", "title": "Semantic model evaluation", "presentationIds": ["R1"]}, {"id": "S2", "title": "Understanding human-AI interaction", "presentationIds": ["R2"]}, {"id": "S3", "title": "Interactive semantic collaboration", "presentationIds": ["R3"]}
+  ],
+  "venues": [
+    {"id": "room-a", "label": "Seminar Room A", "capacity": 8, "equipment": ["projector", "whiteboard"], "availableTimes": [{"day": "Thu", "time": "15:00–16:00"}], "service": "conference-booking", "synthetic": true},
+    {"id": "room-b", "label": "Discussion Room B", "capacity": 4, "equipment": ["whiteboard"], "availableTimes": [{"day": "Thu", "time": "15:00–16:00"}], "service": "conference-booking", "synthetic": true},
+    {"id": "room-c", "label": "Seminar Room C", "capacity": 12, "equipment": ["projector"], "availableTimes": [{"day": "Fri", "time": "15:00–16:00"}], "service": "conference-booking", "synthetic": true}
+  ]
+}

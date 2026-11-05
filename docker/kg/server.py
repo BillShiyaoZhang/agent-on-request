@@ -21,6 +21,7 @@ from kg.console_web import create_app
 from kg.lifecycle import MemoryService
 from kg.ontology_editing import OntologyEditor
 from kg.schema import schema_for_store
+from research_adapter import ResearchKnowledge
 
 
 MAX_BODY = 768 * 1024
@@ -153,7 +154,8 @@ class DemoKnowledge:
     def read_records(self, scope, session=None, epoch=None):
         params = {"prefix": self.config.urn_prefix, "scope": scope, "session": session, "epoch": epoch}
         nodes = self.store.run_read("""MATCH (n:KGEntity)
-            WHERE n.uri STARTS WITH $prefix AND (n.x_demo_scope=$scope OR $scope='default' AND n.x_demo_scope IS NULL)
+            WHERE n.uri STARTS WITH $prefix AND (n.x_demo_scope=$scope
+                OR $scope='default' AND n.x_demo_scope IS NULL AND n.x_res_kind IS NULL)
                 AND NOT n:KGQuarantined AND coalesce(n.x_demo_active,true)=true
                 AND NOT n:KGLegacyAlias AND NOT n:KGLegacyUnresolved
                 AND coalesce(n.hermes_aliasConfirmed,false)=false
@@ -473,9 +475,19 @@ def create_service():
         app.router.routes.remove(route)
     knowledge = DemoKnowledge(config, memory, role)
     app.state.demo = knowledge
+    research_knowledge = ResearchKnowledge(config, memory.store, role)
+    app.state.research = research_knowledge
 
     @app.middleware("http")
     async def controller_boundary(request: Request, call_next):
+        if request.url.path.startswith("/api/research/"):
+            supplied = request.headers.get("authorization", "")
+            if not hmac.compare_digest(supplied, "Bearer " + service_token):
+                return JSONResponse({"detail": "Research profiles and ledger projections require the role-scoped service credential."},
+                    status_code=403, headers={"Cache-Control": "no-store"})
+            request.scope["headers"] = [(key, value) for key, value in request.scope["headers"] if key.lower() != b"authorization"]
+            request.scope["headers"].append((b"authorization", ("Bearer " + token).encode()))
+            request.__dict__.pop("_headers", None)
         if request.url.path.startswith("/api/demo/"):
             supplied = request.headers.get("authorization", "")
             if hmac.compare_digest(supplied, "Bearer " + service_token):
@@ -489,6 +501,8 @@ def create_service():
 
     @app.exception_handler(ValueError)
     async def invalid_operation(request, error):
+        if "cannot resolve address" in str(error).lower():
+            return JSONResponse({"detail": "The native graph database is unavailable. Restore its network connection and retry the same operation."}, status_code=503)
         conflict = any(word in str(error).lower() for word in ("conflict", "version", "already exists with different"))
         return JSONResponse({"detail": "Native knowledge changed; reload and retry the same intended operation."
             if conflict else "The demo record does not match the native knowledge schema."}, status_code=409 if conflict else 422)
@@ -508,6 +522,24 @@ def create_service():
     def identity(session, epoch):
         if not IDENTIFIER.fullmatch(session) or epoch < 1:
             raise HTTPException(422, "Invalid session identity")
+
+    @app.get("/api/research/profile")
+    def research_profile():
+        return research_knowledge.profile()
+
+    @app.put("/api/research/profile")
+    async def seed_research_profile(request: Request):
+        value = await payload(request)
+        return research_knowledge.seed(value.get("profile"), seed_only=value.get("seedOnly", True), expected_revision=value.get("expectedRevision"))
+
+    @app.post("/api/research/projections")
+    async def research_projection(request: Request):
+        return research_knowledge.project((await payload(request)).get("event"))
+
+    @app.post("/api/research/knowledge")
+    async def record_research_knowledge(request: Request):
+        value = await payload(request)
+        return research_knowledge.record(value.get("workspaceId"), value.get("nodes"), value.get("edges"))
 
     @app.get("/api/demo/health")
     def health():

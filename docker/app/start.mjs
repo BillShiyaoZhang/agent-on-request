@@ -39,6 +39,8 @@ if (new Set([aliceKGToken, bobKGToken, aliceKGServiceToken, bobKGServiceToken]).
 }
 const servers = [
   forward(ingress, 4328, '127.0.0.1', 4327),
+  // Authenticated research tool callbacks are reachable on role networks, never published to the host.
+  forward('0.0.0.0', 4330, '127.0.0.1', 4327),
   forward('127.0.0.1', 8643, 'hermes-alice', 8642),
   forward('127.0.0.1', 8644, 'hermes-bob', 8642),
 ];

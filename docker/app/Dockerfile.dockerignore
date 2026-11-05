@@ -8,6 +8,8 @@
 !src/**
 !public/
 !public/**
+!profiles/
+!profiles/**
 !scripts/
 !scripts/demo.mjs
 !docker/

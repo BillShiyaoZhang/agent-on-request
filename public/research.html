@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Research collaboration · Agent on Request</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/research.css">
+</head>
+<body class="research-page">
+  <div class="app-shell research-shell">
+    <header class="app-header">
+      <a class="brand" href="/"><span class="brand-mark" aria-hidden="true">AR</span><span><strong>Agent on Request</strong><small id="page-subtitle">跨领域研究协作</small></span></a>
+      <div class="toolbar"><a class="button quiet" href="/console" id="console-link">控制台</a><button class="button" id="research-language" type="button">English</button></div>
+    </header>
+    <div id="research-notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <main id="research-root"><section class="panel"><p>正在读取研究者的知识与协作能力… / Loading research collaboration…</p></section></main>
+    <footer class="app-footer" id="research-footer">全部人物、研究资料、日程与预约服务均为虚构数据。</footer>
+  </div>
+  <noscript><p class="notice error">请启用 JavaScript。 / JavaScript is required.</p></noscript>
+  <script type="module" src="/research.js"></script>
+</body>
+</html>

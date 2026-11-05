@@ -15,6 +15,7 @@ COPY --from=kg_source /scripts/ scripts/
 COPY --from=kg_source /skills/ skills/
 COPY --from=frontend /ui/dist /app/static
 COPY docker/kg/server.py /demo/server.py
+COPY docker/kg/research_adapter.py /demo/research_adapter.py
 ENV KG_STATIC_DIR=/app/static KG_SYNC_SCHEDULER_ENABLED=false
 EXPOSE 8765
 CMD ["python", "/demo/server.py"]

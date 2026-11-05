@@ -2,3 +2,6 @@
 !docker/
 !docker/hermes/
 !docker/hermes/**
+!skills/
+!skills/research/
+!skills/research/**

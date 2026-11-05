@@ -6,6 +6,8 @@ COPY docker/hermes/config.yaml /opt/hermes/cli-config.yaml.example
 COPY docker/hermes/healthcheck.py /opt/hermes/demo-healthcheck.py
 COPY docker/hermes/configure-profile.py /opt/hermes/configure-demo-profile.py
 COPY docker/hermes/dashboard-forward.py /opt/hermes/demo-dashboard-forward.py
+COPY docker/hermes/research-tools.py /opt/demo-research/research-tools.py
+COPY skills/research /opt/demo-research/skills
 COPY --from=kg_source /plugins/kg /opt/demo-kg/plugins/kg
 COPY --from=kg_source /skills/kg-memory /opt/demo-kg/skills/kg-memory
 COPY --from=kg_source /skills/kg-memory-sync /opt/demo-kg/skills/kg-memory-sync

@@ -1,0 +1,99 @@
+{
+  "role": "Bob", "version": "1.0.0", "name": "Bob", "field": "人机交互", "description": "A researcher who links user needs, interaction designs, observations and findings to supported design decisions.",
+  "modules": [
+    {"id": "research", "name": "Human-computer interaction questions and topics", "dependencies": ["academic"], "concepts": [
+      {"id": "MentalModelAlignmentTopic", "label": "Alignment", "parent": "ResearchTopic", "definition": "Agreement between a user's understanding of an AI assistant and its actual capabilities. This is not ontology-term correspondence.", "properties": []},
+      {"id": "UserControlTopic", "label": "User control", "parent": "ResearchTopic", "definition": "The ways people can inspect, intervene in and direct system behavior; broader than reviewing semantic mappings.", "properties": []},
+      {"id": "TransparencyTopic", "label": "Transparency", "parent": "ResearchTopic", "definition": "How well a person can understand a system's behavior and its basis. Provenance may support transparency but is not equivalent to it.", "properties": []},
+      {"id": "UserReviewDecision", "label": "User review decision", "parent": "Decision", "definition": "A user's accept, modify or reject decision on a system-proposed item in an explicit review task. It is not an execution grant.", "properties": []},
+      {"id": "PresentationActivity", "label": "Presentation activity", "parent": "Presentation", "definition": "One individual research presentation inside a program session; not the whole session.", "properties": []}
+    ], "relations": []},
+    {"id": "interaction", "name": "Users, contexts, interaction designs and rationale", "dependencies": ["research"], "concepts": [
+      {"id": "UserNeed", "label": "User need", "definition": "An evidenced need in a stated use context, distinct from a software feature or researcher's assumption.", "properties": [{"id": "description", "datatype": "string"}]},
+      {"id": "InteractionContext", "label": "Interaction context", "definition": "The people, activity and environment in which interaction takes place.", "properties": [{"id": "description", "datatype": "string"}]},
+      {"id": "InteractivePrototype", "label": "Interactive prototype", "definition": "A concrete version of an interactive design used for exploration or evaluation.", "properties": [{"id": "version", "datatype": "string"}]},
+      {"id": "InteractionFlow", "label": "Interaction flow", "definition": "A sequence of user and system actions in a use context.", "properties": [{"id": "steps", "datatype": "string[]"}]},
+      {"id": "DesignAlternative", "label": "Design alternative", "definition": "A candidate interaction design, not an implemented or evaluated outcome.", "properties": [{"id": "description", "datatype": "string"}]},
+      {"id": "DesignRationale", "label": "Design rationale", "definition": "A documented reason for a design choice, linked to needs or research findings.", "properties": [{"id": "rationale", "datatype": "string"}]}
+    ], "relations": [
+      {"id": "respondsToNeed", "definition": "The research question or design responds to the stated need.", "domain": ["ResearchQuestion", "DesignAlternative"], "range": ["UserNeed"]},
+      {"id": "situatedIn", "definition": "The need or flow is situated in this use context.", "domain": ["UserNeed", "InteractionFlow"], "range": ["InteractionContext"]},
+      {"id": "implementsFlow", "definition": "The prototype implements the interaction flow.", "domain": ["InteractivePrototype"], "range": ["InteractionFlow"]},
+      {"id": "hasRationale", "definition": "The candidate design has this documented rationale.", "domain": ["DesignAlternative"], "range": ["DesignRationale"]}
+    ]},
+    {"id": "study", "name": "User studies, protocols and observations", "dependencies": ["interaction"], "concepts": [
+      {"id": "UserStudy", "label": "User study", "definition": "A study of interaction with a defined question, protocol and scope.", "properties": [{"id": "state", "datatype": "string"}]},
+      {"id": "StudyProtocol", "label": "Study protocol", "definition": "A versioned plan describing procedure, tasks and measurements.", "properties": [{"id": "version", "datatype": "string"}, {"id": "procedure", "datatype": "string"}]},
+      {"id": "StudySession", "label": "Study session", "definition": "One recorded execution of a study protocol; the fixture contains no real participants.", "properties": [{"id": "synthetic", "datatype": "boolean"}]},
+      {"id": "TaskScenario", "label": "Task scenario", "definition": "A contextualized task used in a user study.", "properties": [{"id": "description", "datatype": "string"}]},
+      {"id": "Observation", "label": "Observation", "definition": "A recorded observation from a specific study session, kept distinct from interpretation.", "properties": [{"id": "observation", "datatype": "string"}]},
+      {"id": "ParticipantConsentRecord", "label": "Participant consent record", "definition": "A record about a study participant's consent. It is not authorization for this agent to share data or execute operations.", "properties": [{"id": "scope", "datatype": "string"}]}
+    ], "relations": [
+      {"id": "followsProtocol", "definition": "The study or session follows the exact protocol version.", "domain": ["UserStudy", "StudySession"], "range": ["StudyProtocol"]},
+      {"id": "definesScenario", "definition": "The protocol defines this study task.", "domain": ["StudyProtocol"], "range": ["TaskScenario"]},
+      {"id": "sessionOf", "definition": "The recorded session belongs to the study.", "domain": ["StudySession"], "range": ["UserStudy"]},
+      {"id": "evaluatesPrototype", "definition": "The study investigates this prototype version.", "domain": ["UserStudy"], "range": ["InteractivePrototype"]},
+      {"id": "observedIn", "definition": "The observation was recorded in this study session.", "domain": ["Observation"], "range": ["StudySession"]}
+    ]},
+    {"id": "findings", "name": "Findings, design implications and scholarly outputs", "dependencies": ["study"], "concepts": [
+      {"id": "Finding", "label": "Research finding", "definition": "An interpretation supported by observations, with context and limitations.", "properties": [{"id": "finding", "datatype": "string"}, {"id": "limitations", "datatype": "string"}]},
+      {"id": "DesignImplication", "label": "Design implication", "definition": "A design suggestion derived from scoped research findings, not a universal rule.", "properties": [{"id": "implication", "datatype": "string"}]},
+      {"id": "StudyReport", "label": "Study report", "parent": "Document", "definition": "A report of study methods, observations, findings and limitations.", "properties": [{"id": "summary", "datatype": "string"}]},
+      {"id": "PrototypeDemo", "label": "Prototype demonstration", "parent": "Document", "definition": "A demonstrator of a prototype, not evidence that the design was validated.", "properties": [{"id": "summary", "datatype": "string"}]},
+      {"id": "DesignNote", "label": "Design note", "parent": "ResearchNote", "definition": "A note linking interaction alternatives, reasons and evidence.", "properties": []}
+    ], "relations": [
+      {"id": "supportedBy", "definition": "The finding is supported by the recorded observation.", "domain": ["Finding"], "range": ["Observation"]},
+      {"id": "derivedFromFinding", "definition": "The design implication follows from the scoped finding.", "domain": ["DesignImplication"], "range": ["Finding"]},
+      {"id": "informsDesign", "definition": "The implication informs this candidate interaction design.", "domain": ["DesignImplication"], "range": ["DesignAlternative"]},
+      {"id": "documentsStudy", "definition": "The report documents this study.", "domain": ["StudyReport"], "range": ["UserStudy"]}
+    ]}
+  ],
+  "knowledge": {
+    "nodes": [
+      {"id": "self", "type": "Person", "label": "Bob", "properties": {"displayName": "Bob"}},
+      {"id": "organization", "type": "Organization", "label": "Fictional Human-AI Interaction Lab", "properties": {"displayName": "Fictional Human-AI Interaction Lab"}},
+      {"id": "competency", "type": "HumanCompetency", "label": "Human-AI interaction research", "properties": {"description": "User studies and interaction design"}},
+      {"id": "preference", "type": "Preference", "label": "Research discussion preference", "properties": {"value": "Small discussions with concrete examples and a projector"}},
+      {"id": "source", "type": "SourceRecord", "label": "Bob synthetic study notebook", "properties": {"kind": "fixture", "synthetic": true}},
+      {"id": "project", "type": "ResearchProject", "label": "Understandable and controllable agent collaboration", "properties": {"description": "Study how people inspect and direct cooperation between assistants.", "state": "active"}},
+      {"id": "question", "type": "ResearchQuestion", "label": "How do people understand and control agent collaboration?", "properties": {"question": "Which interaction design helps people distinguish understanding, disclosure and actual action?"}},
+      {"id": "topic-alignment", "type": "MentalModelAlignmentTopic", "label": "Mental-model alignment", "properties": {"definition": "Agreement between a user's mental model and the system's capabilities", "aliases": ["alignment"]}},
+      {"id": "topic-control", "type": "UserControlTopic", "label": "User control", "properties": {"definition": "Inspection, intervention and direction of agent behavior"}},
+      {"id": "topic-transparency", "type": "TransparencyTopic", "label": "Interaction transparency", "properties": {"definition": "A person's understanding of system behavior and its basis"}},
+      {"id": "need", "type": "UserNeed", "label": "Know what will be shared", "properties": {"description": "People need to inspect the exact recipient and outgoing content before approving a private disclosure."}},
+      {"id": "context", "type": "InteractionContext", "label": "Two assistants preparing academic collaboration", "properties": {"description": "A fictional researcher coordinates with another researcher's assistant."}},
+      {"id": "prototype", "type": "InteractivePrototype", "label": "Collaboration review prototype v1", "properties": {"version": "1"}},
+      {"id": "flow", "type": "InteractionFlow", "label": "Inspect, narrow and approve", "properties": {"steps": ["inspect recipient and content", "remove optional private fields", "approve this version", "see confirmed receipt"]}},
+      {"id": "design", "type": "DesignAlternative", "label": "Field-level disclosure preview", "properties": {"description": "Show exact outgoing fields and allow the owner to narrow the request."}},
+      {"id": "rationale", "type": "DesignRationale", "label": "Make the boundary visible", "properties": {"rationale": "Expose content and recipient rather than asking for an abstract blanket approval."}},
+      {"id": "study", "type": "UserStudy", "label": "Synthetic disclosure-preview study", "properties": {"state": "fixture-recorded"}},
+      {"id": "protocol", "type": "StudyProtocol", "label": "Preview interpretation protocol v1", "properties": {"version": "1", "procedure": "Use fictional task records to inspect participant interpretation; no real participant data."}},
+      {"id": "session", "type": "StudySession", "label": "Synthetic study session A", "properties": {"synthetic": true}, "visibility": "private"},
+      {"id": "scenario", "type": "TaskScenario", "label": "Narrow a private research brief", "properties": {"description": "Select a method summary while leaving out unpublished numerical results."}},
+      {"id": "observation", "type": "Observation", "label": "Synthetic preview observation", "properties": {"observation": "In the fictional fixture the person distinguishes approved content from received content after viewing both cards."}, "visibility": "private"},
+      {"id": "finding", "type": "Finding", "label": "Visible content and receipt states support interpretation", "properties": {"finding": "The synthetic observation motivates showing outgoing content and actual reception separately.", "limitations": "Fictional demonstration evidence; not an empirical user-study result."}, "visibility": "private"},
+      {"id": "implication", "type": "DesignImplication", "label": "Separate preview, approval and receipt", "properties": {"implication": "Keep preparation, permission and actual execution visibly distinct."}},
+      {"id": "study-report", "type": "StudyReport", "label": "Synthetic collaboration-review report", "properties": {"title": "Synthetic collaboration-review report", "summary": "A fictional protocol and evidence chain for the interaction design."}, "visibility": "private"},
+      {"id": "paper", "type": "Paper", "label": "Controllable assistant collaboration", "properties": {"title": "Controllable assistant collaboration", "publicationState": "draft"}, "visibility": "private"},
+      {"id": "paper-version", "type": "DocumentVersion", "label": "HCI study draft v1", "properties": {"version": "1", "summary": "Design rationale and scoped synthetic study findings."}, "visibility": "private"},
+      {"id": "reading-plan", "type": "ReadingPlan", "label": "Read human-control design studies", "properties": {"state": "planned"}},
+      {"id": "attendance-plan", "type": "AttendancePlan", "label": "Find a shared human-AI interaction report", "properties": {"state": "planned"}}
+    ],
+    "edges": [
+      ["self", "organization", "memberOf"], ["self", "competency", "hasCompetency"], ["self", "preference", "hasPreference"], ["project", "self", "ownedBy"], ["project", "question", "addresses"],
+      ["question", "topic-control", "investigatesTopic"], ["question", "topic-transparency", "investigatesTopic"], ["question", "need", "respondsToNeed"], ["need", "context", "situatedIn"], ["flow", "context", "situatedIn"], ["prototype", "flow", "implementsFlow"], ["design", "need", "respondsToNeed"], ["design", "rationale", "hasRationale"],
+      ["study", "protocol", "followsProtocol"], ["session", "protocol", "followsProtocol"], ["session", "study", "sessionOf"], ["protocol", "scenario", "definesScenario"], ["study", "prototype", "evaluatesPrototype"], ["observation", "session", "observedIn"], ["finding", "observation", "supportedBy"], ["implication", "finding", "derivedFromFinding"], ["implication", "design", "informsDesign"], ["study-report", "study", "documentsStudy"],
+      ["paper-version", "paper", "versionOf"], ["paper", "topic-control", "aboutTopic"], ["observation", "source", "sourcedFrom"], ["reading-plan", "question", "servesQuestion"], ["attendance-plan", "question", "servesQuestion"]
+    ]
+  },
+  "calendar": [
+    {"day": "Tue", "time": "10:30–11:30", "status": "Busy"}, {"day": "Tue", "time": "14:00–15:00", "status": "Busy"},
+    {"day": "Wed", "time": "09:00–10:00", "status": "Free"}, {"day": "Wed", "time": "15:00–16:00", "status": "Busy"},
+    {"day": "Thu", "time": "15:00–16:00", "status": "Free"}
+  ],
+  "materials": [
+    {"id": "public-intro", "version": "1", "label": "Bob public research introduction", "fields": {"summary": "Bob studies human-AI interaction, user control and understandable agent collaboration."}, "visibility": "public", "sourceIds": ["project", "topic-control"]},
+    {"id": "research-brief", "version": "1", "label": "Bob HCI discussion brief", "fields": {"summary": "We investigate how people inspect and direct cooperation between assistants.", "method": "Separate proposed content, owner decisions and actual reception in the interface.", "results": "Fictional study observations motivate visible disclosure boundaries; no empirical claim is made.", "note": "Private study notes remain local unless their exact version is approved for disclosure."}, "visibility": "private", "sourceIds": ["paper-version", "finding", "observation"]}
+  ],
+  "interests": ["topic-alignment", "topic-control", "topic-transparency"]
+}

@@ -10,6 +10,6 @@
     "demo": "node scripts/demo.mjs",
     "demo:hermes": "node scripts/demo.mjs --hermes",
     "bob": "node src/bob-server.mjs",
-    "test": "node --test"
+    "test": "node --test test/*.test.mjs"
   }
 }

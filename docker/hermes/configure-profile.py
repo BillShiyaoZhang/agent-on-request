@@ -79,12 +79,7 @@ def configure_profile(home, minimax_key, saved_gateway_key, owner):
         save_env_value("API_SERVER_KEY", gateway_key)
         make_private(env_path, owner)
 
-    model = config.get("model")
-    changed = False
-    if isinstance(model, dict) and model.get("default") == "hermes-demo-fixture":
-        seed = require_readable_config_before_write(Path("/opt/hermes/cli-config.yaml.example"))
-        config["model"] = seed["model"]
-        changed = True
+    changed = configure_model(config)
 
     role = os.environ.get("DEMO_HERMES_ROLE")
     if role not in {"Alice", "Bob"}:
@@ -101,6 +96,35 @@ def configure_profile(home, minimax_key, saved_gateway_key, owner):
         if "kg" not in enabled:
             enabled.append("kg")
         changed = True
+    research_marker = home / ".demo-research-v1"
+    if research_marker.is_symlink():
+        raise ValueError("Unexpected research mode marker symlink")
+    if os.environ.get("HERMES_RESEARCH_ENABLED") == "1":
+        configure_research(home, role, owner)
+        # Enable a concrete plugin toolset only. The normal `skills` toolset
+        # includes skill_manage; research supplies its own read-only skill view.
+        config.setdefault("platform_toolsets", {})["api_server"] = ["research"]
+        configure_research_tool_search(config)
+        config["mcp_servers"] = {}
+        config.setdefault("agent", {})["max_turns"] = 24
+        config["agent"]["background_review"] = {"enabled": False}
+        config.setdefault("memory", {}).update({"provider": "kg", "memory_enabled": True, "user_profile_enabled": False})
+        config.setdefault("plugins", {})["enabled"] = ["kg", "research"]
+        # Hermes can enable newly shipped built-ins that were never explicitly
+        # declined. Record the complete current list to keep this exact opt-in.
+        from hermes_cli.tools_config import CONFIGURABLE_TOOLSETS
+        config.setdefault("known_builtin_toolsets", {})["api_server"] = [key for key, _label, _description in CONFIGURABLE_TOOLSETS]
+        config.setdefault("known_plugin_toolsets", {})["api_server"] = ["research"]
+        research_marker.write_text("1\n", encoding="ascii")
+        make_private(research_marker, owner)
+        changed = True
+    elif research_marker.exists():
+        # Returning to the existing proposal-only demo is explicit and reversible.
+        config.setdefault("platform_toolsets", {})["api_server"] = []
+        config.setdefault("agent", {})["max_turns"] = 1
+        config.setdefault("plugins", {})["enabled"] = [name for name in config.get("plugins", {}).get("enabled", []) if name != "research"]
+        research_marker.unlink()
+        changed = True
     if changed:
         save_config(config, strip_defaults=False)
         make_private(config_path, owner)
@@ -109,6 +133,70 @@ def configure_profile(home, minimax_key, saved_gateway_key, owner):
         make_private(marker, owner)
 
     return gateway_key, kg_token, kg_service_token
+
+
+def configure_model(config):
+    """Seed before writing config.yaml, which prevents the stock entrypoint's copy."""
+    model = config.get("model")
+    if isinstance(model, dict) and model.get("default") and model.get("default") != "hermes-demo-fixture":
+        return False
+    seed = require_readable_config_before_write(Path("/opt/hermes/cli-config.yaml.example"))
+    if not isinstance(seed.get("model"), dict) or not seed["model"].get("default"):
+        raise ValueError("The shipped Hermes model default is missing")
+    config["model"] = seed["model"]
+    return True
+
+
+def configure_research_tool_search(config):
+    """Expose concrete schemas, not Hermes' deferred tool_search/call bridge.
+
+    Plugin tools are deferred by default in v0.22.7 even when there are only a
+    few tools. The bridge is intentionally outside this profile's allowlist.
+    """
+    tools = config.get("tools")
+    if not isinstance(tools, dict):
+        tools = {}
+        config["tools"] = tools
+    tools["tool_search"] = {"enabled": "off", "defer": []}
+
+
+def configure_research(home, role, owner):
+    source = Path("/opt/demo-research")
+    plugin = home / "plugins" / "research"
+    if plugin.is_symlink():
+        raise ValueError("Unexpected research plugin symlink")
+    plugin.mkdir(parents=True, exist_ok=True)
+    for name, content in {
+        "__init__.py": (source / "research-tools.py").read_text(encoding="utf-8"),
+        "plugin.yaml": "name: research\nversion: 1.0.0\ndescription: Scoped research workflows and permission-checked collaboration\n",
+    }.items():
+        destination = plugin / name
+        if destination.is_symlink():
+            raise ValueError("Unexpected research plugin file symlink")
+        destination.write_text(content, encoding="utf-8")
+        make_private(destination, owner)
+    destination_root = home / "skills" / "research"
+    if destination_root.is_symlink():
+        raise ValueError("Unexpected research skill directory symlink")
+    destination_root.mkdir(parents=True, exist_ok=True)
+    for category in ("common", role.lower()):
+        for folder in sorted((source / "skills" / category).iterdir()):
+            if not folder.is_dir() or folder.is_symlink() or not (folder / "SKILL.md").is_file():
+                continue
+            destination = destination_root / folder.name
+            if destination.is_symlink():
+                raise ValueError("Unexpected research skill symlink")
+            # Versioned shipped workflows are read-only to agents; owner custom
+            # skills outside this research directory remain untouched.
+            shutil.copytree(folder, destination, dirs_exist_ok=True)
+            for directory, folders, files in os.walk(destination):
+                if os.geteuid() == 0:
+                    os.chown(directory, owner.pw_uid, owner.pw_gid)
+                for name in files:
+                    make_private(Path(directory) / name, owner)
+    if os.geteuid() == 0:
+        os.chown(plugin, owner.pw_uid, owner.pw_gid)
+        os.chown(destination_root, owner.pw_uid, owner.pw_gid)
 
 
 def configure_kg(home, role, owner, *, seed_skills):

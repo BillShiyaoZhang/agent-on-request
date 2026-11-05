@@ -11,6 +11,7 @@ WORKDIR /app
 COPY --from=bridge /out/agent-comm-direct /usr/local/bin/agent-comm-direct
 COPY src/ src/
 COPY public/ public/
+COPY profiles/ profiles/
 COPY scripts/demo.mjs scripts/demo.mjs
 COPY docker/app/start.mjs docker/app/start.mjs
 RUN install -d -o node -g node -m 0700 /app/.data
