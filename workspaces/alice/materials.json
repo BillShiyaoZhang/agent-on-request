@@ -1,0 +1,36 @@
+[
+  {
+    "id": "alice:public-intro",
+    "version": "1",
+    "label": "Alice public research introduction",
+    "fields": {
+      "summary": "Alice studies knowledge graphs, ontology alignment and reviewable semantic exchange."
+    },
+    "visibility": "public",
+    "sourceIds": [
+      "alice:project",
+      "alice:topic-alignment"
+    ],
+    "source": "synthetic:alice:research-fixture:2.0.0",
+    "ownerConfirmedVisibility": true
+  },
+  {
+    "id": "alice:research-brief",
+    "version": "1",
+    "label": "Alice research discussion brief",
+    "fields": {
+      "summary": "We want people to inspect definitions and evidence before accepting semantic mappings.",
+      "method": "Show source and target definitions, provenance and a task-scoped accept/modify/reject control.",
+      "results": "Unpublished synthetic fixture accuracy: 0.82; this is demonstration data.",
+      "note": "Private draft: numerical results and internal notes require a separate disclosure decision."
+    },
+    "visibility": "private",
+    "sourceIds": [
+      "alice:paper-version",
+      "alice:experiment",
+      "alice:metric"
+    ],
+    "source": "synthetic:alice:research-fixture:2.0.0",
+    "ownerConfirmedVisibility": true
+  }
+]

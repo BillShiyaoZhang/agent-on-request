@@ -4,7 +4,7 @@ const SHARED_TASKS = ['schedule', 'select_presentation', 'prepare_discussion'];
 const PRESETS = {
   schedule: '请和 Bob 约一次 30 分钟的学术讨论。',
   select_presentation: '请和 Bob 选择一场共同参加的报告。',
-  prepare_discussion: '请和 Bob 筹备学术讨论，准备议程、分享获准资料并预约场地。',
+  prepare_discussion: '请和 Bob 筹备学术讨论。先准备一份未公开研究材料的分享方案交给我审阅，再根据实际获准交换的内容安排议程，最后把场地预约表单交给我决定是否提交。',
 };
 
 export const defaultResearchCommand = type => PRESETS[type] ?? '';

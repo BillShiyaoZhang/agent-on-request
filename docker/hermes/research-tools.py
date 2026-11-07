@@ -6,6 +6,7 @@ peer delivery and reservations; a generated final answer is not a business recei
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -42,29 +43,33 @@ def _strings():
 _resource = {"resourceId": _string(), "fields": _strings(), "recipient": _string()}
 _intent = {**_resource, "action": _string(["peer.send", "reservation.submit"]), "venueId": _string()}
 SCHEMAS = {
-    "knowledge_search": ("Search your own knowledge and confirmed received facts with source references.",
+    "knowledge_search": ("Search your own knowledge and actually received records. Prefer exact ids returned by earlier tools, with hops=0 when no related records are needed; avoid empty or broad queries while progressing an action. Use peer_describe for full ontology definitions already received from the collaborator. Broad results may provide compact references; query their ids for details.",
         _object({"query": _string(), "type": _string(), "ids": _strings(), "hops": {"type": "integer", "minimum": 0, "maximum": 2}})),
-    "knowledge_record": ("Record private research knowledge and relations using your ontology and evidence sources. This cannot create public classifications or permissions.",
-        _object({"nodes": {"type": "array", "maxItems": 32, "items": _object({"id": _string(), "type": _string(), "label": _string(), "properties": {"type": "object"}, "sourceRefs": _strings()}, ["id", "type", "label", "sourceRefs"])},
+    "knowledge_record": ("Record private research knowledge and relations using declared ontology types and actual evidence references. For an existing node, first knowledge_search its exact id and supply expectedVersion matching the returned version; omit expectedVersion only for a new node. Match every property's datatype from ontology_describe exactly, including strings versus numbers and arrays. The all-string rule for artifact fields does not apply to these typed KG properties. Use sourceRefs actually returned by tools. This cannot create public classifications or permissions.",
+        _object({"nodes": {"type": "array", "maxItems": 32, "items": _object({"id": _string(), "type": _string(), "label": _string(), "properties": {"type": "object"}, "sourceRefs": _strings(),
+            "expectedVersion": {"anyOf": [{"type": "string", "minLength": 1, "maxLength": 100}, {"type": "integer", "minimum": 1, "maximum": 9007199254740991}], "description": "Required when updating an existing node: copy its current version from knowledge_search."}}, ["id", "type", "label", "sourceRefs"])},
                  "edges": {"type": "array", "maxItems": 64, "items": _object({"source": _string(), "target": _string(), "relation": _string()}, ["source", "target", "relation"])}}, ["nodes", "edges"])),
     "ontology_describe": ("Read your versioned application ontology modules for this task.",
         _object({"taskType": _string(["schedule", "select_presentation", "prepare_discussion", "research_work"]), "moduleIds": _strings()})),
-    "artifact_prepare": ("Save a versioned brief, agenda or reservation draft with source references. This does not send it. For kind=reservation, fields MUST include title, day, time, attendees, agenda as text, e.g. day Thu, time 15:00–15:30, attendees 8.",
+    "artifact_prepare": ('Save a versioned brief, agenda or reservation draft using actual source references. This does not send it. EVERY fields value must be a string, including participant counts: {"attendees":"8"}, never {"attendees":8}. A reservation requires text fields title, day, time, attendees, agenda; if fields.title is omitted, the already supplied valid outer title is copied into it before saving the draft. An explicit fields.title is preserved. This draft-text requirement is separate from the declared datatypes of knowledge_record properties.',
         _object({"kind": _string(["brief", "agenda", "reservation"]), "title": _string(),
-                 "fields": {"type": "object", "description": "Named text fields. Reservation requires title, day, time, attendees (count as text), agenda."}, "sourceRefs": _strings()}, ["kind", "title", "fields", "sourceRefs"])),
+                 "fields": {"type": "object", "additionalProperties": {"type": "string"}, "maxProperties": 16, "description": "Every value MUST be a string, including counts. Reservation requires title, day, time, attendees (e.g. the string 2), agenda. A missing reservation title is copied from the valid outer title; an explicit field is never overwritten."}, "sourceRefs": _strings()}, ["kind", "title", "fields", "sourceRefs"])),
     "artifact_revise": ("Revise an exact artifact version, preserving its source and disclosure restrictions.",
         _object({"artifactId": _string(), "expectedVersion": {"type": "integer", "minimum": 1},
-                 "fields": {"type": "object"}, "sourceRefs": _strings()}, ["artifactId", "expectedVersion", "fields"])),
-    "peer_describe": ("Discover the other researcher's published task capabilities and ontology modules.", _object()),
+                 "fields": {"type": "object", "additionalProperties": {"type": "string"}, "maxProperties": 16}, "sourceRefs": _strings()}, ["artifactId", "expectedVersion", "fields"])),
+    "peer_describe": ("Inspect only capabilities and definitions actually received from the collaborator in this experience. Request missing information from the peer; no peer profile is preloaded.", _object()),
     "peer_request": ("Request structured information from the peer; this does not grant access to private records.",
-        _object({"kind": _string(["availability", "report_interests", "research_material", "agenda_review"]),
+        _object({"kind": _string(["availability", "report_interests", "research_material", "agenda_review", "ontology", "capabilities"]),
                  "recipient": _string(["Alice", "Bob"])}, ["kind"])),
-    "peer_send": ("Send selected fields of a source or draft only through the disclosure authorization gate.",
+    "peer_send": ("Send selected fields of your source or draft through the disclosure authorization gate. working-ontology and capabilities are your task-scoped definition and skill source references; use task_status to discover exact available sources.",
         _object({**_resource, "artifactId": _string()})),
-    "alignment_propose": ("Propose supported task-scoped mapping candidates; labels alone do not prove equivalence.",
-        _object({"mappingIds": _strings()}, ["mappingIds"])),
-    "alignment_accept": ("Independently review and accept a peer mapping proposal for the current ontology versions.",
-        _object({"proposalId": _string()}, ["proposalId"])),
+    "alignment_propose": ("Propose correspondences using your own and actually received definitions. The service binds exchanged source versions; there is no preset mapping answer. reason/condition are local review notes; only the service's scoped mapping projection is sent. Share richer explanations using an approved artifact.",
+        _object({"mappings": {"type": "array", "minItems": 1, "maxItems": 12, "items": _object({
+            "id": _string(), "source": _string(), "target": _string(),
+            "relation": _string(["exact", "close", "related", "narrower", "broader", "conditional", "disjoint"]),
+            "condition": _string(), "reason": _string()}, ["source", "target", "relation", "reason"])}}, ["mappings"])),
+    "alignment_accept": ("Independently accept or reject a received mapping proposal from its actual definitions and task scope. The service validates provenance and versions, not semantic correctness; reason is a local review note.",
+        _object({"proposalId": _string(), "decision": _string(["accept", "reject"]), "reason": _string()}, ["proposalId", "decision", "reason"])),
     "authorization_check": ("Retrieve current permission for this exact action. A prior KG memory is not authority.",
         _object(_intent, ["action", "resourceId"])),
     "authorization_request": ("Ask your owner about an exact disclosure or reservation. Save a checkpoint and end the run when pending.",
@@ -161,6 +166,36 @@ def _on_session_end(session_id="", platform="", **kwargs):
             _retired.add(str(session_id))
 
 
+def _draft_text_arguments(name, args):
+    """Normalize draft representation before a draft exists or is reviewed.
+
+    Only artifact fields declare an all-string map. Typed knowledge properties,
+    booleans, containers, non-finite numbers and every execution argument retain
+    their original types so the controller's existing strict checks still apply.
+    A new reservation may reuse its already supplied valid outer title only when
+    that field is absent; revisions and explicit field values remain unchanged.
+    The caller's arguments are never modified in place.
+    """
+    if name not in {"artifact_prepare", "artifact_revise"} or not isinstance(args.get("fields"), dict):
+        return args
+    fields = args["fields"]
+    normalized = {}
+    changed = False
+    for key, value in fields.items():
+        if type(value) in {int, float} and (type(value) is int or math.isfinite(value)):
+            normalized[key] = json.dumps(value, allow_nan=False, separators=(",", ":"))
+            changed = True
+        else:
+            normalized[key] = value
+    title = args.get("title")
+    if (name == "artifact_prepare" and args.get("kind") == "reservation"
+            and "title" not in fields and isinstance(title, str)
+            and title.strip() and len(title) <= 200):
+        normalized["title"] = title
+        changed = True
+    return {**args, "fields": normalized} if changed else args
+
+
 def _handler(name):
     def call(args, **kwargs):
         try:
@@ -169,6 +204,7 @@ def _handler(name):
             forbidden = {"owner", "ownerId", "role", "taskId", "workspaceId", "assignmentId", "token", "url"}
             if forbidden.intersection(args):
                 raise ValueError("Task identity and gateway configuration are not tool arguments")
+            args = _draft_text_arguments(name, args)
             binding = _bind(_session_key(kwargs))
             result = _request("/api/research/agent-tools", {"assignmentId": binding["assignmentId"], "name": name, "arguments": args})
             return json.dumps(result, ensure_ascii=False, allow_nan=False)

@@ -63,11 +63,14 @@ test('working subsets include dependency closure, exclude unnecessary research e
   assert.throws(() => selectWorkingOntology('Bob', 'schedule', profile), error => error.code === 'RESEARCH_ROLE');
 });
 
-test('conference evidence distinguishes lexical false friends, related topics and joint interest without merging them', () => {
+test('public conference keeps personal report interpretations independent and reference mappings are acceptance-only evidence', () => {
   const conference = researchConference();
   assert.equal(conference.synthetic, true);
-  const joint = conference.reports.filter(report => report.topics.Alice.length && report.topics.Bob.length);
-  assert.deepEqual(joint.map(report => report.id), ['R3']);
+  assert.ok(conference.reports.every(report => !Object.hasOwn(report, 'topics')));
+  const offered = role => researchProfile(role).reportAnnotations.filter(annotation => annotation.topicIds.length).map(annotation => annotation.reportId);
+  assert.deepEqual(offered('Alice'), ['R1', 'R3']);
+  assert.deepEqual(offered('Bob'), ['R2', 'R3']);
+  assert.deepEqual(offered('Alice').filter(id => offered('Bob').includes(id)), ['R3']);
   const candidates = researchMappings();
   assert.equal(candidates.find(mapping => mapping.id === 'alignment-label').valid, false);
   assert.equal(candidates.find(mapping => mapping.id === 'provenance-transparency').relation, 'related');

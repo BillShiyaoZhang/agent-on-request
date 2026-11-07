@@ -37,7 +37,12 @@ export function createAgentCommDirect({ command, startupTimeoutMs = 20_000, time
       state.pending.reject(error);
       state.pending = undefined;
     }
+    state.child.stdin.destroy();
     state.child.kill();
+    // A bridge blocked in its SDK shutdown must not keep the app's error path
+    // or service shutdown waiting forever. Only this owned helper is stopped.
+    state.stopTimer ??= setTimeout(() => state.child.kill('SIGKILL'), 750);
+    state.stopTimer.unref();
   }
 
   function handleLine(state, line) {
@@ -72,6 +77,7 @@ export function createAgentCommDirect({ command, startupTimeoutMs = 20_000, time
     state.ready = new Promise((resolve, reject) => { state.resolveReady = resolve; state.rejectReady = reject; });
     state.done = new Promise(resolve => state.child.once('close', () => {
       if (current === state) fail(state, OFFLINE());
+      clearTimeout(state.stopTimer);
       try { rmSync(cwd, { force: true, recursive: true, maxRetries: 3 }); }
       catch { /* Only ephemeral keys and hashed transport receipts may remain. */ }
       children.delete(state.done);

@@ -1,0 +1,297 @@
+[
+  {
+    "id": "coordinate-calendar",
+    "label": "Coordinate academic calendars",
+    "description": "Find a mutually offered interval using only scoped availability and actual peer receipts.",
+    "modules": [
+      "alice:time"
+    ],
+    "inputTypes": [
+      "alice:TimeInterval"
+    ],
+    "outputTypes": [
+      "alice:AttendancePlan"
+    ],
+    "tools": [
+      "knowledge.search",
+      "authorization.check",
+      "peer.request",
+      "peer.send",
+      "task.status"
+    ],
+    "sideEffects": [
+      "disclose-availability"
+    ],
+    "path": "workspaces/alice/skills/coordinate-calendar/SKILL.md"
+  },
+  {
+    "id": "plan-conference",
+    "label": "Plan conference attendance",
+    "description": "Use research questions, topic meanings and individually identified presentations to plan learning.",
+    "modules": [
+      "alice:research"
+    ],
+    "inputTypes": [
+      "alice:ResearchQuestion",
+      "alice:Conference"
+    ],
+    "outputTypes": [
+      "alice:AttendancePlan"
+    ],
+    "tools": [
+      "knowledge.search",
+      "ontology.describe",
+      "alignment.propose",
+      "alignment.accept",
+      "peer.send",
+      "task.status"
+    ],
+    "sideEffects": [
+      "disclose-working-ontology",
+      "disclose-report-selection"
+    ],
+    "path": "workspaces/alice/skills/plan-conference/SKILL.md"
+  },
+  {
+    "id": "prepare-discussion",
+    "label": "Prepare a research discussion",
+    "description": "Prepare a sourced discussion agenda from own knowledge and actual received material, then explicitly deliver approved drafts when peer review is needed.",
+    "modules": [
+      "alice:collaboration",
+      "alice:materials"
+    ],
+    "inputTypes": [
+      "alice:ResearchQuestion",
+      "alice:DocumentVersion"
+    ],
+    "outputTypes": [
+      "alice:DiscussionPlan",
+      "alice:AgendaItem",
+      "alice:DocumentVersion"
+    ],
+    "tools": [
+      "task.status",
+      "knowledge.search",
+      "artifact.prepare",
+      "artifact.revise",
+      "peer.request",
+      "authorization.check",
+      "authorization.request",
+      "peer.send",
+      "receipt.inspect",
+      "task.checkpoint"
+    ],
+    "sideEffects": [
+      "write-local-draft",
+      "request-peer-input",
+      "disclose-material",
+      "request-owner-decision"
+    ],
+    "path": "workspaces/alice/skills/prepare-discussion/SKILL.md"
+  },
+  {
+    "id": "share-materials",
+    "label": "Share selected research materials",
+    "description": "Prepare an exact versioned projection, obtain current permission and send only approved fields.",
+    "modules": [
+      "alice:materials"
+    ],
+    "inputTypes": [
+      "alice:DocumentVersion"
+    ],
+    "outputTypes": [
+      "alice:SelectedExcerpt"
+    ],
+    "tools": [
+      "artifact.prepare",
+      "authorization.check",
+      "authorization.request",
+      "peer.send",
+      "task.checkpoint",
+      "task.status"
+    ],
+    "sideEffects": [
+      "disclose-material"
+    ],
+    "path": "workspaces/alice/skills/share-materials/SKILL.md"
+  },
+  {
+    "id": "authorization-memory",
+    "label": "Retrieve and request authorization",
+    "description": "Explain current permissions in a sourced owner-only brief, propose future rules for owner confirmation, and verify current authority before an external effect.",
+    "modules": [
+      "alice:work",
+      "alice:materials"
+    ],
+    "inputTypes": [
+      "alice:Task"
+    ],
+    "outputTypes": [
+      "alice:Decision",
+      "alice:DocumentVersion"
+    ],
+    "tools": [
+      "task.status",
+      "knowledge.search",
+      "authorization.list",
+      "authorization.check",
+      "authorization.request",
+      "authorization.propose_policy",
+      "artifact.prepare",
+      "task.checkpoint"
+    ],
+    "sideEffects": [
+      "write-local-draft",
+      "request-owner-decision",
+      "propose-standing-policy"
+    ],
+    "path": "workspaces/alice/skills/authorization-memory/SKILL.md"
+  },
+  {
+    "id": "reserve-resource",
+    "label": "Coordinate rooms and resources",
+    "description": "Coordinate suitable resources and approved draft handoffs; only the task's designated organizer submits an independently authorized local reservation form.",
+    "modules": [
+      "alice:collaboration",
+      "alice:materials"
+    ],
+    "inputTypes": [
+      "alice:VenueRequirement",
+      "alice:DocumentVersion"
+    ],
+    "outputTypes": [
+      "alice:ReservationProposal",
+      "alice:ConfirmedReservation"
+    ],
+    "tools": [
+      "task.status",
+      "resource.search",
+      "artifact.prepare",
+      "artifact.revise",
+      "authorization.check",
+      "authorization.request",
+      "peer.send",
+      "receipt.inspect",
+      "reservation.submit",
+      "task.checkpoint"
+    ],
+    "sideEffects": [
+      "write-local-draft",
+      "disclose-material",
+      "request-owner-decision",
+      "reserve-resource"
+    ],
+    "path": "workspaces/alice/skills/reserve-resource/SKILL.md"
+  },
+  {
+    "id": "research-lineage",
+    "label": "Maintain research and literature lineage",
+    "description": "Connect papers, notes, methods and datasets to research questions while preserving source and version evidence.",
+    "modules": [
+      "alice:research",
+      "alice:semantics"
+    ],
+    "inputTypes": [
+      "alice:ResearchQuestion",
+      "alice:Paper"
+    ],
+    "outputTypes": [
+      "alice:ResearchNote",
+      "alice:ReadingPlan"
+    ],
+    "tools": [
+      "knowledge.search",
+      "artifact.prepare",
+      "artifact.revise",
+      "knowledge.record"
+    ],
+    "sideEffects": [
+      "write-local-draft",
+      "write-private-knowledge"
+    ],
+    "path": "workspaces/alice/skills/research-lineage/SKILL.md"
+  },
+  {
+    "id": "semantic-review",
+    "label": "Review semantic models and mappings",
+    "description": "Inspect researched ontology artifacts and mapping candidates; retain definitions, counterexamples and review scope.",
+    "modules": [
+      "alice:semantics"
+    ],
+    "inputTypes": [
+      "alice:OntologyArtifactVersion",
+      "alice:MappingCandidate"
+    ],
+    "outputTypes": [
+      "alice:HumanReviewDecision",
+      "alice:ResearchNote"
+    ],
+    "tools": [
+      "knowledge.search",
+      "ontology.describe",
+      "artifact.prepare",
+      "knowledge.record"
+    ],
+    "sideEffects": [
+      "write-local-draft",
+      "write-private-knowledge"
+    ],
+    "path": "workspaces/alice/skills/semantic-review/SKILL.md"
+  },
+  {
+    "id": "compare-experiments",
+    "label": "Compare experiments and trace claims",
+    "description": "Trace a claim to metrics, experiment inputs and exact ontology versions; compare like-for-like configurations.",
+    "modules": [
+      "alice:evidence"
+    ],
+    "inputTypes": [
+      "alice:ResearchClaim",
+      "alice:ExperimentRun"
+    ],
+    "outputTypes": [
+      "alice:BenchmarkReport"
+    ],
+    "tools": [
+      "knowledge.search",
+      "artifact.prepare",
+      "knowledge.record"
+    ],
+    "sideEffects": [
+      "write-local-draft",
+      "write-private-knowledge"
+    ],
+    "path": "workspaces/alice/skills/compare-experiments/SKILL.md"
+  },
+  {
+    "id": "research-brief",
+    "label": "Prepare a sourced research brief",
+    "description": "Prepare a concise account of research questions, methods, evidence and limitations from explicit source versions.",
+    "modules": [
+      "alice:evidence",
+      "alice:materials"
+    ],
+    "inputTypes": [
+      "alice:ResearchProject",
+      "alice:DocumentVersion"
+    ],
+    "outputTypes": [
+      "alice:DocumentVersion",
+      "alice:SelectedExcerpt"
+    ],
+    "tools": [
+      "knowledge.search",
+      "artifact.prepare",
+      "artifact.revise",
+      "authorization.check",
+      "authorization.request",
+      "knowledge.record"
+    ],
+    "sideEffects": [
+      "write-local-draft",
+      "request-owner-decision",
+      "write-private-knowledge"
+    ],
+    "path": "workspaces/alice/skills/research-brief/SKILL.md"
+  }
+]

@@ -1,8 +1,24 @@
 # Agent on Request
 
-新增[跨领域研究协作演示](http://127.0.0.1:4327/research.html)：Alice 的知识图谱研究与 Bob 的人机交互研究各有完整 ontology、领域知识和原生 skills。三个场景依次演示日程协调、语义对齐选报告，以及主人参与的资料披露和场地预约。授权使用独立 SQLite 账本持久保存，KG 提供可检索的关联与来源。[设计、运行与验收说明](docs/research-collaboration.md)。
+新增[跨领域研究协作演示](http://127.0.0.1:4327/research.html)：Alice 的知识图谱研究与 Bob 的人机交互研究分别从 [Alice workspace](workspaces/alice/README.md) 和 [Bob workspace](workspaces/bob/README.md) 初始化。每方拥有自己的完整 ontology、领域知识、日程、资料、原生 skills 和授权规则；对方的定义、能力及材料通过任务中的实际通信取得。三个场景依次演示日程协调、语义对齐选报告，以及主人参与的资料披露和场地预约。[设计、运行与验收说明](docs/research-collaboration.md)。
 
 `npm run demo` 可运行 Guided 三场景；Docker 默认启用原生 Hermes 多轮研究工具，打开 `/research.html` 后选择 Hermes 模式。设置 `HERMES_RESEARCH_ENABLED=0` 可使用原有单轮 Hermes 日程模式。两种模式都保留原来的日程页面。
+
+新版研究协作的初始内容与运行内容分别保存：
+
+```text
+workspaces/alice/              # Alice 独立、只读、可展示的版本化种子
+workspaces/bob/                # Bob 独立、只读、可展示的版本化种子
+demo/environment/             # 公共会议与模拟场地，无个人兴趣标签
+demo/acceptance/              # 仅供测试的参考资料，不安装进 agent 镜像
+.data/<demo-mode>/collaboration/runs/<experience-id>/
+  alice/                      # 本场种子副本、知识、收发件、草稿、授权账本
+  bob/
+```
+
+同一观众的三个任务延续本场知识和长期规则；下一位观众从相同、经 manifest 校验的种子创建新身份、KG namespace、Hermes run 会话和授权账本。原生模式关闭 profile 级自动记忆注入，由当前任务工具检索本场知识。Docker 的 Alice、Bob 镜像只包含本方种子和技能，实际请求、定义、候选映射及审阅决定经既有 agent-comm 通信。工具中的资源引用、版本与 hash 用于系统内部追踪和执行核验，双方不必预先接受额外的语义、日期或资源表示协议。
+
+种子修改后运行 `node workspaces/update-manifests.mjs alice bob` 更新已审阅文件清单。独立 workspace 的完整操作说明见[研究协作指南](docs/research-collaboration.md)。下文的单轮提案、预设映射及参与者初始化工作台主要描述保留的早期日程演示；新版多轮研究协作以该指南为准。
 
 为学术会议准备的个人助理协作演示。Alice 和 Bob 有不同的概念定义与数据表示，先按任务选择本体模块、协商可执行映射，再由各自主人决定实际披露哪些信息。接收方通过已接受的映射解释真正收到的数据，并查询带回执来源的语义状态来完成安排。默认数据全部虚构，默认研究记录关闭。两个 Agent 在本机独立进程中运行，各有独立临时目录、上下文与权限限制，由受信任的中央控制器协调。
 

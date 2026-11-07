@@ -24,14 +24,28 @@ test('an unavailable KG projection cannot hold standing authorization or actual 
   assert.equal(engine.ledger(w, 'Alice').pendingOutbox().length, 0);
 });
 
-test('owner views publish only the peer working ontology, never their complete private application schema', async t => {
-  const engine = await new ResearchEngine({ persist: false }).init(); t.after(() => engine.close());
+test('peer schemas remain unknown until actual delivery and only the disclosed working subset becomes visible', async t => {
+  const engine = await new ResearchEngine({ persist: false, nativeClient: { run: async () => ({ status: 'completed' }) } }).init(); t.after(() => engine.close());
   const created = await engine.create();
-  assert.equal(created.state.peer.ontology.modules.length, 0);
+  assert.equal(created.state.peer.ontology, null);
+  assert.deepEqual(created.state.peer.skills, []);
   assert(created.state.profile.ontology.modules.length > 0);
-  const state = await engine.start(created.workspaceId, { type: 'schedule' });
-  assert(state.peer.ontology.modules.length > 0);
-  assert(!state.peer.ontology.modules.flatMap(m => m.concepts).some(c => c.id === 'bob:Finding'));
+  const state = await engine.start(created.workspaceId, { type: 'schedule', mode: 'native' });
+  await Promise.allSettled([...engine.running]);
+  const w = engine.get(created.workspaceId), taskId = state.tasks.at(-1).id;
+  assert.equal(engine.view(w, 'Alice').peer.ontology, null);
+  const before = await engine.tool(w.id, taskId, 'Alice', 'peer_describe');
+  assert.deepEqual(before, { role: 'Bob', known: false, ontology: null, skills: [], sources: [] });
+  await engine.tool(w.id, taskId, 'Alice', 'peer_send', { resourceId: 'working-ontology' });
+  assert.equal(engine.view(w, 'Alice').peer.ontology, null, 'Own disclosure cannot manufacture reception of the peer definition.');
+  const bobKnows = await engine.tool(w.id, taskId, 'Bob', 'peer_describe');
+  assert.equal(bobKnows.known, true);
+  assert.ok(bobKnows.sources.every(id => w.messages.some(message => message.id === id && message.to === 'Bob')));
+  await engine.tool(w.id, taskId, 'Bob', 'peer_send', { resourceId: 'working-ontology' });
+  const after = engine.view(w, 'Alice');
+  assert(after.peer.ontology.modules.length > 0);
+  assert(!after.peer.ontology.modules.flatMap(m => m.concepts).some(c => c.id === 'bob:Finding'));
+  assert.deepEqual(after.peer.skills, [], 'Definitions do not implicitly disclose executable skills.');
 });
 
 test('a confirmed standing rule can remember summary-only sharing without granting the other fields', async t => {

@@ -1,0 +1,29 @@
+[
+  {
+    "reportId": "R1",
+    "recordType": "bob:PresentationActivity",
+    "topicIds": [],
+    "source": "synthetic:conference:program:1",
+    "version": "1"
+  },
+  {
+    "reportId": "R2",
+    "recordType": "bob:PresentationActivity",
+    "topicIds": [
+      "bob:topic-alignment",
+      "bob:topic-transparency"
+    ],
+    "source": "synthetic:conference:program:1",
+    "version": "1"
+  },
+  {
+    "reportId": "R3",
+    "recordType": "bob:PresentationActivity",
+    "topicIds": [
+      "bob:topic-control",
+      "bob:topic-transparency"
+    ],
+    "source": "synthetic:conference:program:1",
+    "version": "1"
+  }
+]

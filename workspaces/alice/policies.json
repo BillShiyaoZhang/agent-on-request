@@ -1,0 +1,35 @@
+[
+  {
+    "key": "public-materials",
+    "effect": "allow",
+    "actions": [
+      "peer.send"
+    ],
+    "resourceClass": "public",
+    "recipients": [
+      "Bob"
+    ],
+    "purposes": [
+      "academic_coordination"
+    ]
+  },
+  {
+    "key": "coordination",
+    "effect": "allow",
+    "actions": [
+      "peer.send"
+    ],
+    "resources": [
+      "availability",
+      "report-interests",
+      "working-ontology",
+      "capabilities"
+    ],
+    "recipients": [
+      "Bob"
+    ],
+    "purposes": [
+      "academic_coordination"
+    ]
+  }
+]

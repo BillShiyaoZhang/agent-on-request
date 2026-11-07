@@ -541,6 +541,26 @@ def create_service():
         value = await payload(request)
         return research_knowledge.record(value.get("workspaceId"), value.get("nodes"), value.get("edges"))
 
+    @app.get("/api/research/workspaces/{workspace_id}/profile")
+    def research_workspace_profile(workspace_id: str):
+        return research_knowledge.workspace(workspace_id).profile()
+
+    @app.put("/api/research/workspaces/{workspace_id}/profile")
+    async def seed_research_workspace(workspace_id: str, request: Request):
+        value = await payload(request)
+        # Audience creation always clones the supplied immutable seed. Existing
+        # workspaces may resume that exact seed, but cannot silently be reset.
+        return research_knowledge.workspace(workspace_id).seed(value.get("profile"), seed_only=True)
+
+    @app.post("/api/research/workspaces/{workspace_id}/knowledge")
+    async def record_workspace_research(workspace_id: str, request: Request):
+        value = await payload(request)
+        return research_knowledge.workspace(workspace_id).record(value.get("workspaceId"), value.get("nodes"), value.get("edges"))
+
+    @app.post("/api/research/workspaces/{workspace_id}/projections")
+    async def research_workspace_projection(workspace_id: str, request: Request):
+        return research_knowledge.workspace(workspace_id).project((await payload(request)).get("event"))
+
     @app.get("/api/demo/health")
     def health():
         memory.store.run_read("RETURN 1 AS ready")

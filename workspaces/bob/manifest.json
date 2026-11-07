@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "role": "Bob",
+  "version": "2.0.2",
+  "name": "Bob",
+  "field": "人机交互",
+  "description": "A researcher who links user needs, interaction designs, observations and findings to supported design decisions.",
+  "synthetic": true,
+  "profile": {
+    "ontology": "ontology.json",
+    "knowledge": "knowledge.json",
+    "calendar": "calendar.json",
+    "materials": "materials.json",
+    "interests": "interests.json",
+    "reportAnnotations": "report-annotations.json",
+    "skills": "skills.json",
+    "policyTemplates": "policies.json"
+  },
+  "files": {
+    "calendar.json": {
+      "sha256": "6d5c266042e95db1351f75d97eff5eb7ea5b176c76782c22e6a9c7fd16e726e0",
+      "description": "Own complete starting calendar."
+    },
+    "interests.json": {
+      "sha256": "f6f1c75fcf5577b53807382d0327e4a4287a9e66d2ea07e347b0d80508cfc7a6",
+      "description": "Own research-interest references."
+    },
+    "knowledge.json": {
+      "sha256": "59d45944e42e4d3b36003725e9a887e583ef77abf27bf6c0e29926acd4fc628f",
+      "description": "Private, source-backed personal research knowledge."
+    },
+    "materials.json": {
+      "sha256": "e1d4b35855fe1754ffc99622a55b91c38c6cd0c248599f6d22d853cd6a0f6486",
+      "description": "Own versioned materials and initializer-certified public introductions."
+    },
+    "ontology.json": {
+      "sha256": "65fe40f1c06f9ea40e1de06b94aa6b9f10fc107dc1c3d0e3a552973ce19b71b1",
+      "description": "Complete independently installed application ontology, including its local personal base."
+    },
+    "policies.json": {
+      "sha256": "d5c4016a694ac912634ec007e70e7e104d46a6a7bd330f9c2c12c23ee7163406",
+      "description": "Trusted initializer rule templates; a new experience binds owner/project. No decisions, grants or uses are carried over."
+    },
+    "README.md": {
+      "sha256": "087b57a487ef34099241244699633d1a08de9b9432a9cc08d6c8b3195a886062",
+      "description": "Audience-readable inventory and initialization boundary."
+    },
+    "report-annotations.json": {
+      "sha256": "007f8cdbe86eb3009d6eca537d36e37f7f78ddd01c4514009e20c12f7f122d35",
+      "description": "Own interpretation of the public reports; no collaborator annotations."
+    },
+    "skills/authorization-memory/SKILL.md": {
+      "sha256": "ec01722f742f1e2cd2a1089c35e8d0fef1090db64133da019f01ff401ab93731",
+      "description": "Read-only installed Bob skill: Retrieve and request authorization."
+    },
+    "skills/coordinate-calendar/SKILL.md": {
+      "sha256": "885dfb281a3a122454cd68ce41d4d20d414eae6de02cb0730612a4831c21ba82",
+      "description": "Read-only installed Bob skill: Coordinate academic calendars."
+    },
+    "skills/cross-domain-brief/SKILL.md": {
+      "sha256": "bc301c8a5c082e97073444a87bf98d2b227305b93e6da263b41b960cf521e80d",
+      "description": "Read-only installed Bob skill: Prepare cross-domain collaboration briefs."
+    },
+    "skills/organize-user-study/SKILL.md": {
+      "sha256": "11a0e42548b0406e6c769477a9e9173ac12e9e49687a7446e37f6383333474ba",
+      "description": "Read-only installed Bob skill: Organize user-study evidence."
+    },
+    "skills/plan-conference/SKILL.md": {
+      "sha256": "723c13e602c7ea91426c9837068096b3646f6cf1f3a08526d50920cc412b0eb6",
+      "description": "Read-only installed Bob skill: Plan conference attendance."
+    },
+    "skills/prepare-discussion/SKILL.md": {
+      "sha256": "99fee02da8cce851269fd091e37a8664dc6426d54dc6a100b585eddc02863315",
+      "description": "Read-only installed Bob skill: Prepare a research discussion."
+    },
+    "skills/reserve-resource/SKILL.md": {
+      "sha256": "f12b7a8b251690406d387e52f75ce954f41a5d998f6369c446119021cd1f6580",
+      "description": "Read-only installed Bob skill: Coordinate rooms and resources."
+    },
+    "skills/review-interaction/SKILL.md": {
+      "sha256": "4c269686c24e25721073aec15d987db2004a2e5ce06b96a34eff839db737c900",
+      "description": "Read-only installed Bob skill: Review interaction alternatives."
+    },
+    "skills/share-materials/SKILL.md": {
+      "sha256": "11734ce13660b04fed916c0ed417b2a634d4208f3d69e6eb43f9ea0c762cabcf",
+      "description": "Read-only installed Bob skill: Share selected research materials."
+    },
+    "skills/synthesize-findings/SKILL.md": {
+      "sha256": "9a4578d6b1b7d94511efa41ab059b693f9361c46ce6c11b6fa09775edc1b88d0",
+      "description": "Read-only installed Bob skill: Synthesize scoped research findings."
+    },
+    "skills.json": {
+      "sha256": "7ad02feb35be4ba222f9236ccb03bf69b50c6d295e676c70b5d58bc95329ff9e",
+      "description": "Own executable skill contracts and local document paths."
+    }
+  },
+  "hash": "57303350e9391d8407bdb821cb23b78669e33397228c3df9220ea4a0771e03ad"
+}

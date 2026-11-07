@@ -1,0 +1,36 @@
+[
+  {
+    "id": "bob:public-intro",
+    "version": "1",
+    "label": "Bob public research introduction",
+    "fields": {
+      "summary": "Bob studies human-AI interaction, user control and understandable agent collaboration."
+    },
+    "visibility": "public",
+    "sourceIds": [
+      "bob:project",
+      "bob:topic-control"
+    ],
+    "source": "synthetic:bob:research-fixture:2.0.0",
+    "ownerConfirmedVisibility": true
+  },
+  {
+    "id": "bob:research-brief",
+    "version": "1",
+    "label": "Bob HCI discussion brief",
+    "fields": {
+      "summary": "We investigate how people inspect and direct cooperation between assistants.",
+      "method": "Separate proposed content, owner decisions and actual reception in the interface.",
+      "results": "Fictional study observations motivate visible disclosure boundaries; no empirical claim is made.",
+      "note": "Private study notes remain local unless their exact version is approved for disclosure."
+    },
+    "visibility": "private",
+    "sourceIds": [
+      "bob:paper-version",
+      "bob:finding",
+      "bob:observation"
+    ],
+    "source": "synthetic:bob:research-fixture:2.0.0",
+    "ownerConfirmedVisibility": true
+  }
+]

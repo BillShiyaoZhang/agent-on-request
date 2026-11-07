@@ -78,7 +78,8 @@ for (const knownRun of [true, false]) test(`restart reconciles ${knownRun ? 'the
   const engine = await f.open(nativeClient), w = engine.get(f.created.workspaceId);
   assert.equal(events.length, 1);
   assert.equal(events[0].kind, 'reconcile');
-  assert.deepEqual(events[0].args, { role: 'Alice', runId: f.record.runId, requestId: f.record.requestId, input: f.record.input, instructions: f.record.instructions });
+  assert.deepEqual(events[0].args, { role: 'Alice', workspaceId: w.id, sessionId: f.record.sessionId,
+    runId: f.record.runId, requestId: f.record.requestId, input: f.record.input, instructions: f.record.instructions });
   assert.equal(engine.task(w, f.taskId).status, 'paused');
   assert.equal(engine.task(w, f.taskId).nativeRuns.Alice.status, 'settled');
   assert.equal(engine.blockedRoles.has('Alice'), false);

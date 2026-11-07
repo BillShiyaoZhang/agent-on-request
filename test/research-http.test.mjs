@@ -21,10 +21,16 @@ test('research HTTP separates owner authority, operator access, peer knowledge a
   const catalog = await call('/api/research/catalog');
   assert.equal(catalog.status, 200);
   assert.deepEqual(catalog.data.tasks, ['schedule', 'select_presentation', 'prepare_discussion']);
-  assert.ok(catalog.data.profiles.Alice.ontology.modules.some(m => m.id === 'alice:semantics'));
-  assert.ok(catalog.data.profiles.Bob.ontology.modules.some(m => m.id === 'bob:study'));
+  assert.equal(catalog.data.profiles.Alice.ontology.version, '2.0.0');
+  assert.equal(catalog.data.profiles.Bob.skillCount, 10);
+  assert.equal(catalog.data.profiles.Alice.ontology.modules, undefined);
+  assert.equal(catalog.data.profiles.Bob.ontology.modules, undefined);
+  assert.ok(!JSON.stringify(catalog.data).includes('bob:Finding'));
   const created = await call('/api/research/workspaces', null, {});
   assert.equal(created.status, 201);
+  assert.equal(created.data.state.peer.ontology, null);
+  assert.deepEqual(created.data.state.peer.skills, []);
+  assert.ok(created.data.state.profile.ontology.modules.some(m => m.id === 'alice:semantics'));
   const id = created.data.workspaceId, alice = created.data.token, root = `/api/research/workspaces/${id}`;
   assert.equal((await call(root)).status, 401);
   const admin = (await call('/api/admin/login', null, { pin: 'research-http-test-pin' })).data.token;

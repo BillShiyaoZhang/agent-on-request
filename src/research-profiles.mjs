@@ -1,91 +1,89 @@
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync, realpathSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { hashPayload } from './runtime-helpers.mjs';
 import { AppError } from './errors.mjs';
 
 export const RESEARCH_ROLES = Object.freeze(['Alice', 'Bob']);
 export const RESEARCH_TASK_TYPES = Object.freeze(['schedule', 'select_presentation', 'prepare_discussion']);
 const clone = value => structuredClone(value);
-const readSource = name => JSON.parse(readFileSync(new URL(`../profiles/research/${name}.json`, import.meta.url), 'utf8'));
-const baseline = readSource('baseline');
-const sources = { Alice: readSource('alice'), Bob: readSource('bob') };
-const conference = readSource('conference');
-const mappings = readSource('mappings');
+const repository = fileURLToPath(new URL('../', import.meta.url));
+const sha256 = value => createHash('sha256').update(value).digest('hex');
+const profileKeys = ['ontology', 'knowledge', 'calendar', 'materials', 'interests', 'reportAnnotations', 'skills', 'policyTemplates'];
 
 function requireRole(role) {
   if (!RESEARCH_ROLES.includes(role)) throw new AppError('RESEARCH_ROLE', 'Choose Alice or Bob.', 422);
   return role.toLowerCase();
 }
-const definitions = [
-  { id: 'coordinate-calendar', label: 'Coordinate academic calendars', description: 'Find a mutually offered interval using only scoped availability and actual peer receipts.', modules: ['time'], inputTypes: ['TimeInterval'], outputTypes: ['AttendancePlan'], tools: ['knowledge.search', 'authorization.check', 'peer.request', 'peer.send', 'task.status'], sideEffects: ['disclose-availability'] },
-  { id: 'plan-conference', label: 'Plan conference attendance', description: 'Use research questions, topic meanings and individually identified presentations to plan learning.', modules: ['research'], inputTypes: ['ResearchQuestion', 'Conference'], outputTypes: ['AttendancePlan'], tools: ['knowledge.search', 'ontology.describe', 'alignment.propose', 'alignment.accept', 'peer.send', 'task.status'], sideEffects: ['disclose-working-ontology', 'disclose-report-selection'] },
-  { id: 'prepare-discussion', label: 'Prepare a research discussion', description: 'Combine independently understood research questions and actually received materials into a sourced agenda.', modules: ['collaboration'], inputTypes: ['ResearchQuestion', 'DocumentVersion'], outputTypes: ['DiscussionPlan', 'AgendaItem'], tools: ['knowledge.search', 'artifact.prepare', 'artifact.revise', 'peer.request', 'task.checkpoint', 'task.status'], sideEffects: ['write-local-draft'] },
-  { id: 'share-materials', label: 'Share selected research materials', description: 'Prepare an exact versioned projection, obtain current permission and send only approved fields.', modules: ['materials'], inputTypes: ['DocumentVersion'], outputTypes: ['SelectedExcerpt'], tools: ['artifact.prepare', 'authorization.check', 'authorization.request', 'peer.send', 'task.checkpoint', 'task.status'], sideEffects: ['disclose-material'] },
-  { id: 'authorization-memory', label: 'Retrieve and request authorization', description: 'Find relevant long-term rules and task grants, propose an explicit standing rule for owner confirmation, then verify current authority before an external effect.', modules: ['work'], inputTypes: ['Task'], outputTypes: ['Decision'], tools: ['knowledge.search', 'authorization.list', 'authorization.check', 'authorization.request', 'authorization.propose_policy', 'task.checkpoint'], sideEffects: ['request-owner-decision', 'propose-standing-policy'] },
-  { id: 'reserve-resource', label: 'Coordinate rooms and resources', description: 'Match requirements to rooms, prepare an exact booking and execute only with independently checked permission.', modules: ['collaboration'], inputTypes: ['VenueRequirement'], outputTypes: ['ReservationProposal', 'ConfirmedReservation'], tools: ['resource.search', 'artifact.prepare', 'authorization.check', 'authorization.request', 'reservation.submit', 'task.status'], sideEffects: ['reserve-resource'] },
-];
-const domainSkills = {
-  Alice: [
-    { id: 'research-lineage', label: 'Maintain research and literature lineage', description: 'Connect papers, notes, methods and datasets to research questions while preserving source and version evidence.', modules: ['research', 'semantics'], inputTypes: ['ResearchQuestion', 'Paper'], outputTypes: ['ResearchNote', 'ReadingPlan'], tools: ['knowledge.search', 'artifact.prepare', 'artifact.revise'], sideEffects: ['write-local-draft'] },
-    { id: 'semantic-review', label: 'Review semantic models and mappings', description: 'Inspect researched ontology artifacts and mapping candidates; retain definitions, counterexamples and review scope.', modules: ['semantics'], inputTypes: ['OntologyArtifactVersion', 'MappingCandidate'], outputTypes: ['HumanReviewDecision', 'ResearchNote'], tools: ['knowledge.search', 'ontology.describe', 'artifact.prepare'], sideEffects: ['write-local-draft'] },
-    { id: 'compare-experiments', label: 'Compare experiments and trace claims', description: 'Trace a claim to metrics, experiment inputs and exact ontology versions; compare like-for-like configurations.', modules: ['evidence'], inputTypes: ['ResearchClaim', 'ExperimentRun'], outputTypes: ['BenchmarkReport'], tools: ['knowledge.search', 'artifact.prepare'], sideEffects: ['write-local-draft'] },
-    { id: 'research-brief', label: 'Prepare a sourced research brief', description: 'Prepare a concise account of research questions, methods, evidence and limitations from explicit source versions.', modules: ['evidence', 'materials'], inputTypes: ['ResearchProject', 'DocumentVersion'], outputTypes: ['DocumentVersion', 'SelectedExcerpt'], tools: ['knowledge.search', 'artifact.prepare', 'artifact.revise', 'authorization.check', 'authorization.request'], sideEffects: ['write-local-draft', 'request-owner-decision'] }
-  ],
-  Bob: [
-    { id: 'organize-user-study', label: 'Organize user-study evidence', description: 'Connect research questions, protocols, sessions, observations and findings without treating interpretations as observations.', modules: ['study', 'findings'], inputTypes: ['UserStudy', 'Observation'], outputTypes: ['StudyReport'], tools: ['knowledge.search', 'artifact.prepare', 'artifact.revise'], sideEffects: ['write-local-draft'] },
-    { id: 'review-interaction', label: 'Review interaction alternatives', description: 'Compare prototypes and design alternatives against user needs, use contexts and supported findings.', modules: ['interaction', 'findings'], inputTypes: ['InteractivePrototype', 'DesignAlternative'], outputTypes: ['DesignRationale', 'DesignNote'], tools: ['knowledge.search', 'artifact.prepare'], sideEffects: ['write-local-draft'] },
-    { id: 'synthesize-findings', label: 'Synthesize scoped research findings', description: 'Trace observations supporting findings and summarize design implications with context and limitations.', modules: ['findings'], inputTypes: ['Finding', 'Observation'], outputTypes: ['DesignImplication', 'StudyReport'], tools: ['knowledge.search', 'artifact.prepare', 'artifact.revise'], sideEffects: ['write-local-draft'] },
-    { id: 'cross-domain-brief', label: 'Prepare cross-domain collaboration briefs', description: 'Translate HCI research into partner-facing questions and design suggestions without equating unrelated domain terms.', modules: ['findings', 'materials'], inputTypes: ['ResearchQuestion', 'Finding'], outputTypes: ['DiscussionPlan', 'DocumentVersion'], tools: ['knowledge.search', 'ontology.describe', 'artifact.prepare', 'authorization.check', 'authorization.request'], sideEffects: ['write-local-draft', 'request-owner-decision'] }
-  ]
-};
-
-function materialize(role) {
-  const prefix = requireRole(role);
-  const source = sources[role];
-  const qualify = id => id === '*' ? id : `${prefix}:${id}`;
-  const modules = [...baseline.modules, ...source.modules].map(item => ({
-    ...clone(item), id: qualify(item.id), owner: role,
-    dependencies: item.dependencies.map(qualify),
-    concepts: item.concepts.map(term => ({ ...clone(term), id: qualify(term.id), uri: `urn:agent-on-request:research:${prefix}:ontology:${term.id}`,
-      ...(term.parent ? { parent: qualify(term.parent) } : {}),
-      properties: (term.properties ?? []).map(property => ({ ...clone(property), id: qualify(`${term.id}.${property.id}`), key: property.id,
-        definition: property.definition ?? `${property.id} of ${term.label}.` })) })),
-    relations: item.relations.map(relation => ({ ...clone(relation), id: qualify(relation.id),
-      domain: relation.domain.map(qualify), range: relation.range.map(qualify) }))
-  }));
-  const ontology = { id: `urn:agent-on-request:research:${prefix}:application-ontology`, owner: role,
-    version: source.version, basis: clone(baseline.basis), baselineVersion: baseline.version, modules };
-  ontology.hash = hashPayload(ontology);
-  const sourceRef = `synthetic:${prefix}:research-fixture:${source.version}`;
-  return {
-    role, name: source.name, field: source.field, description: source.description, synthetic: true, ontology,
-    skills: [...definitions, ...domainSkills[role]].map(skill => ({ ...clone(skill), modules: skill.modules.map(qualify),
-      inputTypes: skill.inputTypes.map(qualify), outputTypes: skill.outputTypes.map(qualify),
-      ...(domainSkills[role].includes(skill) ? { tools: [...skill.tools, 'knowledge.record'], sideEffects: [...skill.sideEffects, 'write-private-knowledge'] } : {}),
-      path: `skills/research/${definitions.includes(skill) ? 'common' : prefix}/${skill.id}/SKILL.md` })),
-    knowledge: {
-      nodes: source.knowledge.nodes.map(node => ({ ...clone(node), id: qualify(node.id), type: qualify(node.type),
-        source: sourceRef, version: '1', visibility: node.visibility ?? 'private' })),
-      edges: source.knowledge.edges.map(([from, to, relation], index) => ({ id: qualify(`edge-${index + 1}`), source: qualify(from), target: qualify(to), relation: qualify(relation), sourceRecord: sourceRef, version: '1' }))
-    },
-    calendar: clone(source.calendar),
-    materials: source.materials.map(material => ({ ...clone(material), id: qualify(material.id), source: sourceRef,
-      sourceIds: material.sourceIds.map(qualify), ownerConfirmedVisibility: true })),
-    interests: source.interests.map(qualify)
-  };
+function readJson(filename, description) {
+  try { return JSON.parse(readFileSync(filename, 'utf8')); }
+  catch { throw new AppError('RESEARCH_WORKSPACE', `Cannot load ${description}.`, 503); }
 }
 
-/** Immutable package definitions are materialized into an independent role namespace on each call. */
+/** Read exactly one role's complete, versioned seed. Neither peer seed files nor
+ * acceptance answers are required to initialize this researcher. */
+function readWorkspace(role) {
+  const key = requireRole(role), directory = path.join(repository, 'workspaces', key);
+  const manifest = readJson(path.join(directory, 'manifest.json'), `${role}'s workspace manifest`);
+  const fail = message => { throw new AppError('RESEARCH_WORKSPACE_MANIFEST', message, 503); };
+  if (manifest.schemaVersion !== 1 || manifest.role !== role || !manifest.version || !manifest.files || !manifest.profile)
+    fail(`${role}'s workspace manifest has an invalid identity or structure.`);
+  const { hash, ...body } = manifest;
+  if (hash !== hashPayload(body)) fail(`${role}'s workspace manifest fingerprint changed. Review and update the manifest.`);
+  const root = realpathSync(directory), contents = new Map();
+  for (const [relative, record] of Object.entries(manifest.files)) {
+    if (!/^[A-Za-z0-9_.\/-]+$/.test(relative) || relative.split('/').some(part => !part || part === '.' || part === '..') || path.isAbsolute(relative))
+      fail(`${role}'s workspace file reference must stay inside its own directory.`);
+    let resolved, bytes;
+    try { resolved = realpathSync(path.join(directory, relative)); bytes = readFileSync(resolved); }
+    catch { fail(`${role}'s workspace file ${relative} is missing or unreadable.`); }
+    if (!resolved.startsWith(root + path.sep)) fail(`${role}'s workspace file reference leaves its own directory.`);
+    if (typeof record?.sha256 !== 'string' || sha256(bytes) !== record.sha256)
+      fail(`${role}'s workspace file ${relative} differs from its reviewed manifest. Update the manifest after reviewing the change.`);
+    contents.set(relative, bytes.toString('utf8'));
+  }
+  const profile = { role, name: manifest.name, field: manifest.field, description: manifest.description, synthetic: manifest.synthetic === true };
+  for (const name of profileKeys) {
+    const relative = manifest.profile[name];
+    if (typeof relative !== 'string' || !contents.has(relative)) fail(`${role}'s manifest does not include its ${name} source.`);
+    try { profile[name] = JSON.parse(contents.get(relative)); } catch { fail(`${role}'s ${name} source is not valid JSON.`); }
+  }
+  if (profile.ontology?.owner !== role) fail(`${role}'s ontology belongs to a different workspace.`);
+  for (const skill of profile.skills ?? []) {
+    const prefix = `workspaces/${key}/`;
+    if (typeof skill.path !== 'string' || !skill.path.startsWith(prefix) || !contents.has(skill.path.slice(prefix.length)))
+      fail(`${role}'s skill source must be a reviewed file in this workspace.`);
+  }
+  profile.seed = { version: manifest.version, hash, manifestHash: hash, directory: `workspaces/${key}` };
+  const validation = validateResearchProfile(profile);
+  if (!validation.valid) fail(`${role}'s workspace has invalid ontology, evidence or skill references: ${validation.errors[0].message}`);
+  return { manifest, profile };
+}
+
 export function researchProfile(role) {
-  return materialize(role);
+  return clone(readWorkspace(role).profile);
+}
+
+export function researchWorkspaceManifest(role) {
+  return clone(readWorkspace(role).manifest);
+}
+
+export function researchSeedHash(role) {
+  return readWorkspace(role).manifest.hash;
 }
 
 export function researchConference() {
-  return clone(conference);
+  const conference = readJson(path.join(repository, 'demo', 'environment', 'conference.json'), 'the public conference program');
+  if ((conference.reports ?? []).some(report => report.topics && (Object.hasOwn(report.topics, 'Alice') || Object.hasOwn(report.topics, 'Bob'))))
+    throw new AppError('RESEARCH_ENVIRONMENT', 'Public conference data cannot contain personal researcher annotations.', 503);
+  return conference;
 }
 
-/** Candidates are evidence for peer review, never pre-existing accepted mappings or grants. */
+/** Test-only reference fixture. Runtime agents receive proposed correspondences
+ * exclusively through their actual task communication, not this answer file. */
 export function researchMappings() {
-  return clone(mappings);
+  return readJson(path.join(repository, 'demo', 'acceptance', 'mappings.json'), 'the acceptance-only reference mappings');
 }
 
 /** The optional profile is the version exported by the role's actual KG, rather than a second schema copy. */
@@ -166,6 +164,7 @@ export function validateResearchProfile(profile) {
   });
   const nodes = new Map();
   for (const node of profile.knowledge?.nodes ?? []) {
+    if (typeof node.id !== 'string' || !node.id.startsWith(`${profile.role.toLowerCase()}:`)) error(node.id, 'Knowledge belongs in this role namespace.');
     if (nodes.has(node.id)) error(node.id, 'Knowledge node IDs must be unique.');
     nodes.set(node.id, node);
     if (!concepts.has(node.type)) { error(node.id, 'The node type must be declared in the ontology.'); continue; }
@@ -181,6 +180,7 @@ export function validateResearchProfile(profile) {
   }
   const edgeIds = new Set();
   for (const edge of profile.knowledge?.edges ?? []) {
+    if (typeof edge.id !== 'string' || !edge.id.startsWith(`${profile.role.toLowerCase()}:`)) error(edge.id, 'Knowledge edges belong in this role namespace.');
     if (edgeIds.has(edge.id)) error(edge.id, 'Knowledge edge IDs must be unique.'); edgeIds.add(edge.id);
     const source = nodes.get(edge.source), target = nodes.get(edge.target), relation = relations.get(edge.relation);
     if (!source || !target || !relation) { error(edge.id, 'Graph endpoints and relation definitions must exist.'); continue; }
@@ -190,6 +190,7 @@ export function validateResearchProfile(profile) {
   }
   const materialIds = new Set();
   for (const material of profile.materials ?? []) {
+    if (typeof material.id !== 'string' || !material.id.startsWith(`${profile.role.toLowerCase()}:`)) error(material.id, 'Material belongs in this role namespace.');
     if (materialIds.has(material.id)) error(material.id, 'Material IDs must be unique.'); materialIds.add(material.id);
     if (!material.version || !['public', 'private'].includes(material.visibility) || typeof material.ownerConfirmedVisibility !== 'boolean'
       || material.visibility === 'public' && !material.ownerConfirmedVisibility) error(material.id, 'Materials need a version and trusted certification for public visibility.');
@@ -201,6 +202,14 @@ export function validateResearchProfile(profile) {
     if (!skill.tools?.length) error(skill.id, 'A usable skill declares required tools.');
   }
   for (const interest of profile.interests ?? []) if (!nodes.has(interest)) error(interest, 'Research interests must reference knowledge nodes.');
+  const reportIds = new Set();
+  for (const annotation of profile.reportAnnotations ?? []) {
+    if (typeof annotation.reportId !== 'string' || !annotation.reportId || reportIds.has(annotation.reportId)) error('$.reportAnnotations', 'Personal report annotations need unique report IDs.');
+    reportIds.add(annotation.reportId);
+    if (typeof annotation.recordType !== 'string' || !concepts.has(annotation.recordType)) error(annotation.reportId, 'Personal presentation record types must be declared in this role ontology.');
+    if (!Array.isArray(annotation.topicIds) || annotation.topicIds.some(id => !nodes.has(id))) error(annotation.reportId, 'Personal report annotations may reference only own research topics.');
+    if (!annotation.source || !annotation.version) error(annotation.reportId, 'Personal report annotations retain a source and version.');
+  }
   const { hash, ...definition } = profile.ontology;
   if (hash !== hashPayload(definition)) error('$.ontology.hash', 'The ontology digest does not match its actual definitions.');
   return { valid: errors.length === 0, errors };

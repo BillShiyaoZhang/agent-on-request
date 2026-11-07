@@ -1,0 +1,27 @@
+[
+  {
+    "day": "Tue",
+    "time": "10:30–11:30",
+    "status": "Busy"
+  },
+  {
+    "day": "Tue",
+    "time": "14:00–15:00",
+    "status": "Busy"
+  },
+  {
+    "day": "Wed",
+    "time": "09:00–10:00",
+    "status": "Free"
+  },
+  {
+    "day": "Wed",
+    "time": "15:00–16:00",
+    "status": "Busy"
+  },
+  {
+    "day": "Thu",
+    "time": "15:00–16:00",
+    "status": "Free"
+  }
+]

@@ -2,6 +2,8 @@
 !docker/
 !docker/hermes/
 !docker/hermes/**
-!skills/
-!skills/research/
-!skills/research/**
+!workspaces/
+!workspaces/alice/
+!workspaces/alice/**
+!workspaces/bob/
+!workspaces/bob/**

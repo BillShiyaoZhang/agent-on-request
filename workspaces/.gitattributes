@@ -1,0 +1,4 @@
+# Seed fingerprints are over file bytes and must survive Windows/Linux checkout.
+*.json text eol=lf
+*.md text eol=lf
+*.mjs text eol=lf

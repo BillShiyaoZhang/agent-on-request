@@ -7,6 +7,7 @@ import path from 'node:path';
 const base = new URL(process.env.DEMO_URL || 'http://127.0.0.1:4327');
 assert(['127.0.0.1', '[::1]', 'localhost'].includes(base.hostname));
 const mode = process.argv.includes('--native') ? 'native' : 'controlled';
+const resumePaused = process.argv.includes('--resume-paused');
 const output = path.resolve(process.env.DEMO_ARTIFACTS || `artifacts/research-acceptance-${mode}`);
 const tokens = {};
 async function api(route, body, role = 'Alice') {
@@ -21,15 +22,22 @@ const meta = await api('/api/meta'); assert.equal(meta.openControls, true, 'Use 
 const created = await api('/api/research/workspaces', {}); tokens.Alice = created.token;
 const workspace = `/api/research/workspaces/${created.workspaceId}`;
 tokens.Bob = (await api(`/api/admin/research/workspaces/${created.workspaceId}/claim/Bob`, {})).token;
-const decisions = [], results = [];
+const decisions = [], results = [], recoveries = [];
 try {
   for (const type of ['schedule', 'select_presentation', 'prepare_discussion']) {
     await api(workspace + '/tasks', { type, mode }); let lastStatus;
-    const deadline = Date.now() + (mode === 'native' ? 360_000 : 30_000);
+    const deadline = Date.now() + (mode === 'native' ? 900_000 : 30_000);
     while (true) {
       const state = await api(workspace); const task = state.tasks.at(-1);
       if (task.status !== lastStatus) { console.log(`${mode} ${type}: ${task.status}`); lastStatus = task.status; }
-      if (task.status === 'paused') throw new Error(`${type}: ${task.error}`);
+      if (task.status === 'paused') {
+        const attempts = recoveries.filter(item => item.taskId === task.id).length;
+        assert(resumePaused && mode === 'native' && attempts < 2 && Date.now() < deadline
+          && /^(HERMES_RESEARCH_FAILED|MODEL_TIMEOUT):/.test(task.error ?? ''), `${type}: ${task.error}`);
+        recoveries.push({ type, taskId: task.id, error: task.error, at: new Date().toISOString() });
+        console.log(`Resuming saved native state after ${task.error}`);
+        await api(`${workspace}/tasks/${task.id}/resume`, {}); continue;
+      }
       if (task.status === 'completed') { results.push({ type, taskId: task.id, result: task.result }); break; }
       assert(Date.now() < deadline, `${type} did not complete within its acceptance budget`);
       for (const role of ['Alice', 'Bob']) {
@@ -48,15 +56,17 @@ try {
     }
   }
   const state = await api(workspace);
+  const peerOwnerState = await api(workspace, undefined, 'Bob');
   assert.equal(results[0].result.outcome, 'common_time_found');
   assert.equal(results[1].result.report.id, 'R3');
   assert.equal(results[2].result.reservation.status, 'confirmed');
   for (const message of state.messages.filter(m => m.resourceId.includes('research-brief'))) {
     assert(!Object.hasOwn(message.payload, 'note')); assert(!Object.hasOwn(message.payload, 'results'));
   }
-  const report = { mode, workspaceId: created.workspaceId, checkedAt: new Date().toISOString(), results, decisions,
+  const report = { mode, workspaceId: created.workspaceId, checkedAt: new Date().toISOString(),
+    seeds: { Alice: state.profile.seed, Bob: peerOwnerState.profile.seed }, results, decisions,
     deliveryCount: state.messages.length, authorizationUses: state.authorizations.operations.length,
-    nativeRunCount: state.events.filter(e => e.kind === 'native_run_completed').length };
+    nativeRunCount: state.events.filter(e => e.kind === 'native_run_completed').length, recoveries };
   await mkdir(output, { recursive: true }); await writeFile(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
   console.log(`All three ${mode} scenarios passed; report saved under ${output}.`);
 } finally { await api(workspace + '/end', {}).catch(() => {}); }

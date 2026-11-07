@@ -2,6 +2,7 @@
 
 import os
 import json
+import hashlib
 from pathlib import Path
 import pwd
 import re
@@ -108,8 +109,8 @@ def configure_profile(home, minimax_key, saved_gateway_key, owner):
         config["mcp_servers"] = {}
         config.setdefault("agent", {})["max_turns"] = 24
         config["agent"]["background_review"] = {"enabled": False}
-        config.setdefault("memory", {}).update({"provider": "kg", "memory_enabled": True, "user_profile_enabled": False})
-        config.setdefault("plugins", {})["enabled"] = ["kg", "research"]
+        configure_research_memory(config)
+        config.setdefault("plugins", {})["enabled"] = ["research"]
         # Hermes can enable newly shipped built-ins that were never explicitly
         # declined. Record the complete current list to keep this exact opt-in.
         from hermes_cli.tools_config import CONFIGURABLE_TOOLSETS
@@ -122,7 +123,8 @@ def configure_profile(home, minimax_key, saved_gateway_key, owner):
         # Returning to the existing proposal-only demo is explicit and reversible.
         config.setdefault("platform_toolsets", {})["api_server"] = []
         config.setdefault("agent", {})["max_turns"] = 1
-        config.setdefault("plugins", {})["enabled"] = [name for name in config.get("plugins", {}).get("enabled", []) if name != "research"]
+        config.setdefault("plugins", {})["enabled"] = ["kg"]
+        config.setdefault("memory", {}).update({"provider": "kg", "memory_enabled": True, "user_profile_enabled": False})
         research_marker.unlink()
         changed = True
     if changed:
@@ -160,6 +162,15 @@ def configure_research_tool_search(config):
     tools["tool_search"] = {"enabled": "off", "defer": []}
 
 
+def configure_research_memory(config):
+    """Knowledge is retrieved only through the current experience's scoped tools.
+
+    The role gateway may serve many audiences. Automatic profile-level memory
+    would inject earlier audiences' state before the controller can scope it.
+    """
+    config.setdefault("memory", {}).update({"provider": "builtin", "memory_enabled": False, "user_profile_enabled": False})
+
+
 def configure_research(home, role, owner):
     source = Path("/opt/demo-research")
     plugin = home / "plugins" / "research"
@@ -179,24 +190,79 @@ def configure_research(home, role, owner):
     if destination_root.is_symlink():
         raise ValueError("Unexpected research skill directory symlink")
     destination_root.mkdir(parents=True, exist_ok=True)
-    for category in ("common", role.lower()):
-        for folder in sorted((source / "skills" / category).iterdir()):
-            if not folder.is_dir() or folder.is_symlink() or not (folder / "SKILL.md").is_file():
+    seed = research_workspace_seed(role)
+    skills = seed / "skills"
+    declared = json.loads((seed / "manifest.json").read_text(encoding="utf-8"))["files"]
+    allowed = {name.split("/")[1] for name in declared if name.startswith("skills/") and name.endswith("/SKILL.md")}
+    # Research skills are versioned seed content. A previous seed's removed skill
+    # must not survive in the gateway and become an undeclared prior.
+    for folder in research_skill_folders(destination_root):
+        if folder.name not in allowed:
+            shutil.rmtree(folder)
+    for name in sorted(allowed):
+        folder = skills / name
+        destination = destination_root / name
+        if destination.is_symlink():
+            raise ValueError("Unexpected research skill symlink")
+        if destination.exists():
+            shutil.rmtree(destination)
+        destination.mkdir()
+        for relative in declared:
+            if not relative.startswith(f"skills/{name}/"):
                 continue
-            destination = destination_root / folder.name
-            if destination.is_symlink():
-                raise ValueError("Unexpected research skill symlink")
-            # Versioned shipped workflows are read-only to agents; owner custom
-            # skills outside this research directory remain untouched.
-            shutil.copytree(folder, destination, dirs_exist_ok=True)
-            for directory, folders, files in os.walk(destination):
-                if os.geteuid() == 0:
-                    os.chown(directory, owner.pw_uid, owner.pw_gid)
-                for name in files:
-                    make_private(Path(directory) / name, owner)
+            target = destination / Path(relative).relative_to(Path("skills") / name)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(seed / relative, target)
+        for directory, folders, files in os.walk(destination):
+            if os.geteuid() == 0:
+                os.chown(directory, owner.pw_uid, owner.pw_gid)
+            for filename in files:
+                make_private(Path(directory) / filename, owner)
     if os.geteuid() == 0:
         os.chown(plugin, owner.pw_uid, owner.pw_gid)
         os.chown(destination_root, owner.pw_uid, owner.pw_gid)
+    category = destination_root / "DESCRIPTION.md"
+    category.write_text(f"# {role} research skills\n\nRead-only skills installed from this researcher's versioned workspace seed.\n", encoding="utf-8")
+    make_private(category, owner)
+
+
+def research_skill_folders(root):
+    """Hermes creates DESCRIPTION.md for a skill category on first startup."""
+    for child in root.iterdir():
+        if child.is_symlink():
+            raise ValueError("Unexpected installed research skill symlink")
+        if child.name == "DESCRIPTION.md" and child.is_file():
+            continue
+        if not child.is_dir():
+            raise ValueError("Unexpected installed research skill")
+        yield child
+
+
+def research_workspace_seed(role):
+    """The image and its read-only mount contain exactly this role's seed."""
+    seed = Path(os.environ.get("DEMO_WORKSPACE_ROOT", "/opt/demo-workspace"))
+    if not seed.is_absolute() or seed.is_symlink():
+        raise ValueError("Use a read-only role workspace seed directory")
+    manifest_path = seed / "manifest.json"
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise ValueError("The role workspace manifest is missing")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("role") != role or not (seed / "skills").is_dir() or (seed / "skills").is_symlink():
+        raise ValueError("The mounted workspace belongs to another role")
+    files = manifest.get("files")
+    if not isinstance(files, dict) or not files:
+        raise ValueError("The workspace manifest must identify its versioned files")
+    for relative, descriptor in files.items():
+        if not isinstance(relative, str) or "\\" in relative or any(part in {"", ".", ".."} for part in relative.split("/")):
+            raise ValueError("Workspace files must stay inside the role seed")
+        candidate = seed / relative
+        if not candidate.resolve().is_relative_to(seed.resolve()) or candidate.is_symlink() or not candidate.is_file():
+            raise ValueError("Workspace files must be regular role seed files")
+        if any(parent.is_symlink() for parent in candidate.parents if parent != seed.parent):
+            raise ValueError("Unexpected workspace file parent symlink")
+        if not isinstance(descriptor, dict) or hashlib.sha256(candidate.read_bytes()).hexdigest() != descriptor.get("sha256"):
+            raise ValueError("The role seed changed without updating its manifest")
+    return seed
 
 
 def configure_kg(home, role, owner, *, seed_skills):

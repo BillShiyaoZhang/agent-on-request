@@ -1,5 +1,6 @@
 ARG HERMES_IMAGE=nousresearch/hermes-agent:v0.22.7
 FROM ${HERMES_IMAGE}
+ARG DEMO_WORKSPACE_ROLE=alice
 
 # The official entrypoint seeds this template only when a profile has no config.
 COPY docker/hermes/config.yaml /opt/hermes/cli-config.yaml.example
@@ -7,7 +8,8 @@ COPY docker/hermes/healthcheck.py /opt/hermes/demo-healthcheck.py
 COPY docker/hermes/configure-profile.py /opt/hermes/configure-demo-profile.py
 COPY docker/hermes/dashboard-forward.py /opt/hermes/demo-dashboard-forward.py
 COPY docker/hermes/research-tools.py /opt/demo-research/research-tools.py
-COPY skills/research /opt/demo-research/skills
+COPY workspaces/${DEMO_WORKSPACE_ROLE}/ /opt/demo-workspace/
+RUN test "${DEMO_WORKSPACE_ROLE}" = alice -o "${DEMO_WORKSPACE_ROLE}" = bob
 COPY --from=kg_source /plugins/kg /opt/demo-kg/plugins/kg
 COPY --from=kg_source /skills/kg-memory /opt/demo-kg/skills/kg-memory
 COPY --from=kg_source /skills/kg-memory-sync /opt/demo-kg/skills/kg-memory-sync

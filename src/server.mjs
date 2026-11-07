@@ -68,7 +68,8 @@ export async function createDemoServer(options = {}) {
   catch (error) { await runtime.close(); throw error; }
   const engine = new SessionEngine({ runtime, profiles, research, conditionsStore, knowledge });
   const collaboration = new ResearchEngine({ directory: path.join(directory, 'collaboration'), persist: options.persist !== false,
-    nativeClient: options.researchNative, knowledge: options.researchKnowledge, agentTokens: options.researchAgentTokens });
+    nativeClient: options.researchNative, knowledge: options.researchKnowledge, agentTokens: options.researchAgentTokens,
+    peerTransport: options.researchPeerTransport });
   try { await collaboration.init(); } catch (error) { await engine.close(); await collaboration.close(); throw error; }
   const adminTokens = new Map();
   const loginAttempts = new Map();
@@ -304,7 +305,9 @@ export async function createDemoServer(options = {}) {
   return {
     server, engine, runtime, research, collaboration, profiles, models, conditionsStore, adminPin,
     async listen() { await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, host, resolve); }); return server.address(); },
-    close() { return shutdownPromise ??= (async () => { closing = true; clearInterval(cleanup); for (const probe of probes) probe.abort('service_closing'); await collaboration.close(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); await engine.close(); })(); }
+    close() { return shutdownPromise ??= (async () => { closing = true; clearInterval(cleanup); for (const probe of probes) probe.abort('service_closing');
+      server.closeAllConnections(); const serverClosed = new Promise(resolve => server.close(resolve));
+      await collaboration.close(); await serverClosed; await engine.close(); })(); }
   };
 }
 

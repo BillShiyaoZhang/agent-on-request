@@ -1,0 +1,553 @@
+{
+  "nodes": [
+    {
+      "id": "bob:self",
+      "type": "bob:Person",
+      "label": "Bob",
+      "properties": {
+        "displayName": "Bob"
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:organization",
+      "type": "bob:Organization",
+      "label": "Fictional Human-AI Interaction Lab",
+      "properties": {
+        "displayName": "Fictional Human-AI Interaction Lab"
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:competency",
+      "type": "bob:HumanCompetency",
+      "label": "Human-AI interaction research",
+      "properties": {
+        "description": "User studies and interaction design"
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:preference",
+      "type": "bob:Preference",
+      "label": "Research discussion preference",
+      "properties": {
+        "value": "Small discussions with concrete examples and a projector"
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:source",
+      "type": "bob:SourceRecord",
+      "label": "Bob synthetic study notebook",
+      "properties": {
+        "kind": "fixture",
+        "synthetic": true
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:project",
+      "type": "bob:ResearchProject",
+      "label": "Understandable and controllable agent collaboration",
+      "properties": {
+        "description": "Study how people inspect and direct cooperation between assistants.",
+        "state": "active"
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:question",
+      "type": "bob:ResearchQuestion",
+      "label": "How do people understand and control agent collaboration?",
+      "properties": {
+        "question": "Which interaction design helps people distinguish understanding, disclosure and actual action?"
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:topic-alignment",
+      "type": "bob:MentalModelAlignmentTopic",
+      "label": "Mental-model alignment",
+      "properties": {
+        "definition": "Agreement between a user's mental model and the system's capabilities",
+        "aliases": [
+          "alignment"
+        ]
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:topic-control",
+      "type": "bob:UserControlTopic",
+      "label": "User control",
+      "properties": {
+        "definition": "Inspection, intervention and direction of agent behavior"
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:topic-transparency",
+      "type": "bob:TransparencyTopic",
+      "label": "Interaction transparency",
+      "properties": {
+        "definition": "A person's understanding of system behavior and its basis"
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:need",
+      "type": "bob:UserNeed",
+      "label": "Know what will be shared",
+      "properties": {
+        "description": "People need to inspect the exact recipient and outgoing content before approving a private disclosure."
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:context",
+      "type": "bob:InteractionContext",
+      "label": "Two assistants preparing academic collaboration",
+      "properties": {
+        "description": "A fictional researcher coordinates with another researcher's assistant."
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:prototype",
+      "type": "bob:InteractivePrototype",
+      "label": "Collaboration review prototype v1",
+      "properties": {
+        "version": "1"
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:flow",
+      "type": "bob:InteractionFlow",
+      "label": "Inspect, narrow and approve",
+      "properties": {
+        "steps": [
+          "inspect recipient and content",
+          "remove optional private fields",
+          "approve this version",
+          "see confirmed receipt"
+        ]
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:design",
+      "type": "bob:DesignAlternative",
+      "label": "Field-level disclosure preview",
+      "properties": {
+        "description": "Show exact outgoing fields and allow the owner to narrow the request."
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:rationale",
+      "type": "bob:DesignRationale",
+      "label": "Make the boundary visible",
+      "properties": {
+        "rationale": "Expose content and recipient rather than asking for an abstract blanket approval."
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:study",
+      "type": "bob:UserStudy",
+      "label": "Synthetic disclosure-preview study",
+      "properties": {
+        "state": "fixture-recorded"
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:protocol",
+      "type": "bob:StudyProtocol",
+      "label": "Preview interpretation protocol v1",
+      "properties": {
+        "version": "1",
+        "procedure": "Use fictional task records to inspect participant interpretation; no real participant data."
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:session",
+      "type": "bob:StudySession",
+      "label": "Synthetic study session A",
+      "properties": {
+        "synthetic": true
+      },
+      "visibility": "private",
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:scenario",
+      "type": "bob:TaskScenario",
+      "label": "Narrow a private research brief",
+      "properties": {
+        "description": "Select a method summary while leaving out unpublished numerical results."
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:observation",
+      "type": "bob:Observation",
+      "label": "Synthetic preview observation",
+      "properties": {
+        "observation": "In the fictional fixture the person distinguishes approved content from received content after viewing both cards."
+      },
+      "visibility": "private",
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:finding",
+      "type": "bob:Finding",
+      "label": "Visible content and receipt states support interpretation",
+      "properties": {
+        "finding": "The synthetic observation motivates showing outgoing content and actual reception separately.",
+        "limitations": "Fictional demonstration evidence; not an empirical user-study result."
+      },
+      "visibility": "private",
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:implication",
+      "type": "bob:DesignImplication",
+      "label": "Separate preview, approval and receipt",
+      "properties": {
+        "implication": "Keep preparation, permission and actual execution visibly distinct."
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:study-report",
+      "type": "bob:StudyReport",
+      "label": "Synthetic collaboration-review report",
+      "properties": {
+        "title": "Synthetic collaboration-review report",
+        "summary": "A fictional protocol and evidence chain for the interaction design."
+      },
+      "visibility": "private",
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:paper",
+      "type": "bob:Paper",
+      "label": "Controllable assistant collaboration",
+      "properties": {
+        "title": "Controllable assistant collaboration",
+        "publicationState": "draft"
+      },
+      "visibility": "private",
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:paper-version",
+      "type": "bob:DocumentVersion",
+      "label": "HCI study draft v1",
+      "properties": {
+        "version": "1",
+        "summary": "Design rationale and scoped synthetic study findings."
+      },
+      "visibility": "private",
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:reading-plan",
+      "type": "bob:ReadingPlan",
+      "label": "Read human-control design studies",
+      "properties": {
+        "state": "planned"
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "bob:attendance-plan",
+      "type": "bob:AttendancePlan",
+      "label": "Find a shared human-AI interaction report",
+      "properties": {
+        "state": "planned"
+      },
+      "source": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    }
+  ],
+  "edges": [
+    {
+      "id": "bob:edge-1",
+      "source": "bob:self",
+      "target": "bob:organization",
+      "relation": "bob:memberOf",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-2",
+      "source": "bob:self",
+      "target": "bob:competency",
+      "relation": "bob:hasCompetency",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-3",
+      "source": "bob:self",
+      "target": "bob:preference",
+      "relation": "bob:hasPreference",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-4",
+      "source": "bob:project",
+      "target": "bob:self",
+      "relation": "bob:ownedBy",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-5",
+      "source": "bob:project",
+      "target": "bob:question",
+      "relation": "bob:addresses",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-6",
+      "source": "bob:question",
+      "target": "bob:topic-control",
+      "relation": "bob:investigatesTopic",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-7",
+      "source": "bob:question",
+      "target": "bob:topic-transparency",
+      "relation": "bob:investigatesTopic",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-8",
+      "source": "bob:question",
+      "target": "bob:need",
+      "relation": "bob:respondsToNeed",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-9",
+      "source": "bob:need",
+      "target": "bob:context",
+      "relation": "bob:situatedIn",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-10",
+      "source": "bob:flow",
+      "target": "bob:context",
+      "relation": "bob:situatedIn",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-11",
+      "source": "bob:prototype",
+      "target": "bob:flow",
+      "relation": "bob:implementsFlow",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-12",
+      "source": "bob:design",
+      "target": "bob:need",
+      "relation": "bob:respondsToNeed",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-13",
+      "source": "bob:design",
+      "target": "bob:rationale",
+      "relation": "bob:hasRationale",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-14",
+      "source": "bob:study",
+      "target": "bob:protocol",
+      "relation": "bob:followsProtocol",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-15",
+      "source": "bob:session",
+      "target": "bob:protocol",
+      "relation": "bob:followsProtocol",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-16",
+      "source": "bob:session",
+      "target": "bob:study",
+      "relation": "bob:sessionOf",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-17",
+      "source": "bob:protocol",
+      "target": "bob:scenario",
+      "relation": "bob:definesScenario",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-18",
+      "source": "bob:study",
+      "target": "bob:prototype",
+      "relation": "bob:evaluatesPrototype",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-19",
+      "source": "bob:observation",
+      "target": "bob:session",
+      "relation": "bob:observedIn",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-20",
+      "source": "bob:finding",
+      "target": "bob:observation",
+      "relation": "bob:supportedBy",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-21",
+      "source": "bob:implication",
+      "target": "bob:finding",
+      "relation": "bob:derivedFromFinding",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-22",
+      "source": "bob:implication",
+      "target": "bob:design",
+      "relation": "bob:informsDesign",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-23",
+      "source": "bob:study-report",
+      "target": "bob:study",
+      "relation": "bob:documentsStudy",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-24",
+      "source": "bob:paper-version",
+      "target": "bob:paper",
+      "relation": "bob:versionOf",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-25",
+      "source": "bob:paper",
+      "target": "bob:topic-control",
+      "relation": "bob:aboutTopic",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-26",
+      "source": "bob:observation",
+      "target": "bob:source",
+      "relation": "bob:sourcedFrom",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-27",
+      "source": "bob:reading-plan",
+      "target": "bob:question",
+      "relation": "bob:servesQuestion",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "bob:edge-28",
+      "source": "bob:attendance-plan",
+      "target": "bob:question",
+      "relation": "bob:servesQuestion",
+      "sourceRecord": "synthetic:bob:research-fixture:2.0.0",
+      "version": "1"
+    }
+  ]
+}

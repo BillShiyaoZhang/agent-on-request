@@ -1,4 +1,4 @@
-import { describeActivity, describeAgentState } from './research-conversation.js';
+import { conversationTimeline, describeActivity, describeAgentState, workspaceInventory } from './research-conversation.js';
 
 const root = document.getElementById('research-root');
 const notice = document.getElementById('research-notice');
@@ -13,6 +13,7 @@ const ui = { lang: readStorage(localStorage, 'research-language') ?? (navigator.
 const T = (zh, en) => ui.lang === 'zh' ? zh : en;
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pretty = value => esc(JSON.stringify(value, null, 2) ?? '');
+const contentVersion = value => { let hash = 2166136261; for (const char of JSON.stringify(value) ?? '') hash = Math.imul(hash ^ char.charCodeAt(0), 16777619); return (hash >>> 0).toString(36); };
 const suffix = value => String(value ?? '').split(':').at(-1);
 const statusLabel = value => ({ running: T('协作进行中', 'Working'), needs_owner: T('等待主人决定', 'Owner decision needed'),
   completed: T('已完成', 'Completed'), paused: T('已暂停', 'Paused'), partial: T('部分完成', 'Partially complete'),
@@ -58,7 +59,8 @@ function render(force = false) {
   document.getElementById('research-footer').textContent = T('全部人物、研究资料、日程与预约服务均为虚构数据。', 'All people, research materials, calendars and reservation services are fictional.');
   const focused = root.contains(document.activeElement) ? document.activeElement : null;
   if (!force && focused?.matches('select,input[type="checkbox"]')) return;
-  const focus = focused?.id ? { id: focused.id, start: focused.selectionStart, end: focused.selectionEnd } : null;
+  const focus = focused?.id ? { id: focused.id, start: focused.selectionStart, end: focused.selectionEnd }
+    : focused?.matches('summary') && focused.parentElement.dataset.detail ? { detail: focused.parentElement.dataset.detail } : null;
   const scroll = new Map([...root.querySelectorAll('[data-chat-scroll]')].map(element => [element.dataset.chatScroll,
     { element, lang: element.dataset.renderLang, top: element.scrollTop, atEnd: element.scrollHeight - element.clientHeight - element.scrollTop < 64 }]));
   captureDetails();
@@ -68,18 +70,20 @@ function render(force = false) {
   root.querySelectorAll('[data-chat-scroll]').forEach(element => {
     const previous = scroll.get(element.dataset.chatScroll);
     if (previous?.lang === ui.lang) {
-      const existing = [...previous.element.querySelectorAll(':scope > [data-activity]')];
-      const next = [...element.querySelectorAll(':scope > [data-activity]')];
-      if (existing.length && existing.every((entry, index) => entry.dataset.activity === next[index]?.dataset.activity)) {
-        next.slice(existing.length).forEach(entry => previous.element.append(entry));
-        element.replaceWith(previous.element);
-        element = previous.element;
-      }
+      const existing = new Map([...previous.element.children].filter(entry => entry.dataset.activity).map(entry => [entry.dataset.activity, entry]));
+      const next = [...element.children].map(entry => {
+        const saved = existing.get(entry.dataset.activity);
+        return saved && saved.dataset.version === entry.dataset.version ? saved : entry;
+      });
+      next.forEach((entry, index) => { if (previous.element.children[index] !== entry) previous.element.insertBefore(entry, previous.element.children[index] ?? null); });
+      while (previous.element.children.length > next.length) previous.element.lastElementChild.remove();
+      element.replaceWith(previous.element);
+      element = previous.element;
     }
     element.scrollTop = !previous || previous.atEnd ? element.scrollHeight : previous.top;
   });
   if (focus) {
-    const element = document.getElementById(focus.id);
+    const element = focus.detail ? root.querySelector(`details[data-detail="${CSS.escape(focus.detail)}"] > summary`) : document.getElementById(focus.id);
     if (element && !element.disabled) {
       element.focus({ preventScroll: true });
       if (typeof focus.start === 'number' && element.setSelectionRange) element.setSelectionRange(focus.start, focus.end);
@@ -102,7 +106,7 @@ function persona(role, active = true) {
   return `<article class="panel research-persona ${own ? '' : 'peer'}"><div class="persona-label"><h2>${role}</h2><span class="tag ${active && own ? 'good' : ''}">${active ? own ? T('你代表的主人', 'Your owner perspective') : T('合作伙伴', 'Collaborator') : T('个人研究助理', 'Personal research assistant')}</span></div>
     <strong>${knowledge ? T('知识图谱与语义技术研究者', 'Knowledge graphs & semantic technologies') : T('人机交互研究者', 'Human–computer interaction')}</strong>
     <p>${knowledge ? T('研究问题 → 语义模型 → 映射与实验 → 有证据的结论', 'Research questions → semantic models → mappings & experiments → supported claims') : T('使用情境 → 交互方案 → 用户研究 → 观察与设计启示', 'Use contexts → interaction designs → user studies → observations & implications')}</p>
-    <small>${definition?.ontology?.version ? `${T('应用本体版本', 'Application ontology')} ${esc(definition.ontology.version)} · ${definition.skills?.length ?? 0} skills` : ''}</small>
+    <small>${definition?.ontology?.version ? `${T('应用本体版本', 'Application ontology')} ${esc(definition.ontology.version)} · ${definition.skills?.length ?? definition.skillCount ?? 0} skills` : ''}</small>
     ${active && own ? `<div class="toolbar"><button class="button quiet" data-tab="knowledge">${T('检索我的知识', 'Search my knowledge')}</button><button class="button quiet" data-tab="ontology">${T('查看本体与技能', 'Inspect ontology & skills')}</button></div>` : ''}</article>`;
 }
 function workspaceView() {
@@ -114,8 +118,8 @@ function workspaceView() {
     <label class="field research-mode"><span>${T('体验方式', 'Execution mode')}</span><select id="research-mode" ${ui.busy ? 'disabled' : ''}><option value="controlled" ${ui.mode === 'controlled' ? 'selected' : ''}>${T('Guided · 可重复的离线流程', 'Guided · reproducible offline workflow')}</option><option value="native" ${ui.mode === 'native' ? 'selected' : ''} ${ui.catalog?.nativeAvailable ? '' : 'disabled'}>${T('Hermes · 原生技能与多轮工具', 'Hermes · native skills & multi-tool runs')}</option></select><small>${ui.catalog?.nativeAvailable ? T('双方使用各自独立的运行环境。', 'Each agent uses its own runtime.') : T('原生 Hermes 尚未配置，Guided 可直接体验。', 'Native Hermes is not configured; Guided is available.')}</small></label></section>
     ${ui.tab === 'collaboration' ? '' : `<div class="research-personas">${persona(ui.owner)}${persona(ui.owner === 'Alice' ? 'Bob' : 'Alice')}</div>`}
     <div class="research-workspace-line"><small>${T('当前身份空间', 'Identity workspace')} <span class="mono">${esc(ui.workspaceId)}</span></small><div class="toolbar">${ui.owner === 'Alice' ? `<a class="button" href="/research.html?workspace=${encodeURIComponent(ui.workspaceId)}&owner=Bob" target="_blank" rel="noopener">${T('打开 Bob 主人窗口', 'Open Bob’s owner window')}</a><button class="button quiet" data-action="create" ${ui.busy ? 'disabled' : ''}>${T('下一位观众 · 新建身份', 'Next visitor · new identity')}</button>` : `<span class="tag">${T('Bob 的独立授权窗口', 'Bob’s independent owner window')}</span>`}</div></div>
-    <nav class="app-tabs research-tabs" aria-label="${T('研究协作视图', 'Research views')}">${[['collaboration', T('协作任务', 'Collaboration')], ['knowledge', T('知识与证据', 'Knowledge & evidence')], ['ontology', T('本体与技能', 'Ontology & skills')], ['authorization', T('授权记忆', 'Authorization memory')]].map(([id, label]) => `<button class="tab" data-tab="${id}" ${ui.tab === id ? 'aria-current="page"' : ''}>${label}</button>`).join('')}</nav>
-    <section class="research-content">${ui.tab === 'knowledge' ? knowledgeView() : ui.tab === 'ontology' ? ontologyView() : ui.tab === 'authorization' ? authorizationView() : collaborationView(task)}</section>`;
+    <nav class="app-tabs research-tabs" aria-label="${T('研究协作视图', 'Research views')}">${[['collaboration', T('协作任务', 'Collaboration')], ['workspace', T('我的工作区', 'My workspace')], ['knowledge', T('知识与证据', 'Knowledge & evidence')], ['ontology', T('本体与技能', 'Ontology & skills')], ['authorization', T('授权记忆', 'Authorization memory')]].map(([id, label]) => `<button class="tab" data-tab="${id}" ${ui.tab === id ? 'aria-current="page"' : ''}>${label}</button>`).join('')}</nav>
+    <section class="research-content">${ui.tab === 'workspace' ? workspaceInspectionView() : ui.tab === 'knowledge' ? knowledgeView() : ui.tab === 'ontology' ? ontologyView() : ui.tab === 'authorization' ? authorizationView() : collaborationView(task)}</section>`;
 }
 function collaborationView(task) {
   const active = ui.state.tasks.some(item => ['running', 'needs_owner'].includes(item.status));
@@ -135,7 +139,7 @@ function collaborationView(task) {
 function presetCommand(type) {
   return ({ schedule: T('请和 Bob 约一次 30 分钟的学术讨论。', 'Please arrange a 30-minute academic discussion with Bob.'),
     select_presentation: T('请和 Bob 选择一场共同参加的报告。', 'Please choose a presentation to attend together with Bob.'),
-    prepare_discussion: T('请和 Bob 筹备学术讨论，准备议程、分享获准资料并预约场地。', 'Please prepare an academic discussion with Bob: draft the agenda, share approved material and reserve a venue.') })[type];
+    prepare_discussion: T('请和 Bob 筹备学术讨论。先准备一份未公开研究材料的分享方案交给我审阅，再根据实际获准交换的内容安排议程，最后把场地预约表单交给我决定是否提交。', 'Please prepare a discussion with Bob. First bring me a proposal for sharing unpublished research material, then prepare the agenda from the information actually approved and exchanged. Bring me the final venue form to decide whether to submit it.') })[type];
 }
 function endpointTitle(value) {
   if (value === 'Alice' || value === 'Bob') return `${value} agent`;
@@ -162,40 +166,62 @@ function activityTitle(entry) {
     message: T('协作消息', 'Collaboration message'), approval: T('主人授权', 'Owner authorization'), checkpoint: T('任务进度', 'Task checkpoint'),
     result: T('向主人汇报核验结果', 'Report verified result to owner'), response: T('Agent 给主人的回复', 'Agent reply to owner'), run: T('Agent 运行状态', 'Agent run status') })[entry.kind] ?? entry.name ?? entry.kind;
 }
-function technicalActivityView(entry) {
-  const direction = entry.direction ?? 'local';
-  const kind = ({ incoming: T('收到', 'Received'), outgoing: T('发出', 'Sent'), local: T('本地动作', 'Local action') })[direction] ?? direction;
-  const route = entry.from && entry.to ? `${endpointTitle(entry.from)} → ${endpointTitle(entry.to)}` : direction === 'local' ? `${entry.role} · ${T('本地执行', 'local execution')}` : endpointTitle(entry.to ?? entry.from);
-  const status = ({ started: T('开始', 'Started'), completed: T('完成', 'Completed'), submitted: T('已提交', 'Submitted'), explanatory: T('Agent 回复', 'Agent reply'),
-    owner_decision_required: T('等待主人决定', 'Waiting for owner decision'), checkpoint_saved: T('进度已保存', 'Checkpoint saved'),
-    verified_task_finished: T('结果已核验，运行结束', 'Verified result; run ended'), resumed: T('已恢复', 'Resumed') })[entry.status] ?? statusLabel(entry.status);
-  const data = entry.details;
-  return `<article class="research-chat-entry ${esc(direction)} kind-${esc(entry.kind)}" data-activity="${esc(entry.id)}"><div class="research-chat-meta"><span>${kind}</span><time datetime="${esc(entry.at)}">${esc(entry.at ? new Date(entry.at).toLocaleTimeString(ui.lang === 'zh' ? 'zh-CN' : 'en-GB', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '')}</time></div>
-    <strong class="research-chat-title">${esc(activityTitle(entry))}</strong><div class="research-chat-route">${esc(route)}${status ? ` <span class="tag">${esc(status)}</span>` : ''}</div>
-    ${entry.text ? `<p class="research-chat-text">${esc(entry.text)}</p>` : ''}
-    ${entry.redacted || entry.detailsOmitted ? `<p class="research-chat-private">${T('本地输出仅该 agent 的主人可见。', 'Local output is visible to this agent’s owner.')}</p>` : ''}
-    ${data ? details(`activity-${entry.id}`, entry.kind === 'message' ? T('实际内容与回执', 'Actual content & receipt') : entry.kind === 'tool' && entry.status === 'started' ? T('查看调用参数', 'Inspect call arguments') : T('查看实际输出', 'Inspect actual output'), `<pre>${pretty(data)}</pre>`) : ''}
-  </article>`;
+const activityTime = value => value ? new Date(value).toLocaleTimeString(ui.lang === 'zh' ? 'zh-CN' : 'en-GB', { timeZone: 'Asia/Shanghai', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+const workStatus = value => ({ running: T('进行中', 'Working'), completed: T('已完成', 'Complete'), failed: T('含错误记录', 'Contains an error'), waiting_peer: T('等待合作方', 'Waiting for peer'), needs_owner: T('等待授权', 'Awaiting approval'), paused: T('已暂停', 'Paused'), recorded: T('已记录', 'Recorded') })[value] ?? statusLabel(value);
+function elapsedText(milliseconds) {
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return '';
+  const seconds = Math.round(milliseconds / 1000);
+  if (!seconds) return T('不到 1 秒', '< 1 sec');
+  return seconds < 60 ? T(`${seconds} 秒`, `${seconds} sec`) : T(`${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`, `${Math.floor(seconds / 60)} min ${seconds % 60} sec`);
 }
-function activityView(entry) {
+function toolCallView(records) {
+  const first = records.find(entry => entry.status === 'started') ?? records[0];
+  const last = records.at(-1), completed = records.findLast(entry => entry.status !== 'started');
+  const running = !completed && last.status === 'started';
+  const status = running ? T('进行中', 'Running') : last.status === 'failed' ? T('失败', 'Failed') : T('已完成', 'Complete');
+  const readable = activityTitle(first), privateOutput = records.some(entry => entry.redacted || entry.detailsOmitted);
+  const input = records.find(entry => !entry.redacted && !entry.detailsOmitted && entry.details?.arguments !== undefined)?.details.arguments;
+  const output = records.findLast(entry => entry.status !== 'started' && !entry.redacted && !entry.detailsOmitted)?.details;
+  const duration = first.status === 'started' && completed && first.at && completed.at ? Date.parse(completed.at) - Date.parse(first.at) : null;
+  return `<div class="research-tool-call ${running ? 'is-running' : last.status === 'failed' ? 'is-failed' : ''}">${details(`tool-${first.role}-${first.callId ?? first.id}`, `<span class="research-tool-title">${esc(readable)}</span><span class="research-tool-state">${esc(status)}</span>`,
+    `<div class="research-tool-body"><div class="research-tool-identity"><code>${esc(first.name ?? T('工具', 'tool'))}</code><time datetime="${esc(first.at)}">${esc(activityTime(first.at))}</time>${duration !== null ? `<span>${esc(elapsedText(duration))}</span>` : ''}</div>
+    ${input !== undefined ? details(`tool-input-${first.id}`, T('调用参数 · JSON', 'Input · JSON'), `<pre>${pretty(input)}</pre>`) : ''}
+    ${output !== undefined ? details(`tool-output-${first.id}`, last.status === 'failed' ? T('实际错误 · JSON', 'Actual error · JSON') : T('实际输出 · JSON', 'Output · JSON'), `<pre>${pretty(output.result ?? output)}</pre>`) : ''}
+    ${privateOutput ? `<p class="research-chat-private">${T('本地调用内容仅该 agent 的主人可见。', 'Local call contents are visible only to this agent’s owner.')}</p>` : ''}
+    ${input === undefined && output === undefined && !privateOutput ? `<p class="research-chat-private">${running ? T('工具尚未返回输出。', 'The tool has not returned an output yet.') : T('这条记录未包含调用参数或输出。', 'This record does not contain input or output data.')}</p>` : ''}</div>`)}</div>`;
+}
+function stepRecords(entries) {
+  const tools = new Map();
+  entries.filter(entry => entry.kind === 'tool').forEach(entry => { const key = entry.callId ?? entry.id; if (!tools.has(key)) tools.set(key, []); tools.get(key).push(entry); });
+  const seen = new Set();
+  return entries.map(entry => {
+    if (entry.kind === 'tool') { const key = entry.callId ?? entry.id; if (seen.has(key)) return ''; seen.add(key); return toolCallView(tools.get(key)); }
+    const narrative = describeActivity(entry, { lang: ui.lang, task: ui.state.tasks.find(task => task.id === entry.taskId), conference: ui.state.conference });
+    return `<div class="research-step-record kind-${esc(entry.kind)}"><div class="research-step-record-heading"><span>${esc(narrative.title)}</span><time datetime="${esc(entry.at)}">${esc(activityTime(entry.at))}</time></div>${narrative.body ? `<p>${esc(narrative.body)}</p>` : ''}${entry.redacted || entry.detailsOmitted ? `<small>${T('本地记录的内容仅该 agent 的主人可见。', 'Local record contents are visible only to this agent’s owner.')}</small>` : ''}</div>`;
+  }).join('');
+}
+function workStepView(step) {
+  const duration = elapsedText(step.durationMs);
+  const icon = ({ running: '◌', failed: '!', completed: '✓', needs_owner: '!', waiting_peer: '↔', paused: 'Ⅱ', recorded: '·' })[step.status] ?? '·';
+  const title = `<span class="research-work-icon" aria-hidden="true">${icon}</span><span class="research-work-heading"><strong>${esc(step.title)}</strong><span class="research-work-meta"><span class="research-work-status">${esc(workStatus(step.status))}</span><span>${step.toolCallCount} ${T('次工具调用', 'tool calls')}</span>${duration ? `<span>${esc(duration)}</span>` : ''}</span></span><span class="research-work-chevron" aria-hidden="true">›</span>`;
+  return `<div class="research-work-step status-${esc(step.status)}" data-activity="${esc(step.id)}" data-version="${contentVersion([ui.lang, step])}">${details(`work-${step.id}`, title,
+    `<div class="research-work-body">${step.summary ? `<p class="research-work-summary"><span>${T('进度摘要', 'Progress summary')}</span>${esc(step.summary)}</p>` : ''}<div class="research-work-records">${stepRecords(step.entries)}</div></div>`)}</div>`;
+}
+function activityView(entry, direction = entry.direction ?? 'local') {
   const narrative = describeActivity(entry, { lang: ui.lang, task: ui.state.tasks.find(task => task.id === entry.taskId), conference: ui.state.conference });
   const route = entry.from && entry.to ? `${endpointTitle(entry.from)} → ${endpointTitle(entry.to)}` : endpointTitle(entry.to ?? entry.from);
-  const audience = entry.direction === 'outgoing' ? `${T('发给', 'To')} ${endpointTitle(entry.to)}`
-    : entry.direction === 'incoming' ? `${T('来自', 'From')} ${endpointTitle(entry.from)}` : T('进展更新', 'Progress update');
+  const audience = direction === 'outgoing' ? `${T('发给', 'To')} ${endpointTitle(entry.to ?? `owner:${entry.role}`)}`
+    : direction === 'incoming' ? `${T('来自', 'From')} ${endpointTitle(entry.from ?? `owner:${entry.role}`)}` : T('进展更新', 'Progress update');
   const awaiting = entry.kind === 'approval' && entry.status === 'pending';
-  return `<article class="research-chat-entry research-audience-message ${esc(entry.direction ?? 'local')} kind-${esc(entry.kind)}" data-activity="${esc(entry.id)}">
-    <div class="research-chat-meta"><span class="research-recipient ${awaiting ? 'requires-approval' : ''}">${esc(audience)}</span><time datetime="${esc(entry.at)}">${esc(entry.at ? new Date(entry.at).toLocaleTimeString(ui.lang === 'zh' ? 'zh-CN' : 'en-GB', { timeZone: 'Asia/Shanghai', hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '')}</time></div>
+  const decisionId = awaiting && entry.role === ui.owner ? entry.requestId ?? entry.details?.id : null;
+  return `<article class="research-chat-entry research-audience-message ${esc(direction)} kind-${esc(entry.kind)}" data-activity="${esc(entry.id)}" data-version="${contentVersion([ui.lang, entry, direction, narrative])}">
+    <div class="research-chat-meta"><span class="research-recipient ${awaiting ? 'requires-approval' : ''}">${esc(audience)}</span><time datetime="${esc(entry.at)}">${esc(activityTime(entry.at))}</time></div>
     <strong class="research-chat-title">${esc(narrative.title)}</strong>
     ${narrative.body ? `<p class="research-chat-text">${esc(narrative.body)}</p>` : ''}
     ${entry.kind === 'response' ? `<small class="research-chat-private">${T('Agent 的说明；操作是否完成以回执核验为准。', 'Agent explanation; receipts establish whether an action completed.')}</small>` : ''}
-    ${entry.details || entry.name ? details(`activity-${entry.id}`, T('查看记录与技术细节', 'Inspect record & technical details'), `<p class="research-chat-route">${esc(route)}</p><pre>${pretty({ name: entry.name, status: entry.status, ...(entry.text ? { originalText: entry.text } : {}), ...(entry.details === undefined ? {} : { details: entry.details }) })}</pre>`) : ''}
+    ${decisionId ? `<a class="research-inline-decision" href="#approval-${esc(decisionId)}">${T('查看内容并决定', 'Review and decide')} ↓</a>` : ''}
+    ${entry.details || entry.name ? details(`activity-${entry.id}`, T('查看记录', 'View record'), `<p class="research-chat-route">${esc(route)}</p><pre>${pretty({ name: entry.name, status: entry.status, ...(!entry.redacted && entry.text ? { originalText: entry.text } : {}), ...(entry.redacted || entry.detailsOmitted || entry.details === undefined ? {} : { details: entry.details }) })}</pre>`) : ''}
   </article>`;
-}
-function executionTrace(entries, role, task) {
-  const technical = entries.filter(entry => entry.kind === 'tool' || entry.kind === 'run' || (entry.kind === 'checkpoint' && entry.name === 'native_run'));
-  if (!technical.length) return '';
-  const calls = technical.filter(entry => entry.kind === 'tool' && (entry.status === 'started' || !entry.callId)).length;
-  return `<div class="research-execution-trace">${details(`execution-${role}-${task?.id ?? 'empty'}`, `${T('执行细节', 'Execution details')} <span>${calls} ${T('次工具调用', 'tool calls')}</span>`, `<div class="research-trace-records">${technical.map(technicalActivityView).join('')}</div>`)}</div>`;
 }
 function commandComposer(active) {
   if (ui.owner !== 'Alice') return `<div class="research-chat-composer-note">${T('共同任务由 Alice 的主人发起。你可以在这里观察双方的协作。', 'Alice’s owner initiates shared tasks. You can observe both agents here.')}</div>`;
@@ -204,13 +230,12 @@ function commandComposer(active) {
 function agentConversation(role, task, active) {
   const entries = (ui.state.activity ?? []).filter(entry => entry.role === role && (!task || entry.taskId === task.id)).slice().sort((a, b) => a.sequence - b.sequence);
   const own = ui.owner === role;
-  const visible = entries.filter(entry => ['command', 'message', 'approval', 'result', 'response'].includes(entry.kind) || (entry.kind === 'checkpoint' && entry.name !== 'native_run'));
+  const timeline = conversationTimeline(entries, { role, task, lang: ui.lang, conference: ui.state.conference });
   const progress = describeAgentState({ role, task, entries: (ui.state.activity ?? []).filter(entry => entry.taskId === task?.id), owner: ui.owner, requests: ui.state.authorizations?.requests ?? [], policyCandidates: ui.state.policyCandidates ?? [], lang: ui.lang });
   const decisionId = own && progress.requestIds.length ? `approval-${progress.requestIds[0]}` : null;
   return `<section class="panel research-chat-panel ${role === 'Bob' ? 'bob' : 'alice'}" aria-labelledby="agent-${role}-heading"><header class="research-chat-header"><div class="research-agent-avatar" aria-hidden="true">${role === 'Alice' ? 'A' : 'B'}</div><div><h3 id="agent-${role}-heading">${role} <span>agent ${role === 'Alice' ? 'A' : 'B'}</span></h3><small>${role === 'Alice' ? T('知识图谱与语义技术', 'Knowledge graphs & semantics') : T('人机交互', 'Human–computer interaction')}</small></div><span class="tag ${own ? 'good' : ''}">${own ? T('你的助理', 'Your agent') : T('合作 agent', 'Peer agent')}</span></header>
     <div class="research-agent-now tone-${esc(progress.tone)}" role="status" aria-live="polite" aria-atomic="true"><div class="research-agent-now-label"><span class="research-state-dot" aria-hidden="true"></span><strong>${esc(progress.label)}</strong>${progress.tone === 'approval' ? `<span class="research-human-badge">${T('需要人类授权', 'Human authorization')}</span>` : ''}</div><p>${esc(progress.body)}</p>${decisionId ? `<a class="button research-decision-jump" href="#${esc(decisionId)}">${T('查看内容并决定', 'Review and decide')} ↓</a>` : ''}</div>
-    <div class="research-chat-log" data-chat-scroll="${role}:${esc(task?.id ?? 'empty')}" data-render-lang="${ui.lang}" role="log" aria-label="${role} ${T('协作对话', 'conversation')}" aria-live="polite" aria-relevant="additions" tabindex="0">${visible.length ? visible.map(activityView).join('') : `<div class="research-chat-empty"><span aria-hidden="true">${role === 'Alice' ? 'A' : 'B'}</span><p>${task ? T('正在开展本地工作；收到或发出协作消息后会显示在这里。', 'Working locally. Collaboration messages will appear here when exchanged.') : role === 'Alice' ? T('点击开始，或在下方输入指令。主人的命令会首先出现在这里。', 'Choose Start or write an instruction below. The owner’s command appears here first.') : T('Alice 发起协作后，这里展示 Bob 收到的消息和回复。', 'When Alice starts collaborating, Bob’s received messages and replies appear here.')}</p></div>`}</div>
-    ${executionTrace(entries, role, task)}
+    <div class="research-chat-log" data-chat-scroll="${role}:${esc(task?.id ?? 'empty')}" data-render-lang="${ui.lang}" role="log" aria-label="${role} ${T('协作对话', 'conversation')}" aria-live="polite" aria-relevant="additions" tabindex="0">${timeline.length ? timeline.map(item => item.kind === 'step' ? workStepView(item) : activityView(item.entry, item.direction)).join('') : `<div class="research-chat-empty"><span aria-hidden="true">${role === 'Alice' ? 'A' : 'B'}</span><p>${task ? T('正在开展本地工作；实际进度和协作消息会按顺序显示在这里。', 'Working locally. Actual progress and collaboration messages will appear here in order.') : role === 'Alice' ? T('点击开始，或在下方输入指令。主人的命令会首先出现在这里。', 'Choose Start or write an instruction below. The owner’s command appears here first.') : T('Alice 发起协作后，这里展示 Bob 收到的消息和回复。', 'When Alice starts collaborating, Bob’s received messages and replies appear here.')}</p></div>`}</div>
     ${own ? `<div class="research-chat-decisions">${approvalViews(task?.id)}${policyCandidateViews(task?.id)}</div>` : ''}
     ${role === 'Alice' ? commandComposer(active) : `<div class="research-chat-composer-note">${T('这里只展示实际收到的内容；本地私有资料由各自主人的窗口查看。', 'Only actually received content appears here. Each owner can inspect their local private materials in their own window.')}</div>`}
   </section>`;
@@ -254,9 +279,8 @@ function taskView(task) {
     ${task.error ? `<p class="notice error">${esc(task.error)}</p>` : ''}${resultView(task)}
     ${task.status === 'paused' || task.status === 'partial' ? `<div class="research-actions"><button class="button primary" data-action="resume" data-id="${esc(task.id)}" ${ui.busy ? 'disabled' : ''}>${T('核验状态并恢复', 'Verify state and resume')}</button></div>` : ''}
     ${task.mappings?.length ? `<h3 style="margin-top:16px">${T('本任务接受的对应关系', 'Accepted task mappings')}</h3><div class="research-data-list">${task.mappings.map(mapping => `<article class="research-record"><div class="toolbar"><strong>${esc(mapping.source ?? mapping.id)} → ${esc(mapping.target ?? '')}</strong><span class="tag">${esc(mapping.relation)}</span></div><p>${esc(mapping.reason ?? mapping.condition ?? mapping.definition ?? '')}</p>${details(`mapping-${mapping.id}`, T('对应依据与适用范围', 'Mapping evidence and scope'), `<pre>${pretty(mapping)}</pre>`)}</article>`).join('')}</div>` : ''}
-    ${task.proposals?.some(proposal => proposal.status === 'rejected') ? `<p class="notice">${T('双方拒绝了词面相似但定义不一致的候选对应。', 'The peers rejected a candidate whose similar label concealed different definitions.')}</p>` : ''}
-    ${task.mappingReview?.some(mapping => !mapping.valid) ? `<section class="notice"><strong>${T('同名概念为什么没有等价对齐？', 'Why are these identically named concepts not equivalent?')}</strong>${task.mappingReview.filter(mapping => !mapping.valid).map(mapping => `<p><code>${esc(mapping.source)}</code> ↔ <code>${esc(mapping.target)}</code></p><p>${esc(mapping.reason)}</p>${details(`unmatched-${mapping.id}`, T('查看双方实际定义', 'Inspect both actual definitions'), `<pre>${pretty({ source: mapping.sourceDefinition, target: mapping.targetDefinition, condition: mapping.condition })}</pre>`)}`).join('')}</section>` : ''}
-    ${details(`task-${task.id}`, T('查看本体工作子集与协作进度', 'Inspect working ontology and progress'), `<div class="research-evidence">${Object.entries(task.ontology ?? {}).map(([role, ontology]) => `<article class="research-record"><strong>${esc(role)}</strong><p>${(ontology.modules ?? []).map(module => `<span class="tag">${esc(module.name ?? module.id)}</span>`).join(' ')}</p><small class="mono">${esc(ontology.hash)}</small></article>`).join('')}</div><pre>${pretty({ checkpoints: task.checkpoints, result: task.result, mode: task.mode })}</pre>`)}
+    ${task.proposals?.some(proposal => proposal.status === 'rejected') ? `<section class="notice"><strong>${T('实际发生的对应审阅', 'Recorded correspondence reviews')}</strong>${task.proposals.filter(proposal => proposal.status === 'rejected').map(proposal => `<p>${esc(proposal.reviewedBy ?? T('对方', 'The peer'))} ${T('已拒绝这组对应提议。', 'declined this proposed set of correspondences.')}</p>${details(`rejected-proposal-${proposal.id}`, T('查看提议及双方交换的定义', 'Inspect the proposal and exchanged definitions'), `<div class="research-data-list">${(proposal.mappings ?? []).map(mapping => `<article class="research-record"><strong>${esc(mapping.source)} → ${esc(mapping.target)}</strong><p>${esc(mapping.sourceDefinition ?? '')}</p><p>${esc(mapping.targetDefinition ?? '')}</p><small>${esc(mapping.relation)} · ${esc(mapping.condition ?? '')}</small></article>`).join('')}</div><pre>${pretty(proposal)}</pre>`)}`).join('')}</section>` : ''}
+    ${details(`task-${task.id}`, T('查看本体工作子集与协作进度', 'Inspect working ontology and progress'), `<div class="research-evidence">${Object.entries(task.ontology ?? {}).map(([role, ontology]) => `<article class="research-record"><strong>${esc(role)}</strong>${ontology ? `<p>${(ontology.modules ?? []).map(module => `<span class="tag">${esc(module.name ?? module.id)}</span>`).join(' ')}</p><small class="mono">${esc(ontology.hash)}</small>` : `<p>${T('尚未收到该方的定义。', 'Definitions from this agent have not been received yet.')}</p>`}</article>`).join('')}</div><pre>${pretty({ checkpoints: task.checkpoints, result: task.result, mode: task.mode })}</pre>`)}
   </section>`;
 }
 function resultView(task) {
@@ -290,6 +314,33 @@ function policyCandidateViews(taskId) {
   return candidates.map(candidate => `<section class="panel research-approval"><div class="research-status-line"><h2 id="approval-${esc(candidate.id)}" tabindex="-1">${T('确认助理为你整理的长期规则', 'Review the standing rule proposed by your assistant')}</h2><span class="tag warn">${T('尚未生效', 'Not effective yet')}</span></div><p class="lead">${T('助理把你的要求整理成了下面的明确范围。确认后才写入授权账本；提议本身没有授予任何权限。', 'Your assistant translated the request into this explicit scope. Confirmation writes it to your authorization ledger; the proposal itself grants no authority.')}</p>
     ${candidate.policy.label ? `<strong>${esc(candidate.policy.label)}</strong>` : ''}<dl class="definition-list"><dt>${T('规则', 'Decision')}</dt><dd>${esc({ allow: T('允许', 'Allow'), ask: T('每次询问', 'Ask each time'), deny: T('禁止', 'Deny') }[candidate.policy.effect] ?? candidate.policy.effect)}</dd><dt>${T('动作', 'Actions')}</dt><dd>${esc(candidate.policy.actions.map(actionTitle).join(', '))}</dd><dt>${T('资源范围', 'Resources')}</dt><dd>${esc((candidate.policy.resources?.length ? candidate.policy.resources : [candidate.policy.resourceClass]).filter(Boolean).map(resourceTitle).join(', '))}</dd><dt>${T('接收方', 'Recipients')}</dt><dd>${esc(candidate.policy.recipients.join(', '))}</dd><dt>${T('用途', 'Purposes')}</dt><dd>${esc(candidate.policy.purposes.map(purposeTitle).join(', '))}</dd><dt>${T('期限', 'Validity')}</dt><dd>${T('当前协作项目内，直到撤销', 'Within this collaboration project, until revoked')}</dd></dl>
     ${details(`policy-candidate-${candidate.id}`, T('完整规则与内容指纹', 'Exact rule and content fingerprint'), `<pre>${pretty(candidate.policy)}</pre><small class="mono">${esc(candidate.hash)}</small>`)}<div class="toolbar"><button class="button primary" data-action="allow-policy" data-id="${esc(candidate.id)}" ${ui.busy ? 'disabled' : ''}>${T('确认并记住这条规则', 'Confirm and remember rule')}</button><button class="button" data-action="deny-policy" data-id="${esc(candidate.id)}" ${ui.busy ? 'disabled' : ''}>${T('不采用这条规则', 'Do not adopt rule')}</button></div></section>`).join('');
+}
+function workspaceInspectionView() {
+  const inventory = workspaceInventory(ui.state, { lang: ui.lang });
+  if (!inventory) return `<section class="panel"><h2>${T('我的工作区', 'My workspace')}</h2><p class="lead">${T('当前身份尚未保存完整的工作区清单。新建一位观众的体验会从各自的初始文件创建独立空间。', 'This identity has no complete workspace inventory. A new visitor experience creates independent spaces from each researcher’s initial files.')}</p></section>`;
+  const { profile } = ui.state;
+  const primary = inventory.files.filter(file => !file.path.startsWith('skills/'));
+  const skillFiles = inventory.files.filter(file => file.path.startsWith('skills/'));
+  const fileRows = files => `<div class="research-workspace-files">${files.map(file => `<article class="research-workspace-file"><div><strong>${esc(file.label)}</strong><code>${esc(file.path)}</code></div><small class="mono" title="${esc(file.hash)}">${esc(file.hash.slice(0, 12))}${file.hash ? '…' : ''}</small></article>`).join('')}</div>`;
+  const runtimeFiles = [
+    ['profile.json', T('本方当前知识和定义', 'Current own knowledge and definitions')],
+    ['inbox.json / outbox.json', T('实际收到和发出的消息', 'Actually received and sent messages')],
+    ['artifacts.json', T('本地草稿与工作产物', 'Local drafts and artifacts')],
+    ['tasks.json', T('任务进度与本方 checkpoint', 'Task progress and own checkpoints')],
+    ['authorization.sqlite', T('本方独立授权账本', 'Own authoritative authorization ledger')],
+    ['seed/', T('本次体验使用的初始文件副本', 'Initial files copied for this experience')],
+  ];
+  const topics = new Map((profile.knowledge?.nodes ?? []).map(node => [node.id, node.label]));
+  const annotationRows = (profile.reportAnnotations ?? []).map(annotation => {
+    const report = ui.state.conference?.reports?.find(item => item.id === annotation.reportId);
+    return `<article class="research-record"><strong>${esc(annotation.reportId)} · ${esc(report?.title ?? '')}</strong><p>${annotation.topicIds?.length ? annotation.topicIds.map(id => esc(topics.get(id) ?? id)).join(' · ') : T('当前没有标注相关的本方研究主题。', 'No related own research topic is currently annotated.')}</p></article>`;
+  }).join('');
+  return `<section class="panel research-workspace-intro"><div><p class="eyebrow">${esc(inventory.role)} · WORKSPACE</p><h2>${T('我的独立工作区', 'My independent workspace')}</h2><p class="lead">${T('初始文件保存这个研究者的完整起始条件。本次运行的知识、授权、收发件和产物保存在独立目录中。', 'Initial files preserve this researcher’s starting conditions. This experience stores its knowledge, permissions, messages and artifacts in a separate runtime directory.')}</p></div><span class="tag">${T('本方主人视角', 'Own owner perspective')}</span></section>
+    <div class="research-workspace-grid"><section class="panel"><div class="research-status-line"><h3>${T('初始内容', 'Initial contents')}</h3><span class="tag good">${inventory.seedVersion ? `v${esc(inventory.seedVersion)}` : T('版本未记录', 'Version not recorded')}</span></div><code class="research-folder-path">${esc(inventory.seedPath)}/</code><p class="research-workspace-copy">${T('每位新观众从这些已审阅的文件开始；这一份初始内容在本次运行中保留。', 'Each new visitor starts from these reviewed files. This initial copy is retained throughout the experience.')}</p>${fileRows(primary)}${skillFiles.length ? details('workspace-skill-files', `${T('技能说明文件', 'Skill instruction files')} · ${skillFiles.length}`, fileRows(skillFiles)) : ''}</section>
+    <section class="panel"><h3>${T('本次运行', 'This experience')}</h3><code class="research-folder-path">${esc(inventory.runtimePath)}/</code><div class="research-workspace-counters"><span><strong>${inventory.knowledgeCount}</strong>${T('条本地知识', 'own records')}</span><span><strong>${inventory.materialCount}</strong>${T('份材料', 'materials')}</span><span><strong>${inventory.inboxCount}</strong>${T('封收件', 'received messages')}</span><span><strong>${inventory.outboxCount}</strong>${T('封发件', 'sent messages')}</span><span><strong>${inventory.artifactCount}</strong>${T('份工作产物', 'artifacts')}</span></div><div class="research-workspace-files">${runtimeFiles.map(([name, meaning]) => `<article class="research-workspace-file"><div><strong>${meaning}</strong><code>${name}</code></div></article>`).join('')}</div><div class="toolbar research-actions"><button class="button" data-tab="knowledge">${T('查看知识与证据', 'Inspect knowledge')}</button><button class="button" data-tab="ontology">${T('查看本体与技能', 'Inspect ontology & skills')}</button><button class="button" data-tab="authorization">${T('查看授权账本', 'Inspect permissions')}</button></div></section></div>
+    ${annotationRows ? `<section class="panel"><h3>${T('本方如何理解报告', 'My interpretation of presentations')}</h3><p class="research-workspace-copy">${T('这些标注属于本方知识。对方只有在实际收到分享后才会知道。', 'These annotations belong to this researcher. The peer learns them only through actual exchange.')}</p><div class="research-data-list">${annotationRows}</div></section>` : ''}
+    <section class="panel"><h3>${T('本地研究材料', 'Local research materials')}</h3><div class="research-data-list">${(profile.materials ?? []).map(material => `<article class="research-record"><div class="toolbar"><strong>${esc(material.label)}</strong><span class="tag">v${esc(material.version)}</span></div><small>${esc(material.id)} · ${material.visibility === 'public' && material.ownerConfirmedVisibility ? T('主人确认可公开', 'Owner-confirmed public') : T('保存在本地，分享需要适用许可', 'Stored locally; disclosure requires applicable permission')}</small>${details(`workspace-material-${material.id}`, T('查看本方材料与来源', 'Inspect own material and sources'), `<div class="research-data-list">${Object.entries(material.fields ?? {}).map(([field, value]) => `<div><strong>${esc(reviewFieldLabel(field))}</strong><p class="research-review-value">${esc(reviewValue(value))}</p></div>`).join('')}</div><small class="mono">${esc((material.sourceIds ?? []).join(', '))}</small>`)}</article>`).join('')}</div></section>
+    <section class="panel">${details('workspace-integrity', T('核对初始版本、文件指纹与存储空间', 'Verify seed version, file fingerprints and storage namespace'), `<dl class="definition-list"><dt>${T('初始版本', 'Seed version')}</dt><dd>${esc(inventory.seedVersion || T('未记录', 'Not recorded'))}</dd><dt>Seed hash</dt><dd class="mono">${esc(inventory.seedHash)}</dd><dt>Manifest hash</dt><dd class="mono">${esc(inventory.manifestHash)}</dd><dt>${T('原生 KG namespace', 'Native KG namespace')}</dt><dd class="mono">${esc(inventory.namespace || T('当前使用本机持久化空间', 'Using the local persistent workspace'))}</dd></dl><pre>${pretty(inventory.files)}</pre>`)}</section>`;
 }
 function knowledgeView() {
   const graph = ui.queryResult ?? ui.state.profile.knowledge; const nodes = graph.nodes ?? []; const edges = graph.edges ?? [];

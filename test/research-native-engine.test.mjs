@@ -79,25 +79,40 @@ test('an invented final model explanation cannot create a receipt or task outcom
 test('native peers reject same-word alignment and accept task-scoped relations before selecting a report', async t => {
   let proposalReady;
   const aliceProposed = new Promise(resolve => { proposalReady = resolve; });
+  let definitionsReady;
+  const definitionsExchanged = new Promise(resolve => { definitionsReady = resolve; });
+  const definitionsSent = new Set();
   const { engine, created, calls } = await harness(t, async ({ role, call }) => {
+    let status = await call('task_status');
+    if (status.task.status === 'completed') return;
+    assert.equal(status.mappingCandidates, undefined);
+    if (!definitionsSent.has(role)) {
+      await call('peer_send', { resourceId: 'working-ontology' });
+      definitionsSent.add(role);
+      if (definitionsSent.size === 2) definitionsReady();
+    }
+    await definitionsExchanged;
     if (role === 'Bob') await aliceProposed;
-    const status = await call('task_status');
+    status = await call('task_status');
     if (status.task.status === 'completed') return;
     if (role === 'Alice') {
       const peerProposal = status.task.proposals.find(proposal => proposal.from === 'Bob' && proposal.status === 'proposed');
-      if (peerProposal) { await call('alignment_accept', { proposalId: peerProposal.id }); return; }
-      const falseFriend = status.mappingCandidates.find(mapping => !mapping.valid);
-      await call('alignment_propose', { mappingIds: [falseFriend.id] });
+      if (peerProposal) { await call('alignment_accept', { proposalId: peerProposal.id, decision: 'accept', reason: 'The actual received definitions support only the specified presentation and related-evidence conditions.' }); return; }
+      if (status.task.proposals.some(proposal => proposal.from === 'Alice')) return;
+      await call('alignment_propose', { mappings: [{ id: 'same-label-hypothesis', source: 'alice:OntologyAlignmentTopic', target: 'bob:MentalModelAlignmentTopic', relation: 'exact', reason: 'A deliberately incomplete lexical hypothesis to be reviewed by the peer.' }] });
       proposalReady();
       await call('peer_send', { resourceId: 'report-interests' });
       return;
     }
     for (const proposal of status.task.proposals.filter(item => item.from === 'Alice' && item.status === 'proposed')) {
-      const review = await call('alignment_accept', { proposalId: proposal.id });
+      const review = await call('alignment_accept', { proposalId: proposal.id, decision: 'reject', reason: 'The received source concerns ontology-term correspondences; my target concerns a person’s mental model of a system.' });
       assert.equal(review.status, 'rejected');
     }
-    const valid = status.mappingCandidates.filter(mapping => mapping.valid && (!mapping.taskTypes || mapping.taskTypes.includes('select_presentation')));
-    await call('alignment_propose', { mappingIds: valid.map(mapping => mapping.id) });
+    if (status.task.proposals.some(proposal => proposal.from === 'Bob')) return;
+    await call('alignment_propose', { mappings: [
+      { id: 'presentation-identity', source: 'bob:PresentationActivity', target: 'alice:ResearchTalk', relation: 'conditional', condition: 'One individual presentation identified by the same conference and report ID.', reason: 'Both actual definitions identify an individual research presentation.' },
+      { id: 'understanding-and-evidence', source: 'bob:TransparencyTopic', target: 'alice:MappingProvenanceTopic', relation: 'related', reason: 'Recorded mapping evidence can contribute to understanding, without making the two concepts identical.' },
+    ] });
     await call('peer_send', { resourceId: 'report-interests' });
   });
   await engine.start(created.workspaceId, { type: 'select_presentation', mode: 'native' });
@@ -106,7 +121,9 @@ test('native peers reject same-word alignment and accept task-scoped relations b
   assert.equal(task.status, 'completed');
   assert.equal(task.result.report.id, 'R3');
   assert(task.proposals.some(proposal => proposal.status === 'rejected'));
-  assert(task.mappings.length > 0 && task.mappings.every(mapping => mapping.valid));
+  assert(task.mappings.some(mapping => mapping.id === 'presentation-identity' && mapping.relation === 'conditional'));
+  assert(task.proposals.some(proposal => proposal.status === 'accepted' && proposal.reviewedBy === 'Alice'));
+  for (const role of ['Alice', 'Bob']) assert(workspace.messages.some(message => message.from === role && message.resourceId === 'working-ontology'));
   assert.equal(new Set(calls.filter(call => call.name === 'alignment_accept').map(call => call.role)).size, 2);
 });
 
@@ -154,7 +171,7 @@ test('native disclosure pauses for a narrowed owner grant, resumes, then indepen
     const current = await call('task_status');
     let agenda = current.artifacts.find(item => item.kind === 'agenda');
     if (!agenda) agenda = await call('artifact_prepare', { kind: 'agenda', title: 'Joint semantics and HCI discussion',
-      fields: { topic: 'Reviewable semantic collaboration', agenda: 'Mapping evidence and understandable human control' }, sourceRefs: [alicePublic.id] });
+      fields: { topic: 'Reviewable semantic collaboration', agenda: 'Mapping evidence and understandable human control' }, sourceRefs: [alicePublic.id, ...current.received.map(message => message.id)] });
     let form = current.artifacts.find(item => item.kind === 'reservation');
     if (!form) form = await call('artifact_prepare', { kind: 'reservation', title: 'Discussion venue draft',
       fields: { title: 'Joint research discussion', day: 'Thu', time: '15:00–15:30', attendees: '8', agenda: 'Semantics and HCI research exchange' }, sourceRefs: [alicePublic.id] });

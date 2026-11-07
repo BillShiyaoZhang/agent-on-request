@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "role": "Alice",
+  "version": "2.0.2",
+  "name": "Alice",
+  "field": "知识图谱与语义技术",
+  "description": "A researcher who connects semantic models, mappings and experimental evidence to research questions.",
+  "synthetic": true,
+  "profile": {
+    "ontology": "ontology.json",
+    "knowledge": "knowledge.json",
+    "calendar": "calendar.json",
+    "materials": "materials.json",
+    "interests": "interests.json",
+    "reportAnnotations": "report-annotations.json",
+    "skills": "skills.json",
+    "policyTemplates": "policies.json"
+  },
+  "files": {
+    "calendar.json": {
+      "sha256": "3bb20e039454eb599b8fb0e43e94a6cb5dcceb76191730a4c6b96344b6394b5a",
+      "description": "Own complete starting calendar."
+    },
+    "interests.json": {
+      "sha256": "e174f154e007c9eec50129c43d70bf9909f7cf2bb6655461fe12d3135c0a32d7",
+      "description": "Own research-interest references."
+    },
+    "knowledge.json": {
+      "sha256": "bad9108027428af146a6d281abaff00fadfcaecab584ed8569aa40ff84ff2e72",
+      "description": "Private, source-backed personal research knowledge."
+    },
+    "materials.json": {
+      "sha256": "c8bd680f7fb3d30ffef95e5a3fa7e772ddc8cd310074bf5758ce7bb2f35e8c68",
+      "description": "Own versioned materials and initializer-certified public introductions."
+    },
+    "ontology.json": {
+      "sha256": "dd6156140c03eb55f5b6632c25d9ac7a4f55d4fb02636f99dd25d71fde97aff4",
+      "description": "Complete independently installed application ontology, including its local personal base."
+    },
+    "policies.json": {
+      "sha256": "71b36adc78a223ceebc276939c0e7289defcb479707cf9c5f8df47c84d523e14",
+      "description": "Trusted initializer rule templates; a new experience binds owner/project. No decisions, grants or uses are carried over."
+    },
+    "README.md": {
+      "sha256": "5edb72e1eed3efddd57eb039689f11c47f007c79829cfe8df83faf45a9be18dd",
+      "description": "Audience-readable inventory and initialization boundary."
+    },
+    "report-annotations.json": {
+      "sha256": "1e780353bf5c466973c319259cc1e783a7392259928e1dec3bd61f5df69ad41b",
+      "description": "Own interpretation of the public reports; no collaborator annotations."
+    },
+    "skills/authorization-memory/SKILL.md": {
+      "sha256": "ec01722f742f1e2cd2a1089c35e8d0fef1090db64133da019f01ff401ab93731",
+      "description": "Read-only installed Alice skill: Retrieve and request authorization."
+    },
+    "skills/compare-experiments/SKILL.md": {
+      "sha256": "71bea1187a5d7dc4537a94f20e89337985a224e295780140c3071d9c7b1336a1",
+      "description": "Read-only installed Alice skill: Compare experiments and trace claims."
+    },
+    "skills/coordinate-calendar/SKILL.md": {
+      "sha256": "885dfb281a3a122454cd68ce41d4d20d414eae6de02cb0730612a4831c21ba82",
+      "description": "Read-only installed Alice skill: Coordinate academic calendars."
+    },
+    "skills/plan-conference/SKILL.md": {
+      "sha256": "723c13e602c7ea91426c9837068096b3646f6cf1f3a08526d50920cc412b0eb6",
+      "description": "Read-only installed Alice skill: Plan conference attendance."
+    },
+    "skills/prepare-discussion/SKILL.md": {
+      "sha256": "99fee02da8cce851269fd091e37a8664dc6426d54dc6a100b585eddc02863315",
+      "description": "Read-only installed Alice skill: Prepare a research discussion."
+    },
+    "skills/research-brief/SKILL.md": {
+      "sha256": "c863a399bd64dd5313e003c1086deb562df03874d31647cc7e252acace83d656",
+      "description": "Read-only installed Alice skill: Prepare a sourced research brief."
+    },
+    "skills/research-lineage/SKILL.md": {
+      "sha256": "b6357ae0e4d4ab9a5f502aa88f7dd07ec22c9e72acdc70979515e242db8051a7",
+      "description": "Read-only installed Alice skill: Maintain research and literature lineage."
+    },
+    "skills/reserve-resource/SKILL.md": {
+      "sha256": "f12b7a8b251690406d387e52f75ce954f41a5d998f6369c446119021cd1f6580",
+      "description": "Read-only installed Alice skill: Coordinate rooms and resources."
+    },
+    "skills/semantic-review/SKILL.md": {
+      "sha256": "7849f99e6c4edf785b67560080fc9e64fb2a135a933275ed76c2251ab3a28cfe",
+      "description": "Read-only installed Alice skill: Review semantic models and mappings."
+    },
+    "skills/share-materials/SKILL.md": {
+      "sha256": "11734ce13660b04fed916c0ed417b2a634d4208f3d69e6eb43f9ea0c762cabcf",
+      "description": "Read-only installed Alice skill: Share selected research materials."
+    },
+    "skills.json": {
+      "sha256": "c7a3cc8c35383b7f6cee5a8722f7a0237a47872c3ea64a33ac55a6f941f8fc4c",
+      "description": "Own executable skill contracts and local document paths."
+    }
+  },
+  "hash": "9e236b47fff6005003115b8547c40554082424953d82b3ab9a7f9910f02f7dd4"
+}

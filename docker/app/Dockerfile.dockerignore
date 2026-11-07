@@ -10,6 +10,11 @@
 !public/**
 !profiles/
 !profiles/**
+!workspaces/
+!workspaces/**
+!demo/
+!demo/environment/
+!demo/environment/**
 !scripts/
 !scripts/demo.mjs
 !docker/

@@ -1,0 +1,29 @@
+[
+  {
+    "reportId": "R1",
+    "recordType": "alice:ResearchTalk",
+    "topicIds": [
+      "alice:topic-alignment"
+    ],
+    "source": "synthetic:conference:program:1",
+    "version": "1"
+  },
+  {
+    "reportId": "R2",
+    "recordType": "alice:ResearchTalk",
+    "topicIds": [],
+    "source": "synthetic:conference:program:1",
+    "version": "1"
+  },
+  {
+    "reportId": "R3",
+    "recordType": "alice:ResearchTalk",
+    "topicIds": [
+      "alice:topic-alignment",
+      "alice:topic-review",
+      "alice:topic-provenance"
+    ],
+    "source": "synthetic:conference:program:1",
+    "version": "1"
+  }
+]

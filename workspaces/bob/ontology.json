@@ -1,0 +1,1325 @@
+{
+  "id": "urn:agent-on-request:research:bob:application-ontology",
+  "owner": "Bob",
+  "version": "2.0.0",
+  "basis": {
+    "preset": "personal",
+    "sources": [
+      "https://schema.org/version/30.1/",
+      "https://www.w3.org/TR/skos-reference/",
+      "https://www.w3.org/TR/prov-o/",
+      "https://www.dublincore.org/specifications/dublin-core/dcmi-terms/"
+    ]
+  },
+  "baselineVersion": "1.0.0",
+  "modules": [
+    {
+      "id": "bob:personal",
+      "name": "People, preferences and provenance",
+      "dependencies": [],
+      "concepts": [
+        {
+          "id": "bob:Person",
+          "label": "Person",
+          "definition": "An individual, distinct from the software agent acting for them.",
+          "standardUri": "https://schema.org/Person",
+          "properties": [
+            {
+              "id": "bob:Person.displayName",
+              "datatype": "string",
+              "key": "displayName",
+              "definition": "displayName of Person."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:Person"
+        },
+        {
+          "id": "bob:Organization",
+          "label": "Organization",
+          "definition": "A university, laboratory, team or other organization.",
+          "standardUri": "https://schema.org/Organization",
+          "properties": [
+            {
+              "id": "bob:Organization.displayName",
+              "datatype": "string",
+              "key": "displayName",
+              "definition": "displayName of Organization."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:Organization"
+        },
+        {
+          "id": "bob:Place",
+          "label": "Place",
+          "definition": "A physical location, including a room or conference venue.",
+          "standardUri": "https://schema.org/Place",
+          "properties": [
+            {
+              "id": "bob:Place.capacity",
+              "datatype": "integer",
+              "key": "capacity",
+              "definition": "capacity of Place."
+            },
+            {
+              "id": "bob:Place.equipment",
+              "datatype": "string[]",
+              "key": "equipment",
+              "definition": "equipment of Place."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:Place"
+        },
+        {
+          "id": "bob:Preference",
+          "label": "Preference",
+          "definition": "An explicitly expressed preference. A preference is not an authorization.",
+          "properties": [
+            {
+              "id": "bob:Preference.value",
+              "datatype": "string",
+              "key": "value",
+              "definition": "value of Preference."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:Preference"
+        },
+        {
+          "id": "bob:SourceRecord",
+          "label": "Source record",
+          "definition": "A versioned record used as evidence for knowledge, distinct from the object it describes.",
+          "properties": [
+            {
+              "id": "bob:SourceRecord.kind",
+              "datatype": "string",
+              "key": "kind",
+              "definition": "kind of Source record."
+            },
+            {
+              "id": "bob:SourceRecord.synthetic",
+              "datatype": "boolean",
+              "key": "synthetic",
+              "definition": "synthetic of Source record."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:SourceRecord"
+        },
+        {
+          "id": "bob:HumanCompetency",
+          "label": "Human competency",
+          "definition": "A person's explicitly stated professional ability; not an executable agent skill.",
+          "properties": [
+            {
+              "id": "bob:HumanCompetency.description",
+              "datatype": "string",
+              "key": "description",
+              "definition": "description of Human competency."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:HumanCompetency"
+        }
+      ],
+      "relations": [
+        {
+          "id": "bob:memberOf",
+          "definition": "The person belongs to the organization.",
+          "domain": [
+            "bob:Person"
+          ],
+          "range": [
+            "bob:Organization"
+          ]
+        },
+        {
+          "id": "bob:hasPreference",
+          "definition": "The person explicitly expressed the preference.",
+          "domain": [
+            "bob:Person"
+          ],
+          "range": [
+            "bob:Preference"
+          ]
+        },
+        {
+          "id": "bob:hasCompetency",
+          "definition": "The person explicitly claims the competency.",
+          "domain": [
+            "bob:Person"
+          ],
+          "range": [
+            "bob:HumanCompetency"
+          ]
+        }
+      ],
+      "owner": "Bob"
+    },
+    {
+      "id": "bob:work",
+      "name": "Projects, goals, tasks and decisions",
+      "dependencies": [
+        "bob:personal"
+      ],
+      "concepts": [
+        {
+          "id": "bob:Project",
+          "label": "Project",
+          "definition": "An organized body of work. This local type is not equated to Schema.org Project, which is an Organization.",
+          "properties": [
+            {
+              "id": "bob:Project.state",
+              "datatype": "string",
+              "key": "state",
+              "definition": "state of Project."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:Project"
+        },
+        {
+          "id": "bob:Goal",
+          "label": "Goal",
+          "definition": "A desired outcome, distinct from the task undertaken to achieve it.",
+          "properties": [
+            {
+              "id": "bob:Goal.description",
+              "datatype": "string",
+              "key": "description",
+              "definition": "description of Goal."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:Goal"
+        },
+        {
+          "id": "bob:Task",
+          "label": "Task",
+          "definition": "A concrete action commitment, with a state and optional deadline.",
+          "properties": [
+            {
+              "id": "bob:Task.state",
+              "datatype": "string",
+              "key": "state",
+              "definition": "state of Task."
+            },
+            {
+              "id": "bob:Task.deadline",
+              "datatype": "string",
+              "key": "deadline",
+              "definition": "deadline of Task."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:Task"
+        },
+        {
+          "id": "bob:Decision",
+          "label": "Decision",
+          "definition": "A recorded choice and its rationale. An ordinary decision record never grants agent execution authority.",
+          "properties": [
+            {
+              "id": "bob:Decision.choice",
+              "datatype": "string",
+              "key": "choice",
+              "definition": "choice of Decision."
+            },
+            {
+              "id": "bob:Decision.rationale",
+              "datatype": "string",
+              "key": "rationale",
+              "definition": "rationale of Decision."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:Decision"
+        }
+      ],
+      "relations": [
+        {
+          "id": "bob:pursues",
+          "definition": "The project or task pursues a goal.",
+          "domain": [
+            "bob:Project",
+            "bob:Task"
+          ],
+          "range": [
+            "bob:Goal"
+          ]
+        },
+        {
+          "id": "bob:partOfProject",
+          "definition": "The task belongs to this project.",
+          "domain": [
+            "bob:Task"
+          ],
+          "range": [
+            "bob:Project"
+          ]
+        },
+        {
+          "id": "bob:ownedBy",
+          "definition": "The work item belongs to the person.",
+          "domain": [
+            "bob:Project",
+            "bob:Task",
+            "bob:Goal"
+          ],
+          "range": [
+            "bob:Person"
+          ]
+        }
+      ],
+      "owner": "Bob"
+    },
+    {
+      "id": "bob:time",
+      "name": "Personal time and commitments",
+      "dependencies": [
+        "bob:personal"
+      ],
+      "concepts": [
+        {
+          "id": "bob:TimeInterval",
+          "label": "Time interval",
+          "definition": "A bounded interval in the fictional conference week and Asia/Shanghai timezone.",
+          "properties": [
+            {
+              "id": "bob:TimeInterval.day",
+              "datatype": "string",
+              "constraints": {
+                "enum": [
+                  "Mon",
+                  "Tue",
+                  "Wed",
+                  "Thu",
+                  "Fri",
+                  "Sat",
+                  "Sun"
+                ]
+              },
+              "key": "day",
+              "definition": "day of Time interval."
+            },
+            {
+              "id": "bob:TimeInterval.time",
+              "datatype": "string",
+              "constraints": {
+                "pattern": "HH:MM–HH:MM",
+                "sameDay": true
+              },
+              "key": "time",
+              "definition": "time of Time interval."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:TimeInterval"
+        },
+        {
+          "id": "bob:CalendarEvent",
+          "label": "Calendar event",
+          "definition": "An occupied or explicitly offered interval. The demo's Free intervals are already offered for academic coordination, not inferred from missing events.",
+          "properties": [
+            {
+              "id": "bob:CalendarEvent.status",
+              "datatype": "string",
+              "constraints": {
+                "enum": [
+                  "Free",
+                  "Busy"
+                ]
+              },
+              "key": "status",
+              "definition": "status of Calendar event."
+            },
+            {
+              "id": "bob:CalendarEvent.title",
+              "datatype": "string",
+              "key": "title",
+              "definition": "title of Calendar event."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:CalendarEvent"
+        }
+      ],
+      "relations": [
+        {
+          "id": "bob:during",
+          "definition": "The calendar event occurs during the interval.",
+          "domain": [
+            "bob:CalendarEvent"
+          ],
+          "range": [
+            "bob:TimeInterval"
+          ]
+        },
+        {
+          "id": "bob:calendarOf",
+          "definition": "The calendar entry belongs to the person.",
+          "domain": [
+            "bob:CalendarEvent"
+          ],
+          "range": [
+            "bob:Person"
+          ]
+        }
+      ],
+      "owner": "Bob"
+    },
+    {
+      "id": "bob:materials",
+      "name": "Versioned scholarly materials",
+      "dependencies": [
+        "bob:personal"
+      ],
+      "concepts": [
+        {
+          "id": "bob:Document",
+          "label": "Document",
+          "definition": "An information work, distinct from its particular versions or physical copies.",
+          "standardUri": "https://schema.org/CreativeWork",
+          "properties": [
+            {
+              "id": "bob:Document.title",
+              "datatype": "string",
+              "key": "title",
+              "definition": "title of Document."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:Document"
+        },
+        {
+          "id": "bob:DocumentVersion",
+          "label": "Document version",
+          "definition": "A specific immutable version of an information work.",
+          "properties": [
+            {
+              "id": "bob:DocumentVersion.version",
+              "datatype": "string",
+              "key": "version",
+              "definition": "version of Document version."
+            },
+            {
+              "id": "bob:DocumentVersion.summary",
+              "datatype": "string",
+              "key": "summary",
+              "definition": "summary of Document version."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:DocumentVersion"
+        },
+        {
+          "id": "bob:SelectedExcerpt",
+          "label": "Selected excerpt",
+          "definition": "A selected section from a specific source version. Selection does not make private material public.",
+          "properties": [
+            {
+              "id": "bob:SelectedExcerpt.text",
+              "datatype": "string",
+              "key": "text",
+              "definition": "text of Selected excerpt."
+            },
+            {
+              "id": "bob:SelectedExcerpt.field",
+              "datatype": "string",
+              "key": "field",
+              "definition": "field of Selected excerpt."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:SelectedExcerpt"
+        },
+        {
+          "id": "bob:Paper",
+          "label": "Paper",
+          "parent": "bob:Document",
+          "definition": "A scholarly manuscript or paper; publication and permission to redistribute are separate facts.",
+          "properties": [
+            {
+              "id": "bob:Paper.publicationState",
+              "datatype": "string",
+              "key": "publicationState",
+              "definition": "publicationState of Paper."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:Paper"
+        },
+        {
+          "id": "bob:ResearchNote",
+          "label": "Research note",
+          "parent": "bob:Document",
+          "definition": "A personal research note with explicit sources and disclosure status.",
+          "properties": [
+            {
+              "id": "bob:ResearchNote.summary",
+              "datatype": "string",
+              "key": "summary",
+              "definition": "summary of Research note."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:ResearchNote"
+        }
+      ],
+      "relations": [
+        {
+          "id": "bob:versionOf",
+          "definition": "The concrete version is a version of the information work.",
+          "domain": [
+            "bob:DocumentVersion"
+          ],
+          "range": [
+            "bob:Document"
+          ]
+        },
+        {
+          "id": "bob:excerptOf",
+          "definition": "The excerpt is taken from the exact version.",
+          "domain": [
+            "bob:SelectedExcerpt"
+          ],
+          "range": [
+            "bob:DocumentVersion"
+          ]
+        },
+        {
+          "id": "bob:sourcedFrom",
+          "definition": "The assertion or work is supported by this source record.",
+          "domain": [
+            "*"
+          ],
+          "range": [
+            "bob:SourceRecord"
+          ]
+        }
+      ],
+      "owner": "Bob"
+    },
+    {
+      "id": "bob:academic",
+      "name": "Research goals, conferences and learning plans",
+      "dependencies": [
+        "bob:work",
+        "bob:time",
+        "bob:materials"
+      ],
+      "concepts": [
+        {
+          "id": "bob:ResearchProject",
+          "label": "Research project",
+          "parent": "bob:Project",
+          "definition": "A local work project organized around research questions.",
+          "properties": [
+            {
+              "id": "bob:ResearchProject.description",
+              "datatype": "string",
+              "key": "description",
+              "definition": "description of Research project."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:ResearchProject"
+        },
+        {
+          "id": "bob:ResearchQuestion",
+          "label": "Research question",
+          "parent": "bob:Goal",
+          "definition": "A question that guides research and requires appropriate evidence.",
+          "properties": [
+            {
+              "id": "bob:ResearchQuestion.question",
+              "datatype": "string",
+              "key": "question",
+              "definition": "question of Research question."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:ResearchQuestion"
+        },
+        {
+          "id": "bob:ResearchTopic",
+          "label": "Research topic",
+          "definition": "A subject in the owner's concept scheme; a topic label alone is not proof of equivalence.",
+          "standardUri": "http://www.w3.org/2004/02/skos/core#Concept",
+          "properties": [
+            {
+              "id": "bob:ResearchTopic.definition",
+              "datatype": "string",
+              "key": "definition",
+              "definition": "definition of Research topic."
+            },
+            {
+              "id": "bob:ResearchTopic.aliases",
+              "datatype": "string[]",
+              "key": "aliases",
+              "definition": "aliases of Research topic."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:ResearchTopic"
+        },
+        {
+          "id": "bob:Conference",
+          "label": "Conference",
+          "definition": "A whole conference containing program sessions and individual presentations.",
+          "properties": [
+            {
+              "id": "bob:Conference.conferenceId",
+              "datatype": "string",
+              "key": "conferenceId",
+              "definition": "conferenceId of Conference."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:Conference"
+        },
+        {
+          "id": "bob:ProgramSession",
+          "label": "Program session",
+          "definition": "A program grouping of presentations or other activities, not one individual talk.",
+          "properties": [
+            {
+              "id": "bob:ProgramSession.sessionId",
+              "datatype": "string",
+              "key": "sessionId",
+              "definition": "sessionId of Program session."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:ProgramSession"
+        },
+        {
+          "id": "bob:Presentation",
+          "label": "Presentation",
+          "definition": "One individually identified scholarly presentation within an event.",
+          "properties": [
+            {
+              "id": "bob:Presentation.reportId",
+              "datatype": "string",
+              "key": "reportId",
+              "definition": "reportId of Presentation."
+            },
+            {
+              "id": "bob:Presentation.attendanceMode",
+              "datatype": "string",
+              "key": "attendanceMode",
+              "definition": "attendanceMode of Presentation."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:Presentation"
+        },
+        {
+          "id": "bob:AttendancePlan",
+          "label": "Attendance plan",
+          "parent": "bob:Task",
+          "definition": "A proposed or confirmed personal plan to attend activities.",
+          "properties": [
+            {
+              "id": "bob:AttendancePlan.state",
+              "datatype": "string",
+              "key": "state",
+              "definition": "state of Attendance plan."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:AttendancePlan"
+        },
+        {
+          "id": "bob:ReadingPlan",
+          "label": "Reading plan",
+          "parent": "bob:Task",
+          "definition": "A reading commitment serving explicit research questions.",
+          "properties": [
+            {
+              "id": "bob:ReadingPlan.state",
+              "datatype": "string",
+              "key": "state",
+              "definition": "state of Reading plan."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:ReadingPlan"
+        }
+      ],
+      "relations": [
+        {
+          "id": "bob:addresses",
+          "definition": "The research project addresses this question.",
+          "domain": [
+            "bob:ResearchProject"
+          ],
+          "range": [
+            "bob:ResearchQuestion"
+          ]
+        },
+        {
+          "id": "bob:investigatesTopic",
+          "definition": "The research question concerns the topic.",
+          "domain": [
+            "bob:ResearchQuestion"
+          ],
+          "range": [
+            "bob:ResearchTopic"
+          ]
+        },
+        {
+          "id": "bob:containsSession",
+          "definition": "The conference contains the program grouping.",
+          "domain": [
+            "bob:Conference"
+          ],
+          "range": [
+            "bob:ProgramSession"
+          ]
+        },
+        {
+          "id": "bob:containsPresentation",
+          "definition": "The session contains this individual presentation.",
+          "domain": [
+            "bob:ProgramSession"
+          ],
+          "range": [
+            "bob:Presentation"
+          ]
+        },
+        {
+          "id": "bob:aboutTopic",
+          "definition": "The material or presentation discusses the topic.",
+          "domain": [
+            "bob:Document",
+            "bob:DocumentVersion",
+            "bob:Presentation"
+          ],
+          "range": [
+            "bob:ResearchTopic"
+          ]
+        },
+        {
+          "id": "bob:servesQuestion",
+          "definition": "The reading or attendance plan serves the research question.",
+          "domain": [
+            "bob:ReadingPlan",
+            "bob:AttendancePlan"
+          ],
+          "range": [
+            "bob:ResearchQuestion"
+          ]
+        }
+      ],
+      "owner": "Bob"
+    },
+    {
+      "id": "bob:collaboration",
+      "name": "Discussion preparation and resources",
+      "dependencies": [
+        "bob:academic"
+      ],
+      "concepts": [
+        {
+          "id": "bob:DiscussionPlan",
+          "label": "Discussion plan",
+          "parent": "bob:Task",
+          "definition": "A collaborative discussion plan whose drafts are distinct from externally confirmed arrangements.",
+          "properties": [
+            {
+              "id": "bob:DiscussionPlan.state",
+              "datatype": "string",
+              "key": "state",
+              "definition": "state of Discussion plan."
+            },
+            {
+              "id": "bob:DiscussionPlan.summary",
+              "datatype": "string",
+              "key": "summary",
+              "definition": "summary of Discussion plan."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:DiscussionPlan"
+        },
+        {
+          "id": "bob:AgendaItem",
+          "label": "Agenda item",
+          "definition": "An item proposed for a discussion, with its material sources.",
+          "properties": [
+            {
+              "id": "bob:AgendaItem.topic",
+              "datatype": "string",
+              "key": "topic",
+              "definition": "topic of Agenda item."
+            },
+            {
+              "id": "bob:AgendaItem.minutes",
+              "datatype": "integer",
+              "key": "minutes",
+              "definition": "minutes of Agenda item."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:AgendaItem"
+        },
+        {
+          "id": "bob:MaterialPackage",
+          "label": "Material package",
+          "definition": "A collection of references to materials actually available to its owner.",
+          "properties": [
+            {
+              "id": "bob:MaterialPackage.summary",
+              "datatype": "string",
+              "key": "summary",
+              "definition": "summary of Material package."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:MaterialPackage"
+        },
+        {
+          "id": "bob:VenueRequirement",
+          "label": "Venue requirement",
+          "definition": "The capacity, equipment and time constraints for a discussion.",
+          "properties": [
+            {
+              "id": "bob:VenueRequirement.capacity",
+              "datatype": "integer",
+              "key": "capacity",
+              "definition": "capacity of Venue requirement."
+            },
+            {
+              "id": "bob:VenueRequirement.equipment",
+              "datatype": "string[]",
+              "key": "equipment",
+              "definition": "equipment of Venue requirement."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:VenueRequirement"
+        },
+        {
+          "id": "bob:ReservationProposal",
+          "label": "Reservation proposal",
+          "definition": "An exact proposed reservation. Preparing or approving a proposal does not prove the booking exists.",
+          "properties": [
+            {
+              "id": "bob:ReservationProposal.state",
+              "datatype": "string",
+              "key": "state",
+              "definition": "state of Reservation proposal."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:ReservationProposal"
+        },
+        {
+          "id": "bob:ConfirmedReservation",
+          "label": "Confirmed reservation",
+          "definition": "A reservation supported by a booking-service receipt.",
+          "properties": [
+            {
+              "id": "bob:ConfirmedReservation.reservationId",
+              "datatype": "string",
+              "key": "reservationId",
+              "definition": "reservationId of Confirmed reservation."
+            },
+            {
+              "id": "bob:ConfirmedReservation.operationId",
+              "datatype": "string",
+              "key": "operationId",
+              "definition": "operationId of Confirmed reservation."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:ConfirmedReservation"
+        }
+      ],
+      "relations": [
+        {
+          "id": "bob:hasAgendaItem",
+          "definition": "The discussion plan includes the agenda item.",
+          "domain": [
+            "bob:DiscussionPlan"
+          ],
+          "range": [
+            "bob:AgendaItem"
+          ]
+        },
+        {
+          "id": "bob:usesMaterial",
+          "definition": "The agenda item uses the specified available document version.",
+          "domain": [
+            "bob:AgendaItem"
+          ],
+          "range": [
+            "bob:DocumentVersion",
+            "bob:SelectedExcerpt"
+          ]
+        },
+        {
+          "id": "bob:requiresVenue",
+          "definition": "The discussion plan has these venue requirements.",
+          "domain": [
+            "bob:DiscussionPlan"
+          ],
+          "range": [
+            "bob:VenueRequirement"
+          ]
+        },
+        {
+          "id": "bob:reservesPlace",
+          "definition": "The reservation proposal or confirmed reservation concerns this place.",
+          "domain": [
+            "bob:ReservationProposal",
+            "bob:ConfirmedReservation"
+          ],
+          "range": [
+            "bob:Place"
+          ]
+        }
+      ],
+      "owner": "Bob"
+    },
+    {
+      "id": "bob:research",
+      "name": "Human-computer interaction questions and topics",
+      "dependencies": [
+        "bob:academic"
+      ],
+      "concepts": [
+        {
+          "id": "bob:MentalModelAlignmentTopic",
+          "label": "Alignment",
+          "parent": "bob:ResearchTopic",
+          "definition": "Agreement between a person's understanding of an AI assistant and the assistant's actual capabilities, behavior and limits.",
+          "properties": [],
+          "uri": "urn:agent-on-request:research:bob:ontology:MentalModelAlignmentTopic"
+        },
+        {
+          "id": "bob:UserControlTopic",
+          "label": "User control",
+          "parent": "bob:ResearchTopic",
+          "definition": "The ways people can inspect, intervene in and direct system behavior; broader than reviewing semantic mappings.",
+          "properties": [],
+          "uri": "urn:agent-on-request:research:bob:ontology:UserControlTopic"
+        },
+        {
+          "id": "bob:TransparencyTopic",
+          "label": "Transparency",
+          "parent": "bob:ResearchTopic",
+          "definition": "How well a person can understand a system's behavior and the reasons or evidence presented for that behavior.",
+          "properties": [],
+          "uri": "urn:agent-on-request:research:bob:ontology:TransparencyTopic"
+        },
+        {
+          "id": "bob:UserReviewDecision",
+          "label": "User review decision",
+          "parent": "bob:Decision",
+          "definition": "A user's accept, modify or reject decision on a system-proposed item in an explicit review task. It is not an execution grant.",
+          "properties": [],
+          "uri": "urn:agent-on-request:research:bob:ontology:UserReviewDecision"
+        },
+        {
+          "id": "bob:PresentationActivity",
+          "label": "Presentation activity",
+          "parent": "bob:Presentation",
+          "definition": "One individual research presentation inside a program session; not the whole session.",
+          "properties": [],
+          "uri": "urn:agent-on-request:research:bob:ontology:PresentationActivity"
+        }
+      ],
+      "relations": [],
+      "owner": "Bob"
+    },
+    {
+      "id": "bob:interaction",
+      "name": "Users, contexts, interaction designs and rationale",
+      "dependencies": [
+        "bob:research"
+      ],
+      "concepts": [
+        {
+          "id": "bob:UserNeed",
+          "label": "User need",
+          "definition": "An evidenced need in a stated use context, distinct from a software feature or researcher's assumption.",
+          "properties": [
+            {
+              "id": "bob:UserNeed.description",
+              "datatype": "string",
+              "key": "description",
+              "definition": "description of User need."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:UserNeed"
+        },
+        {
+          "id": "bob:InteractionContext",
+          "label": "Interaction context",
+          "definition": "The people, activity and environment in which interaction takes place.",
+          "properties": [
+            {
+              "id": "bob:InteractionContext.description",
+              "datatype": "string",
+              "key": "description",
+              "definition": "description of Interaction context."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:InteractionContext"
+        },
+        {
+          "id": "bob:InteractivePrototype",
+          "label": "Interactive prototype",
+          "definition": "A concrete version of an interactive design used for exploration or evaluation.",
+          "properties": [
+            {
+              "id": "bob:InteractivePrototype.version",
+              "datatype": "string",
+              "key": "version",
+              "definition": "version of Interactive prototype."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:InteractivePrototype"
+        },
+        {
+          "id": "bob:InteractionFlow",
+          "label": "Interaction flow",
+          "definition": "A sequence of user and system actions in a use context.",
+          "properties": [
+            {
+              "id": "bob:InteractionFlow.steps",
+              "datatype": "string[]",
+              "key": "steps",
+              "definition": "steps of Interaction flow."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:InteractionFlow"
+        },
+        {
+          "id": "bob:DesignAlternative",
+          "label": "Design alternative",
+          "definition": "A candidate interaction design, not an implemented or evaluated outcome.",
+          "properties": [
+            {
+              "id": "bob:DesignAlternative.description",
+              "datatype": "string",
+              "key": "description",
+              "definition": "description of Design alternative."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:DesignAlternative"
+        },
+        {
+          "id": "bob:DesignRationale",
+          "label": "Design rationale",
+          "definition": "A documented reason for a design choice, linked to needs or research findings.",
+          "properties": [
+            {
+              "id": "bob:DesignRationale.rationale",
+              "datatype": "string",
+              "key": "rationale",
+              "definition": "rationale of Design rationale."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:DesignRationale"
+        }
+      ],
+      "relations": [
+        {
+          "id": "bob:respondsToNeed",
+          "definition": "The research question or design responds to the stated need.",
+          "domain": [
+            "bob:ResearchQuestion",
+            "bob:DesignAlternative"
+          ],
+          "range": [
+            "bob:UserNeed"
+          ]
+        },
+        {
+          "id": "bob:situatedIn",
+          "definition": "The need or flow is situated in this use context.",
+          "domain": [
+            "bob:UserNeed",
+            "bob:InteractionFlow"
+          ],
+          "range": [
+            "bob:InteractionContext"
+          ]
+        },
+        {
+          "id": "bob:implementsFlow",
+          "definition": "The prototype implements the interaction flow.",
+          "domain": [
+            "bob:InteractivePrototype"
+          ],
+          "range": [
+            "bob:InteractionFlow"
+          ]
+        },
+        {
+          "id": "bob:hasRationale",
+          "definition": "The candidate design has this documented rationale.",
+          "domain": [
+            "bob:DesignAlternative"
+          ],
+          "range": [
+            "bob:DesignRationale"
+          ]
+        }
+      ],
+      "owner": "Bob"
+    },
+    {
+      "id": "bob:study",
+      "name": "User studies, protocols and observations",
+      "dependencies": [
+        "bob:interaction"
+      ],
+      "concepts": [
+        {
+          "id": "bob:UserStudy",
+          "label": "User study",
+          "definition": "A study of interaction with a defined question, protocol and scope.",
+          "properties": [
+            {
+              "id": "bob:UserStudy.state",
+              "datatype": "string",
+              "key": "state",
+              "definition": "state of User study."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:UserStudy"
+        },
+        {
+          "id": "bob:StudyProtocol",
+          "label": "Study protocol",
+          "definition": "A versioned plan describing procedure, tasks and measurements.",
+          "properties": [
+            {
+              "id": "bob:StudyProtocol.version",
+              "datatype": "string",
+              "key": "version",
+              "definition": "version of Study protocol."
+            },
+            {
+              "id": "bob:StudyProtocol.procedure",
+              "datatype": "string",
+              "key": "procedure",
+              "definition": "procedure of Study protocol."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:StudyProtocol"
+        },
+        {
+          "id": "bob:StudySession",
+          "label": "Study session",
+          "definition": "One recorded execution of a study protocol; the fixture contains no real participants.",
+          "properties": [
+            {
+              "id": "bob:StudySession.synthetic",
+              "datatype": "boolean",
+              "key": "synthetic",
+              "definition": "synthetic of Study session."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:StudySession"
+        },
+        {
+          "id": "bob:TaskScenario",
+          "label": "Task scenario",
+          "definition": "A contextualized task used in a user study.",
+          "properties": [
+            {
+              "id": "bob:TaskScenario.description",
+              "datatype": "string",
+              "key": "description",
+              "definition": "description of Task scenario."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:TaskScenario"
+        },
+        {
+          "id": "bob:Observation",
+          "label": "Observation",
+          "definition": "A recorded observation from a specific study session, kept distinct from interpretation.",
+          "properties": [
+            {
+              "id": "bob:Observation.observation",
+              "datatype": "string",
+              "key": "observation",
+              "definition": "observation of Observation."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:Observation"
+        },
+        {
+          "id": "bob:ParticipantConsentRecord",
+          "label": "Participant consent record",
+          "definition": "A record about a study participant's consent. It is not authorization for this agent to share data or execute operations.",
+          "properties": [
+            {
+              "id": "bob:ParticipantConsentRecord.scope",
+              "datatype": "string",
+              "key": "scope",
+              "definition": "scope of Participant consent record."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:ParticipantConsentRecord"
+        }
+      ],
+      "relations": [
+        {
+          "id": "bob:followsProtocol",
+          "definition": "The study or session follows the exact protocol version.",
+          "domain": [
+            "bob:UserStudy",
+            "bob:StudySession"
+          ],
+          "range": [
+            "bob:StudyProtocol"
+          ]
+        },
+        {
+          "id": "bob:definesScenario",
+          "definition": "The protocol defines this study task.",
+          "domain": [
+            "bob:StudyProtocol"
+          ],
+          "range": [
+            "bob:TaskScenario"
+          ]
+        },
+        {
+          "id": "bob:sessionOf",
+          "definition": "The recorded session belongs to the study.",
+          "domain": [
+            "bob:StudySession"
+          ],
+          "range": [
+            "bob:UserStudy"
+          ]
+        },
+        {
+          "id": "bob:evaluatesPrototype",
+          "definition": "The study investigates this prototype version.",
+          "domain": [
+            "bob:UserStudy"
+          ],
+          "range": [
+            "bob:InteractivePrototype"
+          ]
+        },
+        {
+          "id": "bob:observedIn",
+          "definition": "The observation was recorded in this study session.",
+          "domain": [
+            "bob:Observation"
+          ],
+          "range": [
+            "bob:StudySession"
+          ]
+        }
+      ],
+      "owner": "Bob"
+    },
+    {
+      "id": "bob:findings",
+      "name": "Findings, design implications and scholarly outputs",
+      "dependencies": [
+        "bob:study"
+      ],
+      "concepts": [
+        {
+          "id": "bob:Finding",
+          "label": "Research finding",
+          "definition": "An interpretation supported by observations, with context and limitations.",
+          "properties": [
+            {
+              "id": "bob:Finding.finding",
+              "datatype": "string",
+              "key": "finding",
+              "definition": "finding of Research finding."
+            },
+            {
+              "id": "bob:Finding.limitations",
+              "datatype": "string",
+              "key": "limitations",
+              "definition": "limitations of Research finding."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:Finding"
+        },
+        {
+          "id": "bob:DesignImplication",
+          "label": "Design implication",
+          "definition": "A design suggestion derived from scoped research findings, not a universal rule.",
+          "properties": [
+            {
+              "id": "bob:DesignImplication.implication",
+              "datatype": "string",
+              "key": "implication",
+              "definition": "implication of Design implication."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:DesignImplication"
+        },
+        {
+          "id": "bob:StudyReport",
+          "label": "Study report",
+          "parent": "bob:Document",
+          "definition": "A report of study methods, observations, findings and limitations.",
+          "properties": [
+            {
+              "id": "bob:StudyReport.summary",
+              "datatype": "string",
+              "key": "summary",
+              "definition": "summary of Study report."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:StudyReport"
+        },
+        {
+          "id": "bob:PrototypeDemo",
+          "label": "Prototype demonstration",
+          "parent": "bob:Document",
+          "definition": "A demonstrator of a prototype, not evidence that the design was validated.",
+          "properties": [
+            {
+              "id": "bob:PrototypeDemo.summary",
+              "datatype": "string",
+              "key": "summary",
+              "definition": "summary of Prototype demonstration."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:bob:ontology:PrototypeDemo"
+        },
+        {
+          "id": "bob:DesignNote",
+          "label": "Design note",
+          "parent": "bob:ResearchNote",
+          "definition": "A note linking interaction alternatives, reasons and evidence.",
+          "properties": [],
+          "uri": "urn:agent-on-request:research:bob:ontology:DesignNote"
+        }
+      ],
+      "relations": [
+        {
+          "id": "bob:supportedBy",
+          "definition": "The finding is supported by the recorded observation.",
+          "domain": [
+            "bob:Finding"
+          ],
+          "range": [
+            "bob:Observation"
+          ]
+        },
+        {
+          "id": "bob:derivedFromFinding",
+          "definition": "The design implication follows from the scoped finding.",
+          "domain": [
+            "bob:DesignImplication"
+          ],
+          "range": [
+            "bob:Finding"
+          ]
+        },
+        {
+          "id": "bob:informsDesign",
+          "definition": "The implication informs this candidate interaction design.",
+          "domain": [
+            "bob:DesignImplication"
+          ],
+          "range": [
+            "bob:DesignAlternative"
+          ]
+        },
+        {
+          "id": "bob:documentsStudy",
+          "definition": "The report documents this study.",
+          "domain": [
+            "bob:StudyReport"
+          ],
+          "range": [
+            "bob:UserStudy"
+          ]
+        }
+      ],
+      "owner": "Bob"
+    }
+  ],
+  "hash": "a738ede62ce5ccec08261ccbdae757c8ef1b6aa64005a7e1adcf343d70d9fb81"
+}

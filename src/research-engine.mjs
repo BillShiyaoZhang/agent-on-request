@@ -1,18 +1,22 @@
 import path from 'node:path';
 import { mkdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID, randomBytes, createHash, generateKeyPairSync, sign, verify } from 'node:crypto';
 import { AuthorizationLedger } from './authorization-ledger.mjs';
-import { researchProfile, researchConference, researchMappings, selectWorkingOntology } from './research-profiles.mjs';
+import { researchProfile, researchConference, researchWorkspaceManifest, selectWorkingOntology } from './research-profiles.mjs';
+import { experienceDirectory, initializeExperienceFiles, experienceSnapshot, saveExperienceFiles } from './research-workspace-store.mjs';
 import { AppError, requireThat } from './errors.mjs';
 import { canonical, hashPayload } from './runtime-helpers.mjs';
 import { defaultResearchCommand } from './research-commands.mjs';
+import { guidedCorrespondences } from './research-guided-negotiation.mjs';
 
 const clone = value => structuredClone(value);
 const other = role => role === 'Alice' ? 'Bob' : 'Alice';
 const digest = value => createHash('sha256').update(String(value)).digest('hex');
 const TASKS = ['schedule', 'select_presentation', 'prepare_discussion'];
 const ROLE_NAMES = ['Alice', 'Bob'];
+const reservationOrganizer = task => task.type === 'prepare_discussion' ? 'Alice' : task.initiator;
 const purpose = 'academic_coordination';
 const activityDetails = value => {
   if (value === undefined) return undefined;
@@ -22,35 +26,68 @@ const activityDetails = value => {
 const cleanFields = fields => {
   requireThat(fields && typeof fields === 'object' && !Array.isArray(fields) && Object.keys(fields).length > 0 && Object.keys(fields).length <= 16,
     'ARTIFACT_FIELDS', 'Provide a bounded field object.');
-  for (const [key, value] of Object.entries(fields)) requireThat(/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key)
-    && !['__proto__', 'prototype', 'constructor', 'owner', 'role', 'authorization', 'public', 'visibility'].includes(key)
-    && typeof value === 'string' && value.length <= 8000, 'ARTIFACT_FIELDS', 'Artifact fields must be named text fields.');
+  for (const [key, value] of Object.entries(fields)) {
+    requireThat(/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(key)
+      && !['__proto__', 'prototype', 'constructor', 'owner', 'role', 'authorization', 'public', 'visibility'].includes(key),
+    'ARTIFACT_FIELDS', `Field name ${key} is not allowed.`);
+    requireThat(typeof value === 'string', 'ARTIFACT_FIELDS', `Field ${key} must be text, but received ${Array.isArray(value) ? 'an array' : typeof value}. Use a string for counts too, for example attendees: "2".`);
+    requireThat(value.length <= 8000, 'ARTIFACT_FIELDS', `Field ${key} exceeds 8000 characters.`);
+  }
   return clone(fields);
 };
 const minute = time => { const [h, m] = time.split(':').map(Number); return h * 60 + m; };
 const clock = n => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
 const interval = row => { const [a, b] = row.time.split(/[–—-]/); return [minute(a), minute(b)]; };
 function validateReservationFields(fields) {
-  requireThat(['title', 'day', 'time', 'attendees', 'agenda'].every(key => typeof fields[key] === 'string' && fields[key].trim().length > 0),
-    'RESERVATION_FIELDS', 'A reservation draft requires text fields title, day, time, attendees (participant count), and agenda. Example: day="Thu", time="15:00–15:30", attendees="8".');
-  requireThat(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].includes(fields.day) && /^([01]\d|2[0-3]):[0-5]\d[–-]([01]\d|2[0-3]):[0-5]\d$/.test(fields.time)
-    && interval(fields)[0] < interval(fields)[1] && /^\d{1,4}$/.test(fields.attendees) && Number(fields.attendees) >= 1 && Number(fields.attendees) <= 1000,
-  'RESERVATION_FIELDS', 'Use a weekday, a valid same-day HH:MM–HH:MM interval, and attendees as a positive integer count.');
+  const required = ['title', 'day', 'time', 'attendees', 'agenda'];
+  const describe = value => {
+    const type = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+    const encoded = JSON.stringify(value) ?? String(value);
+    return `${type} ${encoded.length > 200 ? encoded.slice(0, 200) + '…' : encoded}`;
+  };
+  requireThat(fields && typeof fields === 'object' && !Array.isArray(fields), 'RESERVATION_FIELDS',
+    `Reservation fields must be an object containing ${required.join(', ')}. Received ${describe(fields)}.`);
+  for (const key of required) {
+    requireThat(Object.hasOwn(fields, key), 'RESERVATION_FIELDS',
+      `Missing reservation field "${key}". Required text fields: ${required.join(', ')}. Received fields: ${Object.keys(fields).join(', ') || '(none)'}.`);
+    const value = fields[key];
+    if (key === 'day') requireThat(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].includes(value), 'RESERVATION_FIELDS',
+      `Reservation field "day" must be a weekday string: Mon, Tue, Wed, Thu, Fri, Sat, Sun. Received ${describe(value)}.`);
+    else if (key === 'time') requireThat(typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d[–-]([01]\d|2[0-3]):[0-5]\d$/.test(value)
+      && interval(fields)[0] < interval(fields)[1], 'RESERVATION_FIELDS',
+    `Reservation field "time" must use a valid same-day HH:MM–HH:MM interval with start < end, for example "15:00–15:30". Received ${describe(value)}.`);
+    else if (key === 'attendees') requireThat(typeof value === 'string' && /^\d{1,4}$/.test(value) && Number(value) >= 1 && Number(value) <= 1000,
+      'RESERVATION_FIELDS', `Reservation field "attendees" must be a positive-integer string for 1–1000 people, using 1–4 digits, for example "8". Received ${describe(value)}.`);
+    else requireThat(typeof value === 'string' && value.trim().length > 0, 'RESERVATION_FIELDS',
+      `Reservation field "${key}" must be non-empty text. Received ${describe(value)}.`);
+  }
+}
+function deliveredResearchSources(w, role) {
+  const exchanges = w.tasks.flatMap(task => (task.exchanges ?? []).filter(exchange => exchange.workspaceId === w.id && exchange.taskId === task.id
+    && (exchange.from === role || exchange.to === role) && exchange.from !== exchange.to
+    && ROLE_NAMES.includes(exchange.from) && ROLE_NAMES.includes(exchange.to)
+    && exchange.receipt?.status === 'received' && exchange.receipt.operationId === exchange.id
+    && exchange.receipt.receiver === exchange.to && exchange.payload !== undefined && exchange.receipt.payloadHash === hashPayload(exchange.payload)));
+  const proposalIds = new Set(w.tasks.flatMap(task => (task.proposals ?? []).filter(proposal => exchanges.some(exchange => exchange.kind === 'alignment_propose'
+    && exchange.taskId === task.id && exchange.id === proposal.id && exchange.payload?.id === proposal.id && exchange.from === proposal.from)).map(proposal => proposal.id)));
+  return { exchanges, proposalIds };
 }
 
 /** Native agents use the same typed tools as the deterministic rehearsal driver.
  * The service owns identities, source projections, durable authorization and actual receipts.
  */
 export class ResearchEngine {
-  constructor({ directory, persist = true, nativeClient, knowledge, agentTokens = {} } = {}) {
+  constructor({ directory, persist = true, nativeClient, knowledge, peerTransport, agentTokens = {} } = {}) {
     this.directory = directory; this.persist = persist; this.nativeClient = nativeClient; this.knowledge = knowledge;
     this.agentTokens = agentTokens; this.workspaces = new Map(); this.ledgers = new Map(); this.queues = new Map();
     this.assignments = new Map(); this.roleBusy = new Map(); this.running = new Set(); this.controllers = new Map(); this.blockedRoles = new Set(); this.closed = false;
-    this.projectionRuns = new Map();
+    this.projectionRuns = new Map(); this.peerTransport = peerTransport; this.transportQueue = Promise.resolve(); this.fileSaves = new Map(); this.nativeWorkspaceRuns = new Map();
   }
   async init() {
+    await this.peerTransport?.start?.();
     if (this.nativeClient?.check) await Promise.all(ROLE_NAMES.map(role => this.nativeClient.check({ role })));
-    if (this.knowledge) await this.knowledge.initialize(Object.fromEntries(ROLE_NAMES.map(role => [role, researchProfile(role)])));
+    // Every audience receives an immutable seed in its own native namespace.
+    // The mutable base KG is never a source of initial conditions.
     if (this.persist) await mkdir(this.directory, { recursive: true, mode: 0o700 });
     this.stateDB = new DatabaseSync(this.persist ? path.join(this.directory, 'workspaces.sqlite') : ':memory:');
     this.stateDB.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS workspaces(id TEXT PRIMARY KEY,state TEXT NOT NULL)');
@@ -58,6 +95,15 @@ export class ResearchEngine {
       const w = JSON.parse(entry.state);
       requireThat(w.id === entry.id && w.schemaVersion === 1, 'RESEARCH_STORAGE', 'The collaboration workspace cannot be loaded.', 503);
       this.workspaces.set(w.id, w); this.openLedgers(w);
+      for (const report of w.conference.reports ?? []) if (report.topics) {
+        for (const role of ROLE_NAMES) {
+          w.profiles[role].reportAnnotations ??= [];
+          const types = w.profiles[role].ontology.modules.flatMap(module => module.concepts).filter(term => term.parent === `${role.toLowerCase()}:Presentation`);
+          if (!w.profiles[role].reportAnnotations.some(annotation => annotation.reportId === report.id)) w.profiles[role].reportAnnotations.push({
+            reportId: report.id, topicIds: clone(report.topics[role] ?? []), recordType: types.length === 1 ? types[0].id : null, source: 'legacy-own-annotation-import' });
+        }
+        delete report.topics;
+      }
       w.policyCandidates ??= { Alice: [], Bob: [] };
       w.activity ??= [];
       for (const task of w.tasks) if (task.status === 'running') { task.status = 'paused'; task.error = '服务重启；请恢复任务，先核验已有操作回执。'; }
@@ -79,8 +125,11 @@ export class ResearchEngine {
   }
   openLedgers(w) {
     const rows = {};
-    for (const role of ROLE_NAMES) rows[role] = new AuthorizationLedger({ owner: `${w.id}:${role}`,
-      filename: this.persist ? path.join(this.directory, w.id, `${role.toLowerCase()}.sqlite`) : ':memory:' });
+    for (const role of ROLE_NAMES) {
+      const legacy = this.persist ? path.join(this.directory, w.id, `${role.toLowerCase()}.sqlite`) : '';
+      rows[role] = new AuthorizationLedger({ owner: `${w.id}:${role}`, filename: this.persist
+        ? existsSync(legacy) ? legacy : path.join(experienceDirectory(this.directory, w.id, role), 'authorization.sqlite') : ':memory:' });
+    }
     this.ledgers.set(w.id, rows); return rows;
   }
   ledger(w, role) { return this.ledgers.get(w.id)[role]; }
@@ -93,6 +142,43 @@ export class ResearchEngine {
   async save(w) {
     this.recordResults(w);
     this.stateDB.prepare('INSERT INTO workspaces(id,state) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state').run(w.id, JSON.stringify(w));
+    if (this.persist) {
+      const snapshot = experienceSnapshot(w);
+      const saved = (this.fileSaves.get(w.id) ?? Promise.resolve()).then(() => saveExperienceFiles(this.directory, w.id, snapshot));
+      this.fileSaves.set(w.id, saved.catch(() => {})); await saved;
+    }
+  }
+  async transfer(role, value, beforeSend) {
+    const transfer = this.transportQueue.then(async () => {
+      beforeSend?.();
+      const received = this.peerTransport ? await this.peerTransport.transfer(role, value, { beforeSend }) : clone(value);
+      requireThat(canonical(received) === canonical(value), 'RESEARCH_TRANSPORT', 'The peer did not receive the same content.', 502);
+      return received;
+    });
+    this.transportQueue = transfer.catch(() => {}); return transfer;
+  }
+  receivedOntology(w, t, role) {
+    const messages = w.messages.filter(message => message.to === role && message.from === other(role)
+      && message.resourceId === 'working-ontology');
+    const message = messages.findLast(message => message.payload.ontology?.taskType === t.type) ?? messages.at(-1);
+    return message ? { ...clone(message.payload.ontology), receivedSource: message.id } : null;
+  }
+  peerView(w, t, role) {
+    const ontology = t ? this.receivedOntology(w, t, role) : null;
+    const capability = w.messages.findLast(message => message.to === role && message.from === other(role) && message.resourceId === 'capabilities');
+    return { role: other(role), known: Boolean(ontology || capability), ontology, skills: clone(capability?.payload.skills ?? []),
+      sources: [ontology?.receivedSource, capability?.id].filter(Boolean) };
+  }
+  async ensureNativeWorkspace(w, role) {
+    if (!this.knowledge?.createWorkspace || w.profiles[role].nativeWorkspace) return;
+    const key = `${w.id}:${role}`;
+    if (!this.nativeWorkspaceRuns.has(key)) {
+      const run = this.knowledge.createWorkspace(role, { workspaceId: w.id, profile: clone(w.profiles[role]) }).then(profile => {
+        w.profiles[role].nativeWorkspace = profile.nativeWorkspace;
+      }).finally(() => this.nativeWorkspaceRuns.delete(key));
+      this.nativeWorkspaceRuns.set(key, run);
+    }
+    await this.nativeWorkspaceRuns.get(key);
   }
   activity(w, event, { ownerOnly = false, sharedDetails = false } = {}) {
     w.activity ??= [];
@@ -147,7 +233,7 @@ export class ResearchEngine {
     const run = Promise.allSettled(ROLE_NAMES.map(async role => {
       const ledger = this.ledger(w, role);
       for (const item of ledger.pendingOutbox()) {
-        try { await this.knowledge.project(role, { workspaceId: w.id, ...item }); ledger.acknowledgeOutbox(item.id); }
+        try { await this.ensureNativeWorkspace(w, role); await this.knowledge.project(role, { workspaceId: w.id, ...item }); ledger.acknowledgeOutbox(item.id); }
         catch { break; } // Never delay authorization/execution on an unavailable KG projection.
       }
     }));
@@ -157,19 +243,25 @@ export class ResearchEngine {
   async create() {
     const id = randomUUID(); const tokens = Object.fromEntries(ROLE_NAMES.map(role => [role, randomBytes(32).toString('base64url')]));
     const profiles = {};
-    for (const role of ROLE_NAMES) profiles[role] = this.knowledge ? await this.knowledge.profile(role) : researchProfile(role);
+    for (const role of ROLE_NAMES) {
+      const profile = researchProfile(role);
+      profiles[role] = this.knowledge?.createWorkspace ? await this.knowledge.createWorkspace(role, { workspaceId: id, profile }) : profile;
+    }
+    if (profiles.Alice.nativeWorkspace && profiles.Bob.nativeWorkspace) requireThat(profiles.Alice.nativeWorkspace.namespace !== profiles.Bob.nativeWorkspace.namespace,
+      'RESEARCH_KG_ISOLATION', 'Each role requires its own experience namespace.', 503);
     const keys = Object.fromEntries(ROLE_NAMES.map(role => {
       const pair = generateKeyPairSync('ed25519'); return [role, { private: pair.privateKey.export({ type: 'pkcs8', format: 'pem' }), public: pair.publicKey.export({ type: 'spki', format: 'pem' }) }];
     }));
     const w = { schemaVersion: 1, id, projectId: `collaboration:${id}`, createdAt: new Date().toISOString(),
       ownerHashes: Object.fromEntries(ROLE_NAMES.map(role => [role, digest(tokens[role])])), keys, profiles,
-      conference: researchConference(), tasks: [], artifacts: [], messages: [], reservations: [], authorizationProjection: [], policyCandidates: { Alice: [], Bob: [] }, events: [], activity: [] };
-    if (this.persist) await mkdir(path.join(this.directory, id), { recursive: true });
+      conference: researchConference(), seedManifests: Object.fromEntries(ROLE_NAMES.map(role => [role, researchWorkspaceManifest(role)])),
+      tasks: [], artifacts: [], messages: [], reservations: [], authorizationProjection: [], policyCandidates: { Alice: [], Bob: [] }, events: [], activity: [] };
+    if (this.persist) await initializeExperienceFiles(this.directory, w);
     this.workspaces.set(id, w); this.openLedgers(w);
-    for (const role of ROLE_NAMES) this.ledger(w, role).policy({ id: `standing:${role}`, effect: 'allow', actions: ['peer.send'],
-      resourceClass: 'public', recipients: [other(role)], purposes: [purpose], projectId: w.projectId });
-    for (const role of ROLE_NAMES) this.ledger(w, role).policy({ id: `availability:${role}`, effect: 'allow', actions: ['peer.send'],
-      resources: ['availability', 'report-interests'], recipients: [other(role)], purposes: [purpose], projectId: w.projectId });
+    for (const role of ROLE_NAMES) for (const template of profiles[role].policyTemplates ?? []) {
+      const { key, ...policy } = template;
+      this.ledger(w, role).policy({ ...policy, id: key === 'public-materials' ? `standing:${role}` : key === 'coordination' ? `availability:${role}` : `${key}:${role}`, projectId: w.projectId });
+    }
     await this.flush(w); await this.save(w);
     return { workspaceId: id, owner: 'Alice', token: tokens.Alice, state: this.view(w, 'Alice') };
   }
@@ -184,12 +276,14 @@ export class ResearchEngine {
   }
   catalog() {
     return { tasks: TASKS, nativeAvailable: Boolean(this.nativeClient), profiles: Object.fromEntries(ROLE_NAMES.map(role => {
-      const p = researchProfile(role); return [role, { role, ontology: p.ontology, skills: p.skills }];
+      const p = researchProfile(role); return [role, { role, field: p.field, ontology: { version: p.ontology.version }, skillCount: p.skills.length }];
     })), conference: researchConference() };
   }
-  taskView(task, role) {
+  taskView(task, role, w) {
     if (task.type === 'research_work' && task.initiator !== role) return { id: task.id, type: task.type, status: task.status };
-    const { nativeRuns, ownerGoal, ...view } = clone(task);
+    const { nativeRuns, ownerGoal, mappingReview, ontology, ...view } = clone(task);
+    view.ontology = { [role]: clone(ontology[role]), [other(role)]: w ? this.receivedOntology(w, task, role) : null };
+    view.proposals = (view.proposals ?? []).map(({ localNotes, ...proposal }) => proposal);
     if (task.initiator === role) view.ownerGoal = ownerGoal;
     return { ...view, checkpoints: Object.fromEntries(Object.entries(task.checkpoints).map(([owner, checkpoint]) => [owner, owner === role ? clone(checkpoint) : { status: checkpoint.status }])) };
   }
@@ -197,8 +291,11 @@ export class ResearchEngine {
     const own = clone(w.profiles[role]); const peer = w.profiles[other(role)];
     const sharedTask = w.tasks.findLast(task => task.type !== 'research_work');
     return { workspaceId: w.id, projectId: w.projectId, owner: role, createdAt: w.createdAt, profile: own,
-      peer: { role: other(role), ontology: sharedTask ? clone(sharedTask.ontology[other(role)]) : { id: peer.ontology.id, version: peer.ontology.version, modules: [] }, skills: peer.skills }, conference: clone(w.conference),
-      tasks: w.tasks.filter(task => task.type !== 'research_work' || task.initiator === role).map(task => this.taskView(task, role)), artifacts: clone(w.artifacts.filter(a => a.owner === role)),
+      peer: this.peerView(w, sharedTask, role), conference: clone(w.conference),
+      workspace: { role, seed: clone(own.seed), manifest: clone(w.seedManifests?.[role] ?? null),
+        seedPath: `workspaces/${role.toLowerCase()}`, runtimePath: `runs/${w.id}/${role.toLowerCase()}`,
+        nativeNamespace: own.nativeWorkspace?.namespace ?? null },
+      tasks: w.tasks.filter(task => task.type !== 'research_work' || task.initiator === role).map(task => this.taskView(task, role, w)), artifacts: clone(w.artifacts.filter(a => a.owner === role)),
       messages: clone(w.messages.filter(m => m.from === role || m.to === role)),
       activity: this.activityView(w, role),
       authorizations: this.ledger(w, role).list(),
@@ -219,14 +316,13 @@ export class ResearchEngine {
       requireThat(!w.tasks.some(item => ['running', 'needs_owner'].includes(item.status)), 'RESEARCH_BUSY', 'Finish or pause the current task first.', 409);
       const t = { id: randomUUID(), type, mode, initiator, ownerGoal: command.trim(), status: 'running', createdAt: new Date().toISOString(), durationMinutes: 30,
         ontology: Object.fromEntries(ROLE_NAMES.map(role => [role, this.workingOntology(w, role, type)])),
-        proposals: [], mappings: [], checkpoints: {}, wakeRoles: { Alice: type !== 'research_work' || initiator === 'Alice', Bob: type !== 'research_work' || initiator === 'Bob' }, runCounts: { Alice: 0, Bob: 0 },
+        proposals: [], mappings: [], checkpoints: {}, wakeRoles: { Alice: initiator === 'Alice', Bob: initiator === 'Bob' }, runCounts: { Alice: 0, Bob: 0 },
         result: null, error: null, input: { scheduleTask: w.tasks.findLast(x => x.type === 'schedule' && x.result)?.id ?? null,
           reportTask: w.tasks.findLast(x => x.type === 'select_presentation' && x.result)?.id ?? null } };
       if (type === 'research_work') {
         const peerRole = other(initiator), peerOntology = w.profiles[peerRole].ontology;
         t.ontology[peerRole] = { owner: peerRole, id: peerOntology.id, version: peerOntology.version, hash: peerOntology.hash, modules: [] };
       }
-      if (type === 'select_presentation') t.mappingReview = this.mappingCandidates(t);
       w.tasks.push(t);
       this.activity(w, { taskId: t.id, role: initiator, kind: 'command', direction: 'incoming', from: `owner:${initiator}`, to: initiator, name: 'owner_command', text: command.trim(), status: 'received' });
       await this.save(w); return t;
@@ -238,27 +334,26 @@ export class ResearchEngine {
     if (type === 'research_work') return { owner: role, ...clone(w.profiles[role].ontology), taskType: type };
     return selectWorkingOntology(role, type, w.profiles[role]);
   }
-  mappingCandidates(t) {
-    const terms = modules => new Map(modules.flatMap(m => m.concepts).map(c => [c.id, c]));
-    const actual = new Map(ROLE_NAMES.flatMap(role => [...terms(t.ontology[role].modules).entries()]));
-    const original = new Map(ROLE_NAMES.flatMap(role => [...terms(researchProfile(role).ontology.modules).entries()]));
-    const meaning = term => term && hashPayload({ definition: term.definition, parent: term.parent ?? null,
-      properties: (term.properties ?? []).map(p => ({ id: p.id, datatype: p.datatype, constraints: p.constraints ?? {} })) });
-    return researchMappings().filter(m => m.taskTypes.includes(t.type)).map(m => {
-      const source = actual.get(m.source), target = actual.get(m.target);
-      const unchanged = source && target && meaning(source) === meaning(original.get(m.source)) && meaning(target) === meaning(original.get(m.target));
-      return { ...m, valid: Boolean(m.valid && unchanged), sourceDefinition: source?.definition ?? null, targetDefinition: target?.definition ?? null,
-        ...(!unchanged ? { reason: 'The current disclosed definitions differ from this registered correspondence. Review and register a new version before using it.' } : {}),
-        ontologyHashes: Object.fromEntries(ROLE_NAMES.map(role => [role, t.ontology[role].hash])) };
-    });
+  sharedDefinitions(w, t, role) {
+    const own = w.messages.findLast(message => message.from === role && message.resourceId === 'working-ontology'
+      && message.payload.ontology?.taskType === t.type);
+    const peer = this.receivedOntology(w, t, role);
+    requireThat(own && peer && own.payload.ontology.hash === this.workingOntology(w, role, t.type).hash,
+      'RESEARCH_ONTOLOGY_REQUIRED', 'Exchange your current task definitions and request the peer definitions before proposing a correspondence.', 409);
+    return { own: own.payload.ontology, peer, sources: [own.id, peer.receivedSource] };
   }
   source(w, t, role, id) {
     const p = w.profiles[role];
     if (id === 'availability') return { id, version: p.ontology.version, visibility: 'availability', fields: { slots: p.calendar.filter(r => r.status === 'Free').map(({ day, time, status }) => ({ day, time, status })) } };
     if (id === 'report-interests') {
-      const reports = w.conference.reports.filter(report => (report.topics?.[role] ?? []).some(topic => (p.interests ?? []).includes(topic)));
-      return { id, version: p.ontology.version, visibility: 'availability', fields: { reportIds: reports.map(r => r.id), interests: clone(p.interests ?? []) } };
+      const reports = w.conference.reports.filter(report => (p.reportAnnotations ?? []).some(annotation => annotation.reportId === report.id
+        && annotation.topicIds.some(topic => (p.interests ?? []).includes(topic))));
+      const recordTypes = [...new Set((p.reportAnnotations ?? []).filter(annotation => reports.some(report => report.id === annotation.reportId)).map(annotation => annotation.recordType).filter(Boolean))];
+      return { id, version: p.ontology.version, visibility: 'availability', fields: { reportIds: reports.map(r => r.id), interests: clone(p.interests ?? []),
+        recordType: recordTypes.length === 1 ? recordTypes[0] : null } };
     }
+    if (id === 'working-ontology') return { id, version: p.ontology.version, visibility: 'coordination', fields: { ontology: this.workingOntology(w, role, t.type) } };
+    if (id === 'capabilities') return { id, version: p.seed?.version ?? p.ontology.version, visibility: 'coordination', fields: { skills: p.skills.map(({ id, label, description }) => ({ id, label, description })) } };
     const material = p.materials.find(m => m.id === id || m.id.endsWith(`:${id}`));
     if (material) return clone(material);
     const artifact = w.artifacts.find(a => a.id === id && a.owner === role && a.taskId === t.id);
@@ -273,7 +368,8 @@ export class ResearchEngine {
     let recipient = other(role); let resourceClass = source.visibility === 'public' && source.ownerConfirmedVisibility === true ? 'public' : source.visibility === 'availability' ? 'availability' : 'private';
     if (action === 'peer.send') requireThat(!args.recipient || args.recipient === recipient, 'RESEARCH_RECIPIENT', 'Send only to the paired agent.');
     else {
-      requireThat(role === 'Alice', 'RESERVATION_ORGANIZER', 'Alice is the designated organizer for this collaboration.', 403);
+      const organizer = reservationOrganizer(t);
+      requireThat(role === organizer, 'RESERVATION_ORGANIZER', `${organizer} is the designated submitting organizer. Share an approved draft with that agent; only the organizer prepares its own executable form and requests its owner's booking decision.`, 403);
       requireThat(source.kind === 'reservation', 'RESERVATION_DRAFT', 'Prepare a reservation draft first.');
       validateReservationFields(source.fields);
       requireThat(fields.length === Object.keys(source.fields).length, 'RESERVATION_FIELDS', 'A reservation requires the complete reviewed form.');
@@ -301,7 +397,10 @@ export class ResearchEngine {
     try {
       const receipt = await perform(id); await this.save(w);
       ledger.complete(id, { status: 'succeeded', receipt }); await this.flush(w); return receipt;
-    } catch (error) { ledger.complete(id, { status: ['VENUE_UNAVAILABLE', 'RESERVATION_TIME'].includes(error.code) ? 'failed' : 'uncertain' }); throw error; }
+    } catch (error) {
+      if (ledger.getOperation(id)?.status !== 'succeeded') ledger.complete(id, { status: ['VENUE_UNAVAILABLE', 'RESERVATION_TIME'].includes(error.code) ? 'failed' : 'uncertain' });
+      throw error;
+    }
   }
   async send(w, t, role, args) {
     const intent = this.intent(w, t, role, { ...args, action: 'peer.send' });
@@ -310,14 +409,23 @@ export class ResearchEngine {
       const envelope = { id, workspaceId: w.id, taskId: t.id, from: role, to: other(role), resourceId: intent.resourceId,
         sourceVersion: intent.resourceVersion, fields: intent.fields, payload, payloadHash: hashPayload(payload), mappingHash: hashPayload(t.mappings) };
       const signature = sign(null, Buffer.from(canonical(envelope)), w.keys[role].private).toString('base64');
-      requireThat(verify(null, Buffer.from(canonical(envelope)), w.keys[role].public, Buffer.from(signature, 'base64')), 'RESEARCH_SIGNATURE', 'Message signature verification failed.', 503);
+      const received = await this.transfer(role, { ...envelope, signature }, () => requireThat(!w.endedAt && !this.closed, 'RESEARCH_ENDED', 'This experience has ended.', 409));
+      requireThat(verify(null, Buffer.from(canonical(envelope)), w.keys[role].public, Buffer.from(received.signature, 'base64')), 'RESEARCH_SIGNATURE', 'Message signature verification failed.', 503);
       const ack = { operationId: id, status: 'received', receiver: other(role), payloadHash: envelope.payloadHash, receivedAt: new Date().toISOString() };
-      const receipt = { ...ack, signature: sign(null, Buffer.from(canonical(ack)), w.keys[other(role)].private).toString('base64') };
+      const receipt = await this.transfer(other(role), { ...ack, signature: sign(null, Buffer.from(canonical(ack)), w.keys[other(role)].private).toString('base64') });
       w.messages.push({ ...envelope, signature, receipt });
       this.conversation(w, t, role, other(role), 'peer_send', { resourceId: envelope.resourceId, sourceVersion: envelope.sourceVersion, fields: envelope.fields, payload, receipt }, id);
       t.wakeRoles[other(role)] = true; return receipt;
     });
     this.reconcile(w, t); return receipt;
+  }
+  async exchange(w, t, role, name, details, id) {
+    const envelope = { id, workspaceId: w.id, taskId: t.id, from: role, to: other(role), kind: name, payload: details };
+    const received = await this.transfer(role, envelope);
+    const receipt = await this.transfer(other(role), { operationId: id, receiver: other(role), status: 'received', payloadHash: hashPayload(received.payload) });
+    t.exchanges ??= []; t.exchanges.push({ ...received, receipt });
+    this.conversation(w, t, role, other(role), name, received.payload, id);
+    t.wakeRoles[other(role)] = true; return received.payload;
   }
   reconcile(w, t) {
     const messages = w.messages.filter(m => m.taskId === t.id);
@@ -332,13 +440,16 @@ export class ResearchEngine {
       t.result = { outcome: common.length ? 'common_time_found' : 'no_common_time', meeting: common[0] ?? null, receipts: [a.id, b.id] }; t.status = 'completed';
     } else if (t.type === 'select_presentation') {
       const a = messages.find(m => m.from === 'Alice' && m.resourceId === 'report-interests'); const b = messages.find(m => m.from === 'Bob' && m.resourceId === 'report-interests');
-      if (!a || !b || !t.mappings.some(m => m.id === 'individual-presentation')) return;
+      if (!a || !b || !t.mappings.some(mapping => ['exact', 'close', 'conditional'].includes(mapping.relation)
+        && ((mapping.source === a.payload.recordType && mapping.target === b.payload.recordType)
+          || (mapping.source === b.payload.recordType && mapping.target === a.payload.recordType)))) return;
       const ids = a.payload.reportIds.filter(id => b.payload.reportIds.includes(id));
       const report = w.conference.reports.find(r => ids.includes(r.id));
       t.result = { outcome: report ? 'presentation_selected' : 'no_shared_presentation', report: clone(report ?? null), mappings: clone(t.mappings), receipts: [a.id, b.id] }; t.status = 'completed';
     } else if (t.type === 'prepare_discussion') {
       const reservation = w.reservations.find(r => r.taskId === t.id);
-      const agendas = w.artifacts.filter(a => a.taskId === t.id && a.kind === 'agenda');
+      const agendas = w.artifacts.filter(a => a.taskId === t.id && a.kind === 'agenda' && Object.values(a.fields).some(value => value.trim())
+        && a.sourceRefs.some(ref => messages.some(message => message.id === ref && message.to === a.owner)));
       if (reservation && agendas.length && ROLE_NAMES.every(role => messages.some(m => m.from === role))) { t.status = 'completed'; t.result = { outcome: 'discussion_prepared', reservation: clone(reservation.receipt),
         artifacts: agendas.map(a => ({ id: a.id, owner: a.owner, version: a.version })), receipts: messages.map(m => m.id) }; }
       else if (reservation) t.result = { outcome: 'reservation_confirmed_preparation_pending', reservation: clone(reservation.receipt) };
@@ -384,7 +495,11 @@ export class ResearchEngine {
     const profile = w.profiles[role];
     if (name === 'knowledge_search') {
       let nodes = clone(profile.knowledge.nodes);
-      const received = w.messages.filter(m => m.to === role).map(m => ({ id: m.id, type: 'ReceivedInformation', label: m.resourceId, properties: m.payload, source: m.receipt, version: m.sourceVersion }));
+      const exactIds = Array.isArray(args.ids) ? new Set(args.ids) : null;
+      const received = w.messages.filter(m => m.to === role).map(m => ({ id: m.id, type: 'ReceivedInformation', label: m.resourceId,
+        properties: ['working-ontology', 'capabilities'].includes(m.resourceId)
+          ? { resourceId: m.resourceId, from: m.from, version: m.sourceVersion, sourceRef: m.id, inspect: 'peer_describe' }
+          : m.payload, source: m.receipt, version: m.sourceVersion }));
       nodes.push(...received);
       const q = String(args.query ?? '').toLowerCase();
       let selected = nodes.filter(n => (!args.type || n.type === args.type || n.type.endsWith(`:${args.type}`)) && (!args.ids || args.ids.includes(n.id)) && (!q || JSON.stringify(n).toLowerCase().includes(q)));
@@ -394,9 +509,20 @@ export class ResearchEngine {
         for (const edge of profile.knowledge.edges) if (frontier.has(edge.source) || frontier.has(edge.target)) { ids.add(edge.source); ids.add(edge.target); }
       }
       selected = nodes.filter(n => ids.has(n.id));
+      const matches = value => (!exactIds || exactIds.has(value.id ?? value.recordId)) && (!q || JSON.stringify(value).toLowerCase().includes(q));
+      const projections = new Map();
+      for (const row of w.authorizationProjection.filter(row => row.role === role)) {
+        const record = row.record;
+        projections.set(row.recordId, { recordId: row.recordId, kind: row.topic, status: record.status,
+          action: record.intent?.action, resourceId: record.intent?.resourceId, taskId: record.intent?.taskId,
+          createdAt: row.createdAt, inspect: 'authorization_list' });
+      }
+      const broad = !exactIds && !args.type;
       return { owner: role, ontologyVersion: profile.ontology.version, nodes: selected, edges: profile.knowledge.edges.filter(e => ids.has(e.source) && ids.has(e.target)),
-        materials: profile.materials.filter(m => !q || JSON.stringify(m).toLowerCase().includes(q)), calendar: clone(profile.calendar),
-        authorizations: w.authorizationProjection.filter(x => x.role === role && (!q || JSON.stringify(x).toLowerCase().includes(q))) };
+        materials: args.type ? [] : profile.materials.filter(matches),
+        calendar: broad && (!q || /calendar|availability|schedule|日程|忙闲/.test(q)) ? clone(profile.calendar) : [],
+        reportAnnotations: !args.type && !exactIds && (!q || /report|presentation|报告/.test(q)) ? clone(profile.reportAnnotations ?? []) : [],
+        authorizations: [...projections.values()].filter(matches) };
     }
     if (name === 'knowledge_record') {
       const nodes = args.nodes ?? [], edges = args.edges ?? [];
@@ -405,7 +531,11 @@ export class ResearchEngine {
       const concepts = new Map(profile.ontology.modules.flatMap(m => m.concepts).map(c => [c.id, c]));
       const relations = new Map(profile.ontology.modules.flatMap(m => m.relations).map(r => [r.id, r]));
       const prefix = role.toLowerCase() + ':';
-      const knownSources = new Set([...profile.knowledge.nodes.map(n => n.id), ...profile.materials.map(m => m.id), ...w.messages.filter(m => m.to === role).map(m => m.id)]);
+      const { exchanges: deliveredExchanges, proposalIds: deliveredProposalIds } = deliveredResearchSources(w, role);
+      const publicSources = [w.conference.id, ...w.conference.reports.flatMap(report => [report.id, report.source]), ...w.conference.venues.map(venue => venue.id)].filter(Boolean);
+      const knownSources = new Set([...profile.knowledge.nodes.map(n => n.id), ...profile.materials.map(m => m.id),
+        ...w.artifacts.filter(artifact => artifact.owner === role && artifact.sourceRefs?.length).map(artifact => artifact.id),
+        ...w.messages.filter(m => m.to === role || m.from === role).map(m => m.id), ...deliveredExchanges.map(exchange => exchange.id), ...publicSources]);
       const prepared = nodes.map(node => {
         requireThat(node && typeof node.id === 'string' && node.id.startsWith(prefix) && /^[A-Za-z0-9:_-]{1,160}$/.test(node.id), 'KNOWLEDGE_ID', 'A fact ID must belong to the current researcher.');
         const concept = concepts.get(node.type);
@@ -418,21 +548,33 @@ export class ResearchEngine {
         requireThat(properties && typeof properties === 'object' && !Array.isArray(properties) && Object.keys(properties).length <= 32, 'KNOWLEDGE_PROPERTIES', 'Use declared typed properties.');
         for (const [key, value] of Object.entries(properties)) {
           const property = declared.get(key);
-          requireThat(property && !['__proto__', 'prototype', 'constructor'].includes(key), 'KNOWLEDGE_PROPERTY', 'The property is not declared in this ontology.');
+          requireThat(property && !['__proto__', 'prototype', 'constructor'].includes(key), 'KNOWLEDGE_PROPERTY',
+            `Property "${key}" is not declared for ${node.type}. Use the declared properties: ${[...declared.keys()].join(', ') || '(none)'}.`);
           const type = property.datatype;
+          const actualType = value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
           requireThat(type === 'string[]' ? Array.isArray(value) && value.length <= 100 && value.every(v => typeof v === 'string' && v.length <= 1000)
             : type === 'integer' ? Number.isSafeInteger(value) : ['number', 'decimal', 'float', 'double'].includes(type) ? typeof value === 'number' && Number.isFinite(value)
-            : type === 'boolean' ? typeof value === 'boolean' : typeof value === 'string' && value.length <= 8000, 'KNOWLEDGE_DATATYPE', 'The value does not match its ontology datatype.');
+            : type === 'boolean' ? typeof value === 'boolean' : typeof value === 'string' && value.length <= 8000, 'KNOWLEDGE_DATATYPE',
+          `Property "${key}" expects datatype ${type}; received ${actualType}. Use values within the declared datatype and size bounds.`, 400,
+          { property: key, expectedDatatype: type, actualType });
           const constraints = property.constraints ?? {};
           requireThat((!constraints.enum || constraints.enum.includes(value)) && (constraints.minimum === undefined || value >= constraints.minimum)
-            && (constraints.maximum === undefined || value <= constraints.maximum) && (constraints.maxLength === undefined || typeof value !== 'string' || value.length <= constraints.maxLength), 'KNOWLEDGE_CONSTRAINT', 'The value violates its ontology constraints.');
+            && (constraints.maximum === undefined || value <= constraints.maximum) && (constraints.maxLength === undefined || typeof value !== 'string' || value.length <= constraints.maxLength), 'KNOWLEDGE_CONSTRAINT', `Property "${key}" violates its declared ontology constraints.`);
           if (constraints.pattern === 'HH:MM–HH:MM') {
             requireThat(typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d[–-]([01]\d|2[0-3]):[0-5]\d$/.test(value)
-              && interval({ time: value })[0] < interval({ time: value })[1], 'KNOWLEDGE_CONSTRAINT', 'Provide a valid same-day time interval.');
+              && interval({ time: value })[0] < interval({ time: value })[1], 'KNOWLEDGE_CONSTRAINT', `Property "${key}" requires a valid same-day time interval.`);
           }
         }
-        const refs = node.sourceRefs ?? [];
-        requireThat(Array.isArray(refs) && refs.length > 0 && refs.length <= 32 && refs.every(ref => knownSources.has(ref)), 'KNOWLEDGE_SOURCE', 'Facts require existing local or actually received sources.');
+        const suppliedRefs = node.sourceRefs ?? [];
+        requireThat(Array.isArray(suppliedRefs) && suppliedRefs.length > 0 && suppliedRefs.length <= 32,
+          'KNOWLEDGE_SOURCE', 'Facts require 1–32 existing local or actually exchanged source references.');
+        const refs = suppliedRefs.map(ref => {
+          const alias = typeof ref === 'string' && /^proposal:([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})$/i.exec(ref);
+          return alias && deliveredProposalIds.has(alias[1].toLowerCase()) ? alias[1].toLowerCase() : ref;
+        });
+        const unknown = refs.find(ref => typeof ref !== 'string' || !knownSources.has(ref));
+        requireThat(unknown === undefined && refs.every(ref => typeof ref === 'string' && knownSources.has(ref)), 'KNOWLEDGE_SOURCE',
+          `Unknown source reference "${String(unknown).slice(0, 200)}". Use own record IDs or sourced local artifacts, sent or received message receipts, this audience's delivered proposal/exchange IDs, or actual public program records and source IDs.`);
         return { id: node.id, type: node.type, label: node.label, properties: clone(properties), source: { taskId: t.id, references: clone(refs) }, version: String(Number(old?.version ?? 0) + 1), visibility: 'private' };
       });
       requireThat(new Set(prepared.map(n => n.id)).size === prepared.length, 'KNOWLEDGE_ID', 'A fact ID cannot be repeated.');
@@ -445,20 +587,24 @@ export class ResearchEngine {
         requireThat(relation && source && target && isType(source.type, relation.domain) && isType(target.type, relation.range), 'KNOWLEDGE_RELATION', 'Relationship endpoints must satisfy the local ontology.');
         return { id: `${prefix}edge-${hashPayload([edge.source, edge.target, edge.relation]).slice(0, 24)}`, source: edge.source, target: edge.target, relation: edge.relation, sourceRecord: `task:${t.id}`, version: '1' };
       });
-      if (this.knowledge?.record) await this.knowledge.record(role, { workspaceId: w.id, nodes: prepared, edges: preparedEdges });
+      if (this.knowledge?.record) { await this.ensureNativeWorkspace(w, role); await this.knowledge.record(role, { workspaceId: w.id, nodes: prepared, edges: preparedEdges }); }
       for (const node of prepared) { const index = profile.knowledge.nodes.findIndex(n => n.id === node.id); if (index < 0) profile.knowledge.nodes.push(node); else profile.knowledge.nodes[index] = node; }
       for (const edge of preparedEdges) if (!profile.knowledge.edges.some(e => e.id === edge.id)) profile.knowledge.edges.push(edge);
       return { owner: role, ontologyHash: profile.ontology.hash, nodes: prepared, edges: preparedEdges };
     }
     if (name === 'ontology_describe') return this.workingOntology(w, role, args.taskType ?? t.type);
-    if (name === 'peer_describe') return { role: other(role), skills: w.profiles[other(role)].skills, ontology: t.ontology[other(role)] };
+    if (name === 'peer_describe') return this.peerView(w, t, role);
     if (name === 'artifact_prepare' || name === 'artifact_revise') {
-      const fields = cleanFields(args.fields); const refs = args.sourceRefs ?? [];
+      const fields = cleanFields(args.fields); let refs = args.sourceRefs ?? [];
       requireThat(Array.isArray(refs) && refs.length <= 32, 'ARTIFACT_SOURCES', 'Use a bounded source list.');
       const control = this.ledger(w, role).list();
       const controlSources = ['policies', 'requests', 'decisions', 'grants', 'operations'].flatMap(kind => control[kind].map(record => record.id));
-      const known = new Set([...profile.knowledge.nodes.map(n => n.id), ...profile.materials.map(m => m.id), ...w.messages.filter(m => m.to === role).map(m => m.id), ...w.artifacts.filter(a => a.owner === role).map(a => a.id), ...controlSources]);
-      requireThat(refs.every(ref => known.has(ref)), 'ARTIFACT_SOURCE', 'Only own or actually received sources may be used.');
+      const { exchanges, proposalIds: proposals } = deliveredResearchSources(w, role);
+      const exchangedSources = exchanges.map(exchange => exchange.id);
+      refs = refs.map(ref => typeof ref === 'string' && ref.startsWith('proposal:') && proposals.has(ref.slice(9)) ? ref.slice(9) : ref);
+      const publicSources = [w.conference.id, ...w.conference.reports.flatMap(report => [report.id, report.source]), ...w.conference.venues.map(venue => venue.id)].filter(Boolean);
+      const known = new Set([...profile.knowledge.nodes.map(n => n.id), ...profile.materials.map(m => m.id), ...w.messages.filter(m => m.to === role || m.from === role).map(m => m.id), ...w.artifacts.filter(a => a.owner === role).map(a => a.id), ...controlSources, ...publicSources, ...exchangedSources]);
+      requireThat(refs.every(ref => known.has(ref)), 'ARTIFACT_SOURCE', `Unknown source reference: ${refs.find(ref => !known.has(ref)) ?? ''}. Use own record IDs, actual message receipts, or public program records and source IDs.`);
       let artifact;
       if (name === 'artifact_revise') {
         artifact = w.artifacts.find(a => a.id === args.artifactId && a.owner === role && a.taskId === t.id);
@@ -475,34 +621,59 @@ export class ResearchEngine {
       this.reconcile(w, t); return artifact;
     }
     if (name === 'peer_request') {
-      requireThat(['availability', 'report_interests', 'research_material', 'agenda_review'].includes(args.kind), 'PEER_REQUEST', 'Choose a structured request kind.');
+      requireThat(['availability', 'report_interests', 'research_material', 'agenda_review', 'ontology', 'capabilities'].includes(args.kind), 'PEER_REQUEST', 'Choose a request kind.');
       requireThat(!args.recipient || args.recipient === other(role), 'RESEARCH_RECIPIENT', 'Request information only from the paired agent.');
       const request = { id: randomUUID(), taskId: t.id, from: role, to: other(role), kind: args.kind };
+      await this.exchange(w, t, role, name, request, request.id);
       t.requests ??= []; t.requests.push(request);
-      this.conversation(w, t, role, other(role), name, request, request.id);
       t.wakeRoles[other(role)] = true; return request;
     }
     if (name === 'peer_send') return this.send(w, t, role, args);
     if (name === 'alignment_propose') {
-      requireThat(Array.isArray(args.mappingIds) && args.mappingIds.length > 0 && args.mappingIds.length <= 12, 'RESEARCH_MAPPING', 'Choose mapping candidates.');
-      const candidates = this.mappingCandidates(t); const mappings = args.mappingIds.map(id => candidates.find(m => m.id === id));
-      requireThat(mappings.every(Boolean), 'RESEARCH_MAPPING', 'Unknown mapping candidate.');
-      const proposal = { id: randomUUID(), from: role, mappings: clone(mappings), ontologyHashes: Object.fromEntries(ROLE_NAMES.map(r => [r, t.ontology[r].hash])), status: 'proposed' };
-      t.proposals.push(proposal);
-      this.conversation(w, t, role, other(role), name, proposal, proposal.id);
+      requireThat(Array.isArray(args.mappings) && args.mappings.length > 0 && args.mappings.length <= 12, 'RESEARCH_MAPPING', 'Propose correspondences between definitions actually exchanged.');
+      const shared = this.sharedDefinitions(w, t, role);
+      const terms = new Map([shared.own, shared.peer].flatMap(ontology => ontology.modules.flatMap(module => module.concepts.map(term => [term.id, term]))));
+      const mappings = args.mappings.map(mapping => {
+        const source = terms.get(mapping.source), target = terms.get(mapping.target);
+        requireThat(source && target && source.id.split(':')[0] !== target.id.split(':')[0]
+          && ['exact', 'close', 'related', 'narrower', 'broader', 'conditional', 'disjoint'].includes(mapping.relation), 'RESEARCH_MAPPING', 'Use two actually exchanged terms and an explicit relation.');
+        const relation = mapping.relation;
+        return { id: typeof mapping.id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(mapping.id) ? mapping.id : `mapping-${randomUUID()}`,
+          source: source.id, target: target.id, relation,
+          sourceDefinition: source.definition, targetDefinition: target.definition,
+          reason: `Proposed ${relation} correspondence between the exchanged definitions of ${source.label} and ${target.label}.`,
+          condition: relation === 'conditional' ? `For this task only, with the target restricted to the scope of this disclosed source definition: ${source.definition}` : 'Within this task and these exact disclosed definitions.',
+          sourceRefs: shared.sources, ontologyHashes: { [role]: shared.own.hash, [other(role)]: shared.peer.hash } };
+      });
+      requireThat(new Set(mappings.map(mapping => mapping.id)).size === mappings.length, 'RESEARCH_MAPPING', 'Use distinct mapping IDs.');
+      const proposal = { id: randomUUID(), from: role, mappings, status: 'proposed' };
+      await this.exchange(w, t, role, name, proposal, proposal.id); t.proposals.push(proposal);
       t.wakeRoles[other(role)] = true; return proposal;
     }
     if (name === 'alignment_accept') {
       const proposal = t.proposals.find(p => p.id === args.proposalId); requireThat(proposal && proposal.from !== role, 'RESEARCH_MAPPING_PEER', 'The paired agent must review a proposal.');
-      proposal.status = proposal.mappings.every(m => m.valid) ? 'accepted' : 'rejected'; proposal.reviewedBy = role;
-      if (proposal.status === 'accepted') t.mappings = clone(proposal.mappings);
-      this.conversation(w, t, role, other(role), name, proposal, proposal.id);
+      requireThat(['accept', 'reject'].includes(args.decision), 'RESEARCH_MAPPING_REVIEW', 'Explicitly accept or reject the proposal after reviewing the received definitions.');
+      const definitions = this.sharedDefinitions(w, t, role);
+      requireThat(proposal.mappings.every(mapping => mapping.ontologyHashes[role] === definitions.own.hash
+        && mapping.ontologyHashes[other(role)] === definitions.peer.hash), 'RESEARCH_MAPPING_VERSION', 'Definitions changed after this proposal. Exchange and review a new proposal.', 409);
+      if (proposal.status !== 'proposed') {
+        requireThat(proposal.status === (args.decision === 'accept' ? 'accepted' : 'rejected'), 'RESEARCH_MAPPING_REVIEW', 'This proposal already has a different review decision.', 409);
+        return proposal;
+      }
+      const reviewed = { ...proposal, status: args.decision === 'accept' ? 'accepted' : 'rejected', reviewedBy: role };
+      await this.exchange(w, t, role, name, reviewed, `${proposal.id}:${reviewed.status}`);
+      Object.assign(proposal, reviewed);
+      if (proposal.status === 'accepted') t.mappings = [...t.mappings.filter(mapping => !proposal.mappings.some(item => item.id === mapping.id)), ...clone(proposal.mappings)];
       this.reconcile(w, t); t.wakeRoles[other(role)] = true; return proposal;
     }
     if (name === 'authorization_list') {
       const records = this.ledger(w, role).list();
       w.events.push({ role, taskId: t.id, kind: 'authorization_recalled', policyIds: records.policies.map(p => p.id), at: new Date().toISOString() });
-      return { ...records, policyCandidates: clone(w.policyCandidates[role]) };
+      // The exact disclosed bytes stay in the ledger and owner review. Repeating them for
+      // every operation would swamp the agent's context with previously shared ontologies.
+      const compactIntent = intent => { const { values, ...scope } = intent; return scope; };
+      return { ...records, operations: records.operations.map(operation => ({ ...operation, intent: compactIntent(operation.intent) })),
+        policyCandidates: clone(w.policyCandidates[role]) };
     }
     if (name === 'authorization_propose_policy') {
       requireThat(['allow', 'ask', 'deny'].includes(args.effect) && Array.isArray(args.actions) && args.actions.length > 0 && args.actions.every(a => ['peer.send', 'reservation.submit'].includes(a)), 'POLICY_CANDIDATE', 'Use a supported policy effect and action.');
@@ -526,7 +697,11 @@ export class ResearchEngine {
       if (name === 'authorization_check') {
         w.events.push({ role, taskId: t.id, kind: 'authorization_checked', resourceId: intent.resourceId, fields: intent.fields,
           status: check.status, basisId: check.basisId ?? null, at: new Date().toISOString() });
-        return { ...check, intent };
+        const summary = check.status === 'allowed'
+          ? `This exact action is allowed by ${check.basisKind} ${check.basisId}. Nothing has been sent or submitted by this check.`
+          : check.status === 'denied' ? 'This exact action is denied by the current rules. Do not execute it.'
+            : 'This exact action requires an owner decision before execution. Checking does not submit an approval request.';
+        return { ...check, summary, sourceRef: check.basisId ?? null, intent };
       }
       if (check.status === 'allowed') return { ...check, intent };
       const request = ledger.request(intent); if (request.status === 'pending') t.status = 'needs_owner'; return request;
@@ -553,7 +728,7 @@ export class ResearchEngine {
       requireThat(['working', 'waiting_peer', 'needs_owner', 'complete'].includes(args.status), 'TASK_CHECKPOINT', 'Choose a checkpoint state.');
       t.checkpoints[role] = { status: args.status, summary: String(args.summary ?? '').slice(0, 1500), at: new Date().toISOString() };
       if (t.type === 'research_work' && args.status === 'complete') {
-        const artifacts = w.artifacts.filter(a => a.taskId === t.id && a.owner === role).map(a => ({ id: a.id, version: a.version }));
+        const artifacts = w.artifacts.filter(a => a.taskId === t.id && a.owner === role && a.sourceRefs.length).map(a => ({ id: a.id, version: a.version }));
         const facts = profile.knowledge.nodes.filter(n => n.source?.taskId === t.id).map(n => ({ id: n.id, version: n.version }));
         requireThat(artifacts.length + facts.length > 0, 'RESEARCH_RESULT_REQUIRED', 'Save a sourced research artifact or fact before completing the task.');
         t.status = 'completed'; t.result = { outcome: 'research_work_saved', owner: role, artifacts, facts };
@@ -563,19 +738,30 @@ export class ResearchEngine {
       return t.checkpoints[role];
     }
     if (name === 'task_status') {
-      const { ontology, mappingReview, ...task } = this.taskView(t, role);
-      task.ontologyVersions = Object.fromEntries(ROLE_NAMES.map(r => [r, { id: t.ontology[r].id, version: t.ontology[r].version, hash: t.ontology[r].hash }]));
-      return { task, received: w.messages.filter(m => m.to === role && m.taskId === t.id),
-      artifacts: w.artifacts.filter(a => a.owner === role && a.taskId === t.id), requests: (t.requests ?? []).filter(r => r.to === role),
-      pending: this.ledger(w, role).pendingRequests(), policyCandidates: clone(w.policyCandidates[role]), conference: w.conference, mappingCandidates: this.mappingCandidates(t),
+      const { ontology, mappingReview, exchanges, ...task } = this.taskView(t, role, w);
+      task.ontologyVersions = Object.fromEntries(Object.entries(ontology).filter(([, value]) => value).map(([r, value]) => [r, { id: value.id, version: value.version, hash: value.hash }]));
+      task.proposals = task.proposals.map(proposal => ({ id: proposal.id, from: proposal.from, status: proposal.status, reviewedBy: proposal.reviewedBy,
+        mappings: proposal.mappings.map(({ sourceDefinition, targetDefinition, reason, ...mapping }) => mapping) }));
+      const peer = this.peerView(w, t, role);
+      if (peer.ontology) peer.ontology = { id: peer.ontology.id, owner: peer.ontology.owner, version: peer.ontology.version,
+        hash: peer.ontology.hash, receivedSource: peer.ontology.receivedSource, modules: peer.ontology.modules.map(module => ({ id: module.id, name: module.name })),
+        inspect: 'Use peer_describe to read the actual received definitions.' };
+      const received = w.messages.filter(m => m.to === role && m.taskId === t.id).map(message => ['working-ontology', 'capabilities'].includes(message.resourceId)
+        ? { id: message.id, from: message.from, to: message.to, resourceId: message.resourceId, sourceVersion: message.sourceVersion, receipt: message.receipt,
+          inspect: 'The full received definitions or skills are available through peer_describe.' } : message);
+      return { task, execution: { reservationOrganizer: reservationOrganizer(t) }, artifacts: w.artifacts.filter(a => a.owner === role && a.taskId === t.id),
+      pending: this.ledger(w, role).pendingRequests(), requests: (t.requests ?? []).filter(r => r.to === role), received,
+      policyCandidates: clone(w.policyCandidates[role]), peer, ownReportAnnotations: clone(profile.reportAnnotations ?? []),
       authorizationDecisions: this.ledger(w, role).list().requests.filter(r => r.intent.taskId === t.id && r.status !== 'pending'),
       ownCalendar: clone(profile.calendar),
       sourceResources: [
         { id: 'availability', version: profile.ontology.version, label: 'Scoped offered availability', fields: ['slots'], description: 'Use peer_send({resourceId:"availability"}); server projects only day, time and status.' },
-        { id: 'report-interests', version: profile.ontology.version, label: 'Independently relevant presentation IDs and local interest terms', fields: ['reportIds', 'interests'] },
+        { id: 'report-interests', version: profile.ontology.version, label: 'Independently relevant presentation IDs, local record type and own interest terms', fields: ['reportIds', 'interests', 'recordType'] },
+        { id: 'working-ontology', version: profile.ontology.version, label: 'Own task-relevant definitions for an actual peer exchange', fields: ['ontology'] },
+        { id: 'capabilities', version: profile.ontology.version, label: 'Own capability descriptions', fields: ['skills'] },
         ...profile.materials.map(m => ({ id: m.id, version: m.version, label: m.label, fields: Object.keys(m.fields) })),
         ...w.artifacts.filter(a => a.owner === role && a.taskId === t.id).map(a => ({ id: a.id, version: a.version, kind: a.kind, label: a.title, fields: Object.keys(a.fields) }))],
-      relatedResults: { schedule: w.tasks.find(item => item.id === t.input.scheduleTask)?.result ?? null,
+      conference: w.conference, relatedResults: { schedule: w.tasks.find(item => item.id === t.input.scheduleTask)?.result ?? null,
         presentation: w.tasks.find(item => item.id === t.input.reportTask)?.result?.report ?? null } };
     }
     throw new AppError('RESEARCH_TOOL', 'The tool is not registered.', 404);
@@ -682,9 +868,20 @@ export class ResearchEngine {
           for (const role of ROLE_NAMES) { const out = await this.controlledAction(w, t, role, 'peer.send', { resourceId: 'availability' }); if (out.status === 'needs_approval') break; if (out.status === 'denied') { t.status = 'partial'; t.result = { outcome: 'sharing_declined' }; break; } }
         } else if (t.type === 'select_presentation') {
           if (!t.mappings.length) {
-            const mappings = this.mappingCandidates(t).filter(m => m.valid);
-            const proposal = await this.toolUnlocked(w, t, 'Alice', 'alignment_propose', { mappingIds: mappings.map(m => m.id) });
-            await this.toolUnlocked(w, t, 'Bob', 'alignment_accept', { proposalId: proposal.id });
+            for (const role of ROLE_NAMES) {
+              const out = await this.controlledAction(w, t, role, 'peer.send', { resourceId: 'working-ontology' });
+              if (out.status !== 'allowed') { await this.flush(w); await this.save(w); return; }
+            }
+            const shared = this.sharedDefinitions(w, t, 'Alice');
+            const mappings = guidedCorrespondences(shared.own, shared.peer);
+            if (mappings.disputed.length) {
+              const disputed = await this.toolUnlocked(w, t, 'Alice', 'alignment_propose', { mappings: mappings.disputed });
+              await this.toolUnlocked(w, t, 'Bob', 'alignment_accept', { proposalId: disputed.id, decision: 'reject' });
+            }
+            if (mappings.proposed.length) {
+              const proposal = await this.toolUnlocked(w, t, 'Alice', 'alignment_propose', { mappings: mappings.proposed });
+              await this.toolUnlocked(w, t, 'Bob', 'alignment_accept', { proposalId: proposal.id, decision: 'accept' });
+            }
           }
           for (const role of ROLE_NAMES) { const out = await this.controlledAction(w, t, role, 'peer.send', { resourceId: 'report-interests' }); if (out.status === 'needs_approval') break; if (out.status === 'denied') { t.status = 'partial'; t.result = { outcome: 'sharing_declined' }; break; } }
         } else {
@@ -711,8 +908,8 @@ export class ResearchEngine {
           if (out.status === 'denied') { t.status = 'partial'; t.result = { outcome: 'prepared_not_submitted', agendaId: agenda.id, reservationSubmitted: false }; }
         }
         this.reconcile(w, t);
-        if (t.type === 'select_presentation' && !t.mappings.some(m => m.id === 'individual-presentation') && t.status === 'running') {
-          t.status = 'paused'; t.error = '当前本体定义没有可用的已登记报告映射，请先审阅并登记新的对应关系。';
+        if (t.type === 'select_presentation' && !t.mappings.length && t.status === 'running') {
+          t.status = 'paused'; t.error = '已交换定义，尚未形成双方接受的对应关系。请继续审阅和协商。';
         }
         await this.flush(w); await this.save(w);
       } catch (error) { t.status = 'paused'; t.error = `${error.code ?? 'RESEARCH_FAILURE'}: ${error.message}`; await this.save(w); throw error; }
@@ -728,7 +925,7 @@ export class ResearchEngine {
     let adopted = false;
     for (const w of this.workspaces.values()) for (const task of w.tasks) {
       const record = task.nativeRuns?.[role]; if (!record || record.status === 'settled') continue;
-      const result = await this.nativeClient.reconcile({ role, runId: record.runId, requestId: record.requestId, input: record.input, instructions: record.instructions });
+      const result = await this.nativeClient.reconcile({ role, workspaceId: w.id, sessionId: record.sessionId, runId: record.runId, requestId: record.requestId, input: record.input, instructions: record.instructions });
       requireThat(result?.settled === true, 'HERMES_RUN_UNSETTLED', 'The interrupted native run has not been confirmed stopped.', 409);
       record.status = 'settled'; record.reconciledAt = new Date().toISOString(); adopted = true; await this.save(w);
     }
@@ -791,18 +988,18 @@ export class ResearchEngine {
     try {
       this.activity(w, { taskId: t.id, role, kind: 'run', direction: 'local', from: 'controller', to: role, name: 'native_run', status: 'started' });
       await this.save(w);
-      const instructions = `You are ${role}, the ${role === 'Alice' ? 'knowledge graph and semantic technologies' : 'human-computer interaction'} researcher’s personal agent. Use native research skills and tools. Your task type is ${t.type}. Start with task_status and research_skills_list/research_skill_view. Query your ontology, knowledge and current authorization. Only actual received facts may inform peer-dependent decisions. Do not claim a send/reservation without its receipt. Use structured peer requests and source/draft references. For schedule both sides send availability. For select_presentation review mapping candidates, propose/review valid mappings and exchange report-interests. For prepare_discussion exchange public introductions, request a selected Alice research brief, jointly prepare an agenda, and let Alice prepare a reservation draft and request owner approval. Use authorization_request for any unapproved disclosure or reservation; then task_checkpoint needs_owner and end this run. On receipt/owner decision resume from task_status and check authorization again; use approvedIntent.fields if narrowed. Final text is explanatory only. Do not recreate an existing artifact or action unnecessarily. Source ids and conference/venue ids are supplied by tools. Planning and drafting are autonomous; publishing or booking requires current authorization.`;
-      const ownWork = t.type === 'research_work' ? ' For this private owner research task, do not coordinate with the peer unless the owner asks. Use knowledge_record for sourced domain facts and artifact_prepare for a sourced answer. For an instruction about future permissions, use authorization_propose_policy to propose the explicit rule, then checkpoint needs_owner. A proposed policy is not effective until the owner confirms it. Complete ordinary research work with a saved sourced artifact and task_checkpoint complete.' : '';
-      const toolGuidance = ' Tools bind identity and task automatically. NEVER supply role, task_id, workspace_id or assignmentId in tool arguments. task_status({}) returns exact sourceResources and valid mappingCandidates. Load only one relevant skill per run; use targeted knowledge queries, and prioritize the current collaboration action. Do not write unrelated research notes during shared demo tasks; ordinary memory maintenance has separate private research_work tasks. Scheduling: authorization_check({action:"peer.send",resourceId:"availability"}), then peer_send({resourceId:"availability"}) if allowed. Report selection: source resource is "report-interests"; use mapping IDs returned by task_status and review your peer proposal. For prepare_discussion, after exchanging public-intro, Alice requests approval to share fields ["summary","method"] of alice:research-brief, then checkpoints needs_owner and ends this run; Bob requests research_material and checkpoints waiting_peer until actual reception. After disclosure, Bob prepares an agenda with received source refs and Alice prepares the final reservation form, requests reservation.submit approval with exact resourceId and venueId, checkpoints needs_owner and ends. Use relatedResults if provided. For owner approval pass the SAME action/resourceId/fields/venueId that execution will use. task_checkpoint requires status and summary. If already delivered, inspect its receipt instead of asking again. If task_status says completed/partial/cancelled, end the run immediately.';
-      const reservationGuidance = ' A reservation artifact must use text fields title, day, time, attendees, agenda. Example shape only: {title:"Joint discussion",day:"Thu",time:"15:00–15:30",attendees:"8",agenda:"Methods and interaction review"}; choose actual values from task and venue data. Extra meeting/context fields cannot replace these required keys.';
+      const instructions = `You are ${role}, a personal research assistant. Your private workspace is independent. Retrieve your own task, knowledge, skills and current permissions. You do not know the collaborator\'s ontology, capabilities, preferences or constraints until actually received. peer_describe returns only received information. Use agent-comm through peer_request and peer_send to ask, explain and coordinate. Where relevant, send your working-ontology and request the collaborator\'s definitions; inspect the actual definitions before proposing mappings. Propose mappings yourself with source, target and a relation; the other agent explicitly accepts or rejects. Preserve differences in meaning and scope rather than assuming equal words are equivalent. Unshared counterpart information and reference answers are unavailable. Tools bind your identity and current experience automatically. Use source references for outgoing content and inspect receipts. Private documents and derived drafts need permission before sharing; reservation submission needs its own exact approval. You may propose permissions but cannot issue them. When an owner decision is needed, save a needs_owner checkpoint and end this run. Wait for actual peer information with waiting_peer; a later fresh run retrieves saved task state. Explanatory final text never proves execution.`;
+      const ownWork = t.type === 'research_work' ? ' This is private work for your owner. Use sourced knowledge and saved artifacts. Reading your own records and saving an owner-only answer do not need disclosure permission. For a permission question, retrieve the formal rule and check the exact requested scope; report its actual status without probing unrelated field or recipient combinations. Save a brief citing the returned policy/decision record ID, then task_checkpoint complete. Propose any requested future rule for owner confirmation; complete only after saving sourced work.' : '';
+const toolGuidance = ' Start with task_status and load one relevant local skill. sourceResources lists exact own source references; working-ontology and capabilities are available for actual peer exchange. Prefer knowledge_search with the relevant ids and hops:0. Received messages, artifacts and checkpoints are already persisted; use knowledge_record only when new domain facts are needed for the requested task, with property types from ontology_describe. Use peer_request kinds ontology, capabilities, availability, report_interests, research_material or agenda_review as needed. The peer knows only received content. Reuse knowledge actually received earlier in this audience; do not repeat an ontology review unless this task needs a new one. Public program source IDs and actual proposal IDs are valid artifact references. An agenda should cite actual received information from the collaborator. Saving a draft does not share it: peer_request only asks for cooperation and never gives the peer access to your private draft. Use authorized peer_send if actual draft review is needed. In discussion preparation focus on the requested material, agenda and final owner decision, instead of redoing prior ontology work. For alignment_propose supply mappings [{source,target,relation}]; relations include exact, close, related, narrower, broader, conditional, disjoint. Both current ontologies must actually be exchanged first. Local reason/condition notes stay local; the outgoing proposal quotes shared definitions and its bound task scope. alignment_accept requires proposalId and decision accept or reject. Do not look for preloaded mappingCandidates. Sharing resource references uses authorization_check/request with the same action, fields and recipient that execution will use. After an owner narrows permission use approvedIntent.fields exactly. If an operation already has a receipt, inspect it instead of resending. Stop when the task is completed, partial or cancelled.';
+const reservationGuidance = t.type === 'prepare_discussion' ? ' Goal: jointly prepare a useful discussion, exchange only needed approved material, and arrange a suitable venue. Reuse the verified meeting and presentation in relatedResults. This task is discussion preparation and owner authorization; do not start a new ontology-mapping exercise or repeat the presentation selection. Read previously received definitions if needed to interpret material, then proceed with the actual received content. Alice is the submitting organizer. The reservation artifact uses text fields title, day, time, attendees and agenda; attendees is the participant count as text, not a list of names. Select actual values from the received discussion plan and available venues. Preparing a draft does not book it. Request a separate owner decision on the final complete form before reservation_submit.' : t.type === 'schedule' ? ' Goal: arrange 30 minutes for an academic discussion using actual exchanged availability.' : t.type === 'select_presentation' ? ' Goal: select a presentation that meets both independently researched interests, based on actual exchanges and reviewed semantic correspondences. Exchange report-interests with its local recordType, and review a correspondence between the actual presentation record types as well as topical relationships. A topical relationship alone does not establish the identity of an activity. The public program contains no personal relevance labels.' : '';
       const input = `Continue task ${t.id} in workspace ${w.id}. Use task_status to retrieve checkpoint and actual state.${t.initiator === role && t.ownerGoal ? ` Authenticated owner request: ${t.ownerGoal}` : ''}`;
       const effectiveInstructions = instructions + ownWork + toolGuidance + reservationGuidance;
       t.nativeRuns ??= {}; t.nativeRuns[role] = { assignmentId, requestId: `research-${assignmentId}`, input, instructions: effectiveInstructions,
         runId: null, status: 'submitted', startedAt: new Date().toISOString() };
       await this.save(w);
-      const output = await this.nativeClient.run({ role, input, instructions: effectiveInstructions,
+      const output = await this.nativeClient.run({ role, workspaceId: w.id, taskId: t.id, input, instructions: effectiveInstructions,
         requestId: `research-${assignmentId}`, signal: controller.signal,
-        onAdmitted: async ({ runId }) => { await this.lock(w, async () => { t.nativeRuns[role].runId = runId; await this.save(w); }); } });
+        onAdmitted: async ({ runId, sessionId }) => { await this.lock(w, async () => { t.nativeRuns[role].runId = runId; t.nativeRuns[role].sessionId = sessionId ?? null; await this.save(w); }); } });
       await this.lock(w, async () => {
         w.events.push({ role, taskId: t.id, kind: 'native_run_completed', at: new Date().toISOString(), status: output.status ?? 'completed' });
         this.activity(w, { taskId: t.id, role, kind: 'run', direction: 'local', from: role, to: 'controller', name: 'native_run', status: output.status ?? 'completed' });
@@ -834,7 +1031,8 @@ export class ResearchEngine {
   close() {
     this.closePromise ??= (async () => { this.closed = true; for (const controller of this.controllers.values()) controller.abort('service_closing');
       clearInterval(this.projectionTimer); await Promise.allSettled([...this.running]); for (const pending of this.queues.values()) await pending;
-      await Promise.allSettled([...this.projectionRuns.values()]);
+      await Promise.allSettled([...this.projectionRuns.values(), ...this.fileSaves.values()]); await this.transportQueue;
+      await this.peerTransport?.close?.();
       for (const rows of this.ledgers.values()) for (const ledger of Object.values(rows)) ledger.close(); this.stateDB?.close(); })();
     return this.closePromise;
   }

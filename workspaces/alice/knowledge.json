@@ -1,0 +1,495 @@
+{
+  "nodes": [
+    {
+      "id": "alice:self",
+      "type": "alice:Person",
+      "label": "Alice",
+      "properties": {
+        "displayName": "Alice"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:organization",
+      "type": "alice:Organization",
+      "label": "Fictional Semantic Systems Lab",
+      "properties": {
+        "displayName": "Fictional Semantic Systems Lab"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:competency",
+      "type": "alice:HumanCompetency",
+      "label": "Semantic modeling",
+      "properties": {
+        "description": "Ontology engineering and mapping evaluation"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:preference",
+      "type": "alice:Preference",
+      "label": "Research discussion preference",
+      "properties": {
+        "value": "30-minute afternoon academic discussions"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:source",
+      "type": "alice:SourceRecord",
+      "label": "Alice synthetic research notebook",
+      "properties": {
+        "kind": "fixture",
+        "synthetic": true
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:project",
+      "type": "alice:ResearchProject",
+      "label": "Explainable cross-agent semantic exchange",
+      "properties": {
+        "description": "Investigate mappings whose definitions and evidence people can inspect.",
+        "state": "active"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:question",
+      "type": "alice:ResearchQuestion",
+      "label": "Which evidence helps a person review a semantic mapping?",
+      "properties": {
+        "question": "Which definition and provenance evidence helps people correctly review a candidate mapping?"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:topic-alignment",
+      "type": "alice:OntologyAlignmentTopic",
+      "label": "Ontology alignment",
+      "properties": {
+        "definition": "Semantic correspondences between ontology terms",
+        "aliases": [
+          "ontology matching"
+        ]
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:topic-review",
+      "type": "alice:HumanReviewTopic",
+      "label": "Human mapping review",
+      "properties": {
+        "definition": "People inspect mapping proposals and their definitions"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:topic-provenance",
+      "type": "alice:MappingProvenanceTopic",
+      "label": "Mapping evidence and provenance",
+      "properties": {
+        "definition": "Source and decision evidence attached to semantic mappings"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:ontology-source",
+      "type": "alice:OntologyArtifactVersion",
+      "label": "Research vocabulary A v2",
+      "properties": {
+        "version": "2",
+        "artifactVersion": "2",
+        "summary": "A fictional ontology studied as a research object."
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:ontology-target",
+      "type": "alice:OntologyArtifactVersion",
+      "label": "Research vocabulary B v3",
+      "properties": {
+        "version": "3",
+        "artifactVersion": "3",
+        "summary": "A fictional target research vocabulary used in the recorded mapping experiment."
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:term-source",
+      "type": "alice:VocabularyTerm",
+      "label": "Research artifact: Review",
+      "properties": {
+        "termKind": "class",
+        "definition": "A human assessment of a candidate correspondence"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:term-target",
+      "type": "alice:VocabularyTerm",
+      "label": "Research artifact: Assessment",
+      "properties": {
+        "termKind": "class",
+        "definition": "A task-bounded acceptance, modification or rejection"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:mapping",
+      "type": "alice:MappingCandidate",
+      "label": "Review/Assessment candidate",
+      "properties": {
+        "relation": "conditional",
+        "state": "reviewed"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:mapping-set",
+      "type": "alice:MappingSet",
+      "label": "Reviewable mappings v1",
+      "properties": {
+        "version": "1"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:review",
+      "type": "alice:HumanReviewDecision",
+      "label": "Fictional candidate review",
+      "properties": {
+        "choice": "accept within review task",
+        "rationale": "The definitions agree only within the stated task."
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:dataset",
+      "type": "alice:Dataset",
+      "label": "Synthetic mapping benchmark v1",
+      "properties": {
+        "version": "1",
+        "title": "Synthetic mapping benchmark"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:experiment",
+      "type": "alice:ExperimentRun",
+      "label": "Definition evidence ablation",
+      "properties": {
+        "configuration": "Synthetic benchmark v1; mapping set v1; show definitions and provenance",
+        "state": "recorded"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:metric",
+      "type": "alice:MetricObservation",
+      "label": "Synthetic review accuracy",
+      "properties": {
+        "metric": "synthetic review accuracy",
+        "value": 0.82
+      },
+      "visibility": "private",
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:claim",
+      "type": "alice:ResearchClaim",
+      "label": "Definitions help review this synthetic mapping set",
+      "properties": {
+        "claim": "In this synthetic fixture, definition evidence supports review of mapping set v1; no general empirical claim is made."
+      },
+      "visibility": "private",
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:benchmark-report",
+      "type": "alice:BenchmarkReport",
+      "label": "Mapping evidence fixture report",
+      "properties": {
+        "title": "Mapping evidence fixture report",
+        "summary": "Documents a fictional evidence-ablation run."
+      },
+      "visibility": "private",
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:paper",
+      "type": "alice:Paper",
+      "label": "Reviewable semantic exchange",
+      "properties": {
+        "title": "Reviewable semantic exchange",
+        "publicationState": "draft"
+      },
+      "visibility": "private",
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:paper-version",
+      "type": "alice:DocumentVersion",
+      "label": "Research draft v1",
+      "properties": {
+        "version": "1",
+        "summary": "Method overview and unpublished synthetic numerical results."
+      },
+      "visibility": "private",
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:reading-plan",
+      "type": "alice:ReadingPlan",
+      "label": "Read mapping-review studies",
+      "properties": {
+        "state": "planned"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    },
+    {
+      "id": "alice:attendance-plan",
+      "type": "alice:AttendancePlan",
+      "label": "Find a cross-domain research talk",
+      "properties": {
+        "state": "planned"
+      },
+      "source": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1",
+      "visibility": "private"
+    }
+  ],
+  "edges": [
+    {
+      "id": "alice:edge-1",
+      "source": "alice:self",
+      "target": "alice:organization",
+      "relation": "alice:memberOf",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-2",
+      "source": "alice:self",
+      "target": "alice:competency",
+      "relation": "alice:hasCompetency",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-3",
+      "source": "alice:self",
+      "target": "alice:preference",
+      "relation": "alice:hasPreference",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-4",
+      "source": "alice:project",
+      "target": "alice:self",
+      "relation": "alice:ownedBy",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-5",
+      "source": "alice:project",
+      "target": "alice:question",
+      "relation": "alice:addresses",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-6",
+      "source": "alice:question",
+      "target": "alice:topic-alignment",
+      "relation": "alice:investigatesTopic",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-7",
+      "source": "alice:question",
+      "target": "alice:topic-review",
+      "relation": "alice:investigatesTopic",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-8",
+      "source": "alice:ontology-source",
+      "target": "alice:term-source",
+      "relation": "alice:definesTerm",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-9",
+      "source": "alice:ontology-target",
+      "target": "alice:term-target",
+      "relation": "alice:definesTerm",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-10",
+      "source": "alice:mapping-set",
+      "target": "alice:ontology-source",
+      "relation": "alice:sourceOntology",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-11",
+      "source": "alice:mapping-set",
+      "target": "alice:ontology-target",
+      "relation": "alice:targetOntology",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-12",
+      "source": "alice:mapping-set",
+      "target": "alice:mapping",
+      "relation": "alice:containsMapping",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-13",
+      "source": "alice:review",
+      "target": "alice:mapping",
+      "relation": "alice:reviewsMapping",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-14",
+      "source": "alice:experiment",
+      "target": "alice:dataset",
+      "relation": "alice:usesDataset",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-15",
+      "source": "alice:experiment",
+      "target": "alice:mapping-set",
+      "relation": "alice:evaluatesMapping",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-16",
+      "source": "alice:experiment",
+      "target": "alice:metric",
+      "relation": "alice:producesMetric",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-17",
+      "source": "alice:claim",
+      "target": "alice:metric",
+      "relation": "alice:supportedBy",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-18",
+      "source": "alice:benchmark-report",
+      "target": "alice:experiment",
+      "relation": "alice:documentsRun",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-19",
+      "source": "alice:paper-version",
+      "target": "alice:paper",
+      "relation": "alice:versionOf",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-20",
+      "source": "alice:paper",
+      "target": "alice:topic-review",
+      "relation": "alice:aboutTopic",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-21",
+      "source": "alice:claim",
+      "target": "alice:source",
+      "relation": "alice:sourcedFrom",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-22",
+      "source": "alice:reading-plan",
+      "target": "alice:question",
+      "relation": "alice:servesQuestion",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    },
+    {
+      "id": "alice:edge-23",
+      "source": "alice:attendance-plan",
+      "target": "alice:question",
+      "relation": "alice:servesQuestion",
+      "sourceRecord": "synthetic:alice:research-fixture:2.0.0",
+      "version": "1"
+    }
+  ]
+}

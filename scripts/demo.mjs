@@ -7,11 +7,14 @@ import { createAgentCommDirect } from '../src/agent-comm-direct.mjs';
 import { createKGClient } from '../src/kg-client.mjs';
 import { createHermesResearchClient } from '../src/hermes-research-client.mjs';
 import { createResearchKGClient } from '../src/research-kg-client.mjs';
+import { existsSync } from 'node:fs';
 
 // A separate event workspace keeps rehearsals away from existing research data.
 const root = fileURLToPath(new URL('../', import.meta.url));
 const useHermes = process.argv.includes('--hermes');
 const researchNative = useHermes && process.env.HERMES_RESEARCH_ENABLED === '1';
+const directCommand = process.env.DEMO_AGENT_COMM_DIRECT
+  || path.join(root, 'bridge', 'agent-comm-direct', process.platform === 'win32' ? 'agent-comm-direct.exe' : 'agent-comm-direct');
 let app;
 try {
   await loadDemoEnvironment({ root, migrate: !useHermes });
@@ -23,10 +26,13 @@ try {
       alice: { url: process.env.DEMO_HERMES_ALICE_URL, apiKey: process.env.DEMO_HERMES_ALICE_KEY },
       bob: { url: process.env.DEMO_HERMES_BOB_URL, apiKey: process.env.DEMO_HERMES_BOB_KEY },
     } }),
-    peerTransport: createAgentCommDirect({ command: process.env.DEMO_AGENT_COMM_DIRECT
-      || path.join(root, 'bridge', 'agent-comm-direct', process.platform === 'win32' ? 'agent-comm-direct.exe' : 'agent-comm-direct') }),
+    peerTransport: createAgentCommDirect({ command: directCommand }),
   } : {};
   const workspace = useHermes ? 'demo-hermes' : 'demo';
+  // Research transfers have their own serialized agent-comm bridge, so they do
+  // not contend with the separately preserved legacy calendar demonstration.
+  const researchPeerTransport = useHermes || process.env.DEMO_AGENT_COMM_DIRECT || existsSync(directCommand)
+    ? createAgentCommDirect({ command: directCommand }) : undefined;
   const useKnowledge = useHermes && Boolean(process.env.DEMO_KG_ALICE_URL || process.env.DEMO_KG_BOB_URL);
   const nativeInterfaces = useKnowledge ? Object.fromEntries(['Alice', 'Bob'].map(role => {
     const suffix = role.toUpperCase();
@@ -42,7 +48,7 @@ try {
     url: process.env['DEMO_KG_' + role.toUpperCase() + '_URL'], token: process.env['DEMO_KG_' + role.toUpperCase() + '_SERVICE_TOKEN']
   }])) }) : undefined;
   app = await createDemoServer({ host: '127.0.0.1', port: Number(process.env.DEMO_PORT || 4327),
-    directory: path.join(root, '.data', workspace), openControls: true, ...hermesOptions, knowledge, researchKnowledge, nativeInterfaces,
+    directory: path.join(root, '.data', workspace), openControls: true, ...hermesOptions, knowledge, researchKnowledge, researchPeerTransport, nativeInterfaces,
     minimaxApiKey: '', environmentApiKey: useHermes ? '' : process.env.MINIMAX_TOKEN_PLAN_KEY ?? '' });
   const address = await app.listen();
   console.log(`Demo ready: http://127.0.0.1:${address.port}`);

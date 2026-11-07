@@ -23,6 +23,42 @@ const requestAction = (intent, lang) => intent?.action === 'reservation.submit'
   ? language(lang)('提交场地预约', 'submit the venue reservation')
   : language(lang)('向合作方分享资料', 'share material with the collaborator');
 
+/** Presentation-only inventory of the authenticated owner's workspace. No
+ * peer catalogue is consulted and no filesystem path is opened by this view.
+ */
+export function workspaceInventory(state, { lang = 'zh' } = {}) {
+  const owner = state?.owner, workspace = state?.workspace, profile = state?.profile;
+  if (!['Alice', 'Bob'].includes(owner) || workspace?.role !== owner || profile?.role !== owner
+    || workspace.manifest && workspace.manifest.role !== owner) return null;
+  const expectedSeed = `workspaces/${owner.toLowerCase()}`;
+  const expectedRuntime = `runs/${state.workspaceId}/${owner.toLowerCase()}`;
+  if (workspace.seedPath !== expectedSeed || workspace.runtimePath !== expectedRuntime) return null;
+  const T = language(lang);
+  const labels = {
+    'README.md': T('工作区说明', 'Workspace guide'), 'ontology.json': T('独立应用本体', 'Own application ontology'),
+    'knowledge.json': T('研究知识与证据', 'Research knowledge and evidence'), 'calendar.json': T('完整起始日程', 'Complete initial calendar'),
+    'materials.json': T('起始研究材料', 'Initial research materials'), 'interests.json': T('本方研究兴趣', 'Own research interests'),
+    'report-annotations.json': T('本方对报告的理解', 'Own presentation annotations'),
+    'skills.json': T('技能能力清单', 'Skill contracts'), 'policies.json': T('初始授权规则模板', 'Initial policy templates'),
+  };
+  const files = Object.entries(workspace.manifest?.files ?? {}).filter(([name]) =>
+    /^[A-Za-z0-9_.\/-]+$/.test(name) && !name.startsWith('/') && !name.split('/').some(part => !part || part === '.' || part === '..'))
+    .map(([name, record]) => {
+      const skill = list(profile.skills).find(item => item.path === `${expectedSeed}/${name}`);
+      return { path: name, label: labels[name] || text(skill?.label) || name, hash: text(record?.sha256), description: text(record?.description) };
+    }).sort((a, b) => a.path.localeCompare(b.path));
+  return {
+    role: owner, seedPath: expectedSeed, runtimePath: expectedRuntime,
+    seedVersion: text(workspace.seed?.version), seedHash: text(workspace.seed?.hash),
+    manifestHash: text(workspace.manifest?.hash), namespace: text(workspace.nativeNamespace), files,
+    knowledgeCount: list(profile.knowledge?.nodes).length, materialCount: list(profile.materials).length,
+    skillCount: list(profile.skills).length,
+    inboxCount: list(state.messages).filter(message => message.to === owner).length,
+    outboxCount: list(state.messages).filter(message => message.from === owner).length,
+    artifactCount: list(state.artifacts).filter(artifact => artifact.owner === owner).length,
+  };
+}
+
 function resultDescription(result, lang) {
   const T = language(lang);
   switch (result?.outcome) {
@@ -76,6 +112,20 @@ export function describeActivity(entry = {}, { lang = 'zh', task, conference } =
           body: reports.length ? T(`符合本方研究需求的报告有：${reports.join('；')}。${receipt}`, `Presentations matching this researcher’s interests: ${reports.join('; ')}. ${receipt}`)
             : T(`已分享本方的报告兴趣。${receipt}`, `Presentation interests were shared. ${receipt}`) };
       }
+      if (data.resourceId === 'working-ontology') {
+        const ontology = payload.ontology ?? {}, modules = list(ontology.modules);
+        const names = modules.map(module => text(module.name)).filter(Boolean).slice(0, 4);
+        const version = text(ontology.version);
+        return { title: T(`${from} 发送本次任务的概念定义`, `${from} shared task-relevant concept definitions`),
+          body: T(`已发送 ${modules.length} 组定义${version ? `（版本 ${version}）` : ''}${names.length ? `，包括：${names.join('、')}` : ''}。${receipt}具体对应关系仍需双方协商。`,
+            `${modules.length} groups of definitions were sent${version ? ` (version ${version})` : ''}${names.length ? `, including: ${names.join(', ')}` : ''}. ${receipt} Correspondences still require peer discussion.`) };
+      }
+      if (data.resourceId === 'capabilities') {
+        const skills = list(payload.skills), names = skills.map(skill => text(skill.label)).filter(Boolean).slice(0, 4);
+        return { title: T(`${from} 介绍自己的能力`, `${from} described their capabilities`),
+          body: T(`介绍了 ${skills.length} 项能力${names.length ? `：${names.join('、')}${skills.length > names.length ? '等' : ''}` : ''}。${receipt}`,
+            `Shared ${skills.length} capabilities${names.length ? `, including ${names.join(', ')}` : ''}. ${receipt}`) };
+      }
       const contents = materialText(payload, lang);
       return { title: T(`${from} 分享获准内容`, `${from} shared permitted content`), body: contents
         ? `${contents}\n${receipt}` : T(`这份材料已经发送。${receipt}可展开查看交付内容。`, `The material was sent. ${receipt} Expand to inspect the delivered content.`) };
@@ -84,21 +134,23 @@ export function describeActivity(entry = {}, { lang = 'zh', task, conference } =
       const request = ({ availability: ['请提供可用于约见的空闲时间', 'Please provide availability for a meeting'],
         report_interests: ['请提供符合你研究需求的报告', 'Please share presentations matching your research interests'],
         research_material: ['请提供可获准分享的研究材料', 'Please provide research material that may be shared with permission'],
-        agenda_review: ['请审阅讨论议程并提出意见', 'Please review the discussion agenda'] })[data.kind];
+        agenda_review: ['请审阅讨论议程并提出意见', 'Please review the discussion agenda'],
+        ontology: ['请提供本次任务所需的概念定义', 'Please provide concept definitions relevant to this task'],
+        capabilities: ['请介绍你可以提供的协作能力', 'Please describe the capabilities you can contribute'] })[data.kind];
       return { title: T(`${from} 向 ${to} 请求协作`, `${from} requested help from ${to}`),
         body: request ? `${request[lang === 'en' ? 1 : 0]}。${T('请求已经送达，所需内容尚待对方提供。', 'The request was delivered; the requested content has not yet been provided.')}`
           : T('协作请求已经送达对方。', 'The collaboration request was delivered to the peer.') };
     }
     if (entry.name === 'alignment_propose' || entry.name === 'alignment_accept') {
-      const mappings = list(data.mappings), invalid = mappings.filter(mapping => mapping.valid === false);
+      const mappings = list(data.mappings);
       if (entry.name === 'alignment_accept') return { title: data.status === 'accepted' ? T('双方接受任务内的概念对应', 'Task-scoped correspondences accepted') : T('这组概念对应未被接受', 'Correspondences not accepted'),
-        body: data.status === 'accepted' ? T(`对方审阅后接受了 ${mappings.length} 项对应；限定条件和相关关系仍然保留，没有把所有概念当作同义词。`, `The peer reviewed and accepted ${mappings.length} correspondences. Conditions and related meanings remain distinct; these are not blanket synonyms.`)
-          : T('审阅发现对应不满足当前定义或适用条件，需要重新讨论。', 'The proposed correspondences did not meet the current definitions or conditions and need further discussion.') };
+        body: data.status === 'accepted' ? T(`对方审阅后接受了 ${mappings.length} 项对应。后续协作按记录的关系与适用条件使用。`, `The peer reviewed and accepted ${mappings.length} correspondences. Further collaboration uses their recorded relations and conditions.`)
+          : T('对方已审阅并拒绝这组对应。双方可以根据已交换的定义继续讨论；具体记录可展开查看。', 'The peer reviewed and declined these correspondences. Discussion can continue from the exchanged definitions; expand to inspect the review record.') };
       const conditional = mappings.filter(mapping => mapping.relation === 'conditional').length;
       const related = mappings.filter(mapping => mapping.relation === 'related').length;
       return { title: T(`${from} 提议对齐概念含义`, `${from} proposed semantic correspondences`),
-        body: T(`已向 ${to} 提交 ${mappings.length} 项对应供审阅${conditional ? `，其中 ${conditional} 项只在特定条件下成立` : ''}${related ? `，${related} 项只表示相关` : ''}。${invalid.length ? '其中有候选未通过适用范围检查，不能直接接受。' : '仍需对方审阅，提议本身不代表已经接受。'}`,
-          `${mappings.length} correspondences were proposed to ${to}${conditional ? `; ${conditional} are conditional` : ''}${related ? `; ${related} express related meanings` : ''}. ${invalid.length ? 'Some candidates failed the scope check and cannot be accepted as-is.' : 'Peer review is still required; proposing is not acceptance.'}`) };
+        body: T(`已向 ${to} 提交 ${mappings.length} 项对应供审阅${conditional ? `，其中 ${conditional} 项只在特定条件下成立` : ''}${related ? `，${related} 项只表示相关` : ''}。仍需对方审阅，提议本身不代表已经接受。`,
+          `${mappings.length} correspondences were proposed to ${to}${conditional ? `; ${conditional} are conditional` : ''}${related ? `; ${related} express related meanings` : ''}. Peer review is still required; proposing is not acceptance.`) };
     }
     return { title: T('收到协作信息', 'Collaboration information'), body: T('这条信息已记入双方的协作记录，可展开查看原始内容。', 'This information is recorded in the collaboration history. Expand to inspect the original content.') };
   }
@@ -155,6 +207,169 @@ const completedToolState = (name, lang) => ({
   receipt_inspect: ['已查询实际回执', 'Actual receipts inspected'], task_status: ['已读取协作进度', 'Collaboration progress retrieved'],
   task_checkpoint: ['已保存任务进度', 'Task progress saved'], research_skills_list: ['已列出适用技能', 'Available skills listed'], research_skill_view: ['已读取技能方法', 'Skill instructions retrieved'],
 }[name]?.[lang === 'en' ? 1 : 0] ?? language(lang)('刚完成一项工具动作', 'A tool action just finished'));
+
+const timelineKinds = new Set(['command', 'message', 'response', 'result', 'approval', 'tool', 'run', 'checkpoint']);
+const hiddenChannel = /^(?:analysis|thinking|reasoning|private(?:[_ -]?(?:thinking|reasoning))?|chain[_ -]?of[_ -]?thought|reasoning_content)$/i;
+const hiddenField = /^(?:analysis|thinking|reasoning|reasoning_content|reasoningContent|private[_-]?(?:thinking|reasoning)|privateThinking|privateReasoning|chain[_-]?of[_-]?thought|chainOfThought)$/i;
+const activeToolStatuses = new Set(['started', 'running', 'in_progress', 'queued']);
+const finishedToolStatuses = new Set(['completed', 'failed', 'error', 'cancelled', 'denied']);
+const checkpointStatus = status => ({ needs_owner: 'needs_owner', owner_decision_required: 'needs_owner',
+  waiting_peer: 'waiting_peer', paused: 'paused', failed: 'failed', error: 'failed',
+  checkpoint_saved: 'recorded', complete: 'completed', completed: 'completed', verified_task_finished: 'completed' })[status];
+const runFinished = entry => entry.kind === 'run' && ['completed', 'failed', 'error', 'cancelled', 'paused'].includes(entry.status)
+  || entry.kind === 'checkpoint' && entry.name === 'native_run'
+    && ['checkpoint_saved', 'owner_decision_required', 'verified_task_finished'].includes(entry.status);
+
+// The activity API exposes tool boundaries and public checkpoint summaries, not
+// model reasoning. Keep this projection safe even if an unexpected event shape
+// reaches the browser, and never reconstruct content from a redacted record.
+function timelineEntry(entry) {
+  if (!entry || !timelineKinds.has(entry.kind)
+    || ['kind', 'channel', 'type', 'visibility'].some(key => hiddenChannel.test(text(entry[key])))
+    || hiddenChannel.test(text(entry.name))
+    || /(?:^|[_:.-])(?:private[_-]?(?:thinking|reasoning)|chain[_-]?of[_-]?thought|thinking|reasoning_content)(?:$|[_:.-])/i.test(text(entry.name))) return null;
+  if (entry.redacted) {
+    const metadata = ['id', 'sequence', 'at', 'taskId', 'role', 'kind', 'direction', 'from', 'to',
+      'name', 'status', 'callId', 'requestId', 'revision', 'messageId', 'redacted'];
+    return Object.fromEntries(metadata.filter(key => entry[key] !== undefined).map(key => [key, entry[key]]));
+  }
+  const publicValue = value => {
+    if (Array.isArray(value)) return value.map(publicValue).filter(item => item !== undefined);
+    if (!value || typeof value !== 'object') return value;
+    if (['kind', 'channel', 'type', 'visibility'].some(key => hiddenChannel.test(text(value[key])))) return undefined;
+    return Object.fromEntries(Object.entries(value).filter(([key]) => !hiddenField.test(key))
+      .map(([key, item]) => [key, publicValue(item)]).filter(([, item]) => item !== undefined));
+  };
+  return publicValue(entry);
+}
+
+const toolPhase = name => ({
+  task_status: 'review', research_skills_list: 'review', research_skill_view: 'review',
+  knowledge_search: 'review', ontology_describe: 'review', peer_describe: 'review', authorization_list: 'review',
+  knowledge_record: 'prepare', artifact_prepare: 'prepare', artifact_revise: 'prepare', resource_search: 'prepare',
+  peer_request: 'collaborate', peer_send: 'collaborate', alignment_propose: 'collaborate', alignment_accept: 'collaborate',
+  authorization_check: 'authorize', authorization_request: 'authorize', authorization_propose_policy: 'authorize',
+  reservation_submit: 'execute', receipt_inspect: 'verify',
+})[name];
+const phaseTitle = (phase, lang) => ({
+  review: ['查阅任务与研究资料', 'Review task and research material'],
+  prepare: ['整理证据与准备材料', 'Organize evidence and prepare material'],
+  collaborate: ['处理协作与概念对应', 'Handle collaboration and correspondences'],
+  authorize: ['检查权限与准备授权', 'Check permissions and prepare authorization'],
+  execute: ['提交预约操作', 'Submit the booking operation'],
+  verify: ['核验实际执行回执', 'Inspect actual execution receipts'],
+}[phase]?.[lang === 'en' ? 1 : 0] ?? language(lang)('处理任务步骤', 'Work on the task'));
+
+/** A chronological chat projection of recorded evidence. Steps are collapsed
+ * presentation groups, not invented model turns or private thinking. A late
+ * tool result stays with its original call even when messages arrive meanwhile.
+ * Status describes that recorded step; it does not establish business success.
+ */
+export function conversationTimeline(entries, { role, task, lang = 'zh', conference } = {}) {
+  const timeline = [], metadata = new Map(), calls = new Map(), seen = new Set(), runs = [];
+  let current = null, activeRun = null;
+  const events = scoped(list(entries).filter(Boolean), task).filter(entry => !role || entry.role === role)
+    .map(timelineEntry).filter(Boolean);
+  const eventId = (entry, index) => text(entry.id) || `${text(entry.taskId)}:${text(entry.role)}:${entry.sequence ?? index}:${entry.kind}:${text(entry.at)}`;
+  const closeStep = () => { if (current) metadata.get(current).sealed = true; current = null; };
+  const makeStep = (entry, index, phase) => {
+    const step = { kind: 'step', id: `step:${eventId(entry, index)}`, title: '', status: 'recorded',
+      entries: [], toolCallCount: 0, startedAt: null, endedAt: null, durationMs: null };
+    metadata.set(step, { phase, sealed: false, calls: new Map(), runs: new Set(activeRun ? [activeRun] : []) });
+    if (activeRun) activeRun.lastStep = step;
+    timeline.push(step); current = step; return step;
+  };
+  const stepFor = (entry, index, phase) => {
+    if (current && phase && metadata.get(current).phase && metadata.get(current).phase !== phase) closeStep();
+    const step = current ?? makeStep(entry, index, phase);
+    if (phase && !metadata.get(step).phase) metadata.get(step).phase = phase;
+    return step;
+  };
+  const callKey = (entry, id) => `${text(entry.taskId)}:${text(entry.role)}:${id}`;
+  const direction = entry => {
+    if (entry.kind === 'command' || entry.kind === 'approval'
+      && (entry.status !== 'pending' || text(entry.from).startsWith('owner:'))) return 'incoming';
+    if (['response', 'result', 'approval'].includes(entry.kind)) return 'outgoing';
+    if (entry.to === role || entry.direction === 'incoming') return 'incoming';
+    if (entry.from === role || entry.direction === 'outgoing') return 'outgoing';
+    return 'local';
+  };
+
+  events.forEach((entry, index) => {
+    const id = eventId(entry, index);
+    if (seen.has(id)) return;
+    seen.add(id);
+    if (['command', 'message', 'response', 'result', 'approval'].includes(entry.kind)) {
+      closeStep();
+      timeline.push({ kind: 'message', id: `message:${id}`, direction: direction(entry), entry });
+      return;
+    }
+    if (entry.kind === 'tool') {
+      const aliases = [entry.callId, entry.status === 'started' ? entry.id : null].filter(Boolean);
+      const existing = aliases.map(alias => calls.get(callKey(entry, alias))).find(Boolean);
+      const step = existing?.step ?? stepFor(entry, index, toolPhase(entry.name));
+      const meta = metadata.get(step), key = existing?.key ?? callKey(entry, entry.callId ?? entry.id ?? id);
+      const call = meta.calls.get(key) ?? { status: entry.status, entries: [] };
+      call.status = entry.status; call.entries.push(entry); meta.calls.set(key, call);
+      for (const alias of new Set([...aliases, entry.id, entry.callId].filter(Boolean))) calls.set(callKey(entry, alias), { step, key });
+      step.entries.push(entry);
+      return;
+    }
+    if (entry.kind === 'run' && entry.status === 'started') {
+      closeStep();
+      const step = stepFor(entry, index);
+      activeRun = { step, lastStep: step, name: entry.name, taskId: entry.taskId, role: entry.role, end: null };
+      runs.push(activeRun); metadata.get(step).runs.add(activeRun); step.entries.push(entry);
+      return;
+    }
+    if (runFinished(entry)) {
+      const run = [...runs].reverse().find(item => !item.end && item.name === entry.name
+        && item.role === entry.role && item.taskId === entry.taskId);
+      const step = run?.lastStep ?? stepFor(entry, index);
+      step.entries.push(entry);
+      if (run) { run.end = entry; if (activeRun === run) activeRun = null; }
+      closeStep();
+      return;
+    }
+    const step = stepFor(entry, index);
+    step.entries.push(entry);
+    if (entry.kind === 'checkpoint' && checkpointStatus(entry.status)) closeStep();
+  });
+
+  for (const step of timeline.filter(item => item.kind === 'step')) {
+    const meta = metadata.get(step), records = step.entries;
+    const lastCheckpoint = records.findLast(entry => entry.kind === 'checkpoint' && checkpointStatus(entry.status));
+    const failed = records.some(entry => ['failed', 'error', 'denied'].includes(entry.status));
+    const toolCalls = [...meta.calls.values()];
+    const openCall = toolCalls.some(call => activeToolStatuses.has(call.status));
+    const ownRunEnd = records.findLast(runFinished);
+    const running = [...meta.runs].some(run => !run.end) && (!meta.sealed || !toolCalls.length);
+    step.toolCallCount = toolCalls.length;
+    const paused = ownRunEnd?.status === 'paused' || ownRunEnd?.status === 'cancelled'
+      || toolCalls.some(call => call.status === 'cancelled');
+    const completed = toolCalls.length > 0 && toolCalls.every(call => finishedToolStatuses.has(call.status))
+      || ownRunEnd?.status === 'completed';
+    step.status = failed ? 'failed' : paused ? 'paused' : lastCheckpoint ? checkpointStatus(lastCheckpoint.status)
+      : openCall || running ? 'running' : completed ? 'completed' : 'recorded';
+    step.title = meta.phase ? phaseTitle(meta.phase, lang)
+      : describeActivity(lastCheckpoint ?? records.at(-1), { lang, task, conference }).title;
+    const publicCheckpoint = records.findLast(entry => entry.kind === 'checkpoint' && !entry.redacted && text(entry.text) && !structured(entry.text));
+    const summaryRecord = lastCheckpoint ?? records.findLast(entry => entry.kind === 'checkpoint'
+      || entry.kind === 'run' && (['completed', 'failed'].includes(entry.status)
+        || entry.status === 'started' && !toolCalls.length));
+    if (publicCheckpoint) step.summary = text(publicCheckpoint.text);
+    else if (summaryRecord) step.summary = describeActivity(summaryRecord, { lang, task, conference }).body;
+    const times = records.map(entry => ({ at: entry.at, ms: Date.parse(entry.at) })).filter(value => Number.isFinite(value.ms));
+    if (times.length) {
+      const first = times.reduce((a, b) => a.ms <= b.ms ? a : b), last = times.reduce((a, b) => a.ms >= b.ms ? a : b);
+      step.startedAt = first.at;
+      const ended = step.status !== 'running' && (ownRunEnd || lastCheckpoint
+        || toolCalls.length && toolCalls.every(call => finishedToolStatuses.has(call.status)));
+      if (ended) { step.endedAt = last.at; step.durationMs = Math.max(0, last.ms - first.ms); }
+    }
+  }
+  return timeline;
+}
 
 export function describeAgentState({ role, task, entries = [], owner, requests = [], policyCandidates = [], lang = 'zh' } = {}) {
   const T = language(lang);

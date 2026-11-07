@@ -11,13 +11,18 @@ export const RESEARCH_TOOL_NAMES = Object.freeze([
 const EXPECTED = new Set(RESEARCH_TOOL_NAMES);
 const TERMINAL = new Set(['completed', 'failed', 'cancelled', 'interrupted', 'incomplete']);
 const RUNNING = new Set(['queued', 'started', 'running', 'stopping']);
-const validTimeout = value => Number.isSafeInteger(value) && value > 0 && value <= 300_000;
+const validTimeout = value => Number.isSafeInteger(value) && value > 0 && value <= 600_000;
 const validRunId = value => typeof value === 'string' && /^run_[A-Za-z0-9_-]{1,160}$/.test(value);
 const validRequestId = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,200}$/.test(value);
+const validExperienceId = value => typeof value === 'string' && /^[a-f0-9-]{36}$/.test(value);
 
 function runPayload(input, instructions) {
   invariant(typeof input === 'string' && input.trim() && (instructions === undefined || typeof instructions === 'string'),
     'HERMES_INVALID_REQUEST', 'Supply the exact native run input and instructions.', 422);
+  // Hermes v0.22.7 api_server_runs._handle_runs uses session_id = fresh run_id
+  // when no session_id, previous_response_id or X-Hermes-Session-Key is supplied.
+  // Every continuation therefore retrieves its checkpoint through task_status;
+  // no previous audience's conversation history can be selected here.
   const body = { input, instructions, author: { id: 'bot:agent-on-request:research', name: 'Research collaboration', is_bot: true } };
   invariant(Buffer.byteLength(JSON.stringify(body)) <= 768 * 1024, 'HERMES_INVALID_REQUEST', 'The native run input exceeds its limit.', 422);
   return body;
@@ -36,13 +41,21 @@ function endpoint(config, role) {
 }
 
 /** Native multi-tool runs. Domain records, not the returned model text, determine task success. */
-export function createHermesResearchClient({ endpoints, timeoutMs = 300_000, pollIntervalMs = 250, fetchImpl = fetch } = {}) {
+export function createHermesResearchClient({ endpoints, timeoutMs = 600_000, pollIntervalMs = 250, fetchImpl = fetch } = {}) {
   invariant(validTimeout(timeoutMs) && Number.isSafeInteger(pollIntervalMs) && pollIntervalMs > 0 && pollIntervalMs <= 5_000,
     'HERMES_CONFIGURATION', 'Use a bounded native run timeout and polling interval.', 503);
   const configured = Object.fromEntries(['alice', 'bob'].map(role => [role, endpoint(endpoints?.[role], role)]));
   invariant(configured.alice.port !== configured.bob.port && configured.alice.key !== configured.bob.key,
     'HERMES_CONFIGURATION', 'Research agents require separate Hermes ports and keys.', 503);
   const active = new Map();
+  const issuedSessions = new Map();
+
+  function pinFreshSession(config, runId, requestId) {
+    const key = `${config.role}:${runId}`;
+    invariant(!issuedSessions.has(key) || issuedSessions.get(key) === requestId,
+      'HERMES_RESEARCH_SESSION', 'Hermes reused another research run’s conversation. Keep experiences isolated.', 502);
+    issuedSessions.set(key, requestId);
+  }
 
   function target(role) {
     const key = typeof role === 'string' ? role.toLowerCase() : '';
@@ -123,8 +136,9 @@ export function createHermesResearchClient({ endpoints, timeoutMs = 300_000, pol
     } catch { /* Keep the role occupied until a later reconcile confirms termination. */ }
     return false;
   }
-  async function reconcile({ role, runId, requestId, input, instructions }) {
+  async function reconcile({ role, runId, requestId, input, instructions, workspaceId, sessionId }) {
     const config = target(role);
+    invariant(workspaceId === undefined || validExperienceId(workspaceId), 'HERMES_INVALID_REQUEST', 'Use the authenticated experience identifier.', 422);
     const persisted = runId !== undefined || requestId !== undefined || input !== undefined || instructions !== undefined;
     let record = active.get(config.role);
     // Preserve the existing in-process reconcile contract when no durable
@@ -157,6 +171,8 @@ export function createHermesResearchClient({ endpoints, timeoutMs = 300_000, pol
         invariant(validRunId(admitted?.run_id), 'HERMES_RESEARCH_TRANSPORT', 'Hermes returned an invalid recovered run identifier.', 502);
         record.id = admitted.run_id; record.url = `${config.url}/v1/runs/${record.id}`;
       }
+      invariant(sessionId == null || sessionId === record.id, 'HERMES_RESEARCH_SESSION', 'The recovered conversation must belong to the original fresh run.', 502);
+      pinFreshSession(config, record.id, requestId ?? record.requestId);
       const state = await request(record.url, config, 'GET', deadline);
       invariant(state?.run_id === record.id, 'HERMES_RESEARCH_TRANSPORT', 'Hermes returned a different recovered run.', 502);
       if (TERMINAL.has(state.status)) {
@@ -168,8 +184,10 @@ export function createHermesResearchClient({ endpoints, timeoutMs = 300_000, pol
     throw new RuntimeError('HERMES_RUN_UNSETTLED',
       'The persisted Hermes run could not be confirmed stopped. Keep its assignment until reconciliation.', 503);
   }
-  async function run({ role, input, instructions, requestId, signal, onAdmitted, timeoutMs: runTimeout = timeoutMs }) {
+  async function run({ role, input, instructions, requestId, signal, onAdmitted, workspaceId, taskId, timeoutMs: runTimeout = timeoutMs }) {
     const config = target(role);
+    invariant((workspaceId === undefined || validExperienceId(workspaceId)) && (taskId === undefined || validExperienceId(taskId)),
+      'HERMES_INVALID_REQUEST', 'Use authenticated experience and task identifiers.', 422);
     invariant(!active.has(config.role), 'HERMES_RESEARCH_BUSY', 'The previous role run must settle before assigning another task.', 409);
     invariant(validRequestId(requestId) && validTimeout(runTimeout)
       && (onAdmitted === undefined || typeof onAdmitted === 'function'),
@@ -177,7 +195,7 @@ export function createHermesResearchClient({ endpoints, timeoutMs = 300_000, pol
     const body = runPayload(input, instructions);
     const deadline = AbortSignal.timeout(runTimeout);
     const combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
-    const record = { requestId, id: null, url: null, body };
+    const record = { requestId, id: null, url: null, body, workspaceId, taskId };
     active.set(config.role, record);
     let submitted = false;
     try {
@@ -189,10 +207,13 @@ export function createHermesResearchClient({ endpoints, timeoutMs = 300_000, pol
       invariant(validRunId(admitted?.run_id),
         'HERMES_RESEARCH_TRANSPORT', 'Hermes returned an invalid native run identifier.', 502);
       record.id = admitted.run_id; record.url = `${config.url}/v1/runs/${record.id}`;
-      if (onAdmitted) await onAdmitted({ runId: record.id, requestId });
+      pinFreshSession(config, record.id, requestId);
+      if (onAdmitted) await onAdmitted({ runId: record.id, requestId, ...(workspaceId ? { sessionId: record.id } : {}) });
       while (true) {
         const result = await request(record.url, config, 'GET', combined);
         invariant(result?.run_id === record.id, 'HERMES_RESEARCH_TRANSPORT', 'Hermes returned a different native run.', 502);
+        invariant(result.session_id === undefined || result.session_id === record.id,
+          'HERMES_RESEARCH_SESSION', 'The native run selected a different conversation. Pause rather than reuse its history.', 502);
         combined.throwIfAborted();
         if (TERMINAL.has(result.status)) {
           active.delete(config.role);
@@ -200,7 +221,7 @@ export function createHermesResearchClient({ endpoints, timeoutMs = 300_000, pol
             'HERMES_RESEARCH_FAILED', 'Hermes did not complete the native tool run. Inspect task records before retrying.', 502);
           invariant(typeof result.output === 'string' && Buffer.byteLength(result.output) <= 512 * 1024,
             'HERMES_RESEARCH_TRANSPORT', 'Hermes returned an invalid run explanation.', 502);
-          return { runId: record.id, status: 'completed', output: result.output };
+          return { runId: record.id, ...(workspaceId ? { sessionId: record.id } : {}), status: 'completed', output: result.output };
         }
         invariant(!['waiting_for_approval', 'waiting_for_clarification'].includes(result.status),
           'HERMES_CONTROL_REQUIRED', 'Native tools must save owner decisions through the research task service.', 409);

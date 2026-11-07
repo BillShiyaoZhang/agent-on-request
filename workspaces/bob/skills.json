@@ -1,0 +1,298 @@
+[
+  {
+    "id": "coordinate-calendar",
+    "label": "Coordinate academic calendars",
+    "description": "Find a mutually offered interval using only scoped availability and actual peer receipts.",
+    "modules": [
+      "bob:time"
+    ],
+    "inputTypes": [
+      "bob:TimeInterval"
+    ],
+    "outputTypes": [
+      "bob:AttendancePlan"
+    ],
+    "tools": [
+      "knowledge.search",
+      "authorization.check",
+      "peer.request",
+      "peer.send",
+      "task.status"
+    ],
+    "sideEffects": [
+      "disclose-availability"
+    ],
+    "path": "workspaces/bob/skills/coordinate-calendar/SKILL.md"
+  },
+  {
+    "id": "plan-conference",
+    "label": "Plan conference attendance",
+    "description": "Use research questions, topic meanings and individually identified presentations to plan learning.",
+    "modules": [
+      "bob:research"
+    ],
+    "inputTypes": [
+      "bob:ResearchQuestion",
+      "bob:Conference"
+    ],
+    "outputTypes": [
+      "bob:AttendancePlan"
+    ],
+    "tools": [
+      "knowledge.search",
+      "ontology.describe",
+      "alignment.propose",
+      "alignment.accept",
+      "peer.send",
+      "task.status"
+    ],
+    "sideEffects": [
+      "disclose-working-ontology",
+      "disclose-report-selection"
+    ],
+    "path": "workspaces/bob/skills/plan-conference/SKILL.md"
+  },
+  {
+    "id": "prepare-discussion",
+    "label": "Prepare a research discussion",
+    "description": "Prepare a sourced discussion agenda from own knowledge and actual received material, then explicitly deliver approved drafts when peer review is needed.",
+    "modules": [
+      "bob:collaboration",
+      "bob:materials"
+    ],
+    "inputTypes": [
+      "bob:ResearchQuestion",
+      "bob:DocumentVersion"
+    ],
+    "outputTypes": [
+      "bob:DiscussionPlan",
+      "bob:AgendaItem",
+      "bob:DocumentVersion"
+    ],
+    "tools": [
+      "task.status",
+      "knowledge.search",
+      "artifact.prepare",
+      "artifact.revise",
+      "peer.request",
+      "authorization.check",
+      "authorization.request",
+      "peer.send",
+      "receipt.inspect",
+      "task.checkpoint"
+    ],
+    "sideEffects": [
+      "write-local-draft",
+      "request-peer-input",
+      "disclose-material",
+      "request-owner-decision"
+    ],
+    "path": "workspaces/bob/skills/prepare-discussion/SKILL.md"
+  },
+  {
+    "id": "share-materials",
+    "label": "Share selected research materials",
+    "description": "Prepare an exact versioned projection, obtain current permission and send only approved fields.",
+    "modules": [
+      "bob:materials"
+    ],
+    "inputTypes": [
+      "bob:DocumentVersion"
+    ],
+    "outputTypes": [
+      "bob:SelectedExcerpt"
+    ],
+    "tools": [
+      "artifact.prepare",
+      "authorization.check",
+      "authorization.request",
+      "peer.send",
+      "task.checkpoint",
+      "task.status"
+    ],
+    "sideEffects": [
+      "disclose-material"
+    ],
+    "path": "workspaces/bob/skills/share-materials/SKILL.md"
+  },
+  {
+    "id": "authorization-memory",
+    "label": "Retrieve and request authorization",
+    "description": "Explain current permissions in a sourced owner-only brief, propose future rules for owner confirmation, and verify current authority before an external effect.",
+    "modules": [
+      "bob:work",
+      "bob:materials"
+    ],
+    "inputTypes": [
+      "bob:Task"
+    ],
+    "outputTypes": [
+      "bob:Decision",
+      "bob:DocumentVersion"
+    ],
+    "tools": [
+      "task.status",
+      "knowledge.search",
+      "authorization.list",
+      "authorization.check",
+      "authorization.request",
+      "authorization.propose_policy",
+      "artifact.prepare",
+      "task.checkpoint"
+    ],
+    "sideEffects": [
+      "write-local-draft",
+      "request-owner-decision",
+      "propose-standing-policy"
+    ],
+    "path": "workspaces/bob/skills/authorization-memory/SKILL.md"
+  },
+  {
+    "id": "reserve-resource",
+    "label": "Coordinate rooms and resources",
+    "description": "Coordinate suitable resources and approved draft handoffs; only the task's designated organizer submits an independently authorized local reservation form.",
+    "modules": [
+      "bob:collaboration",
+      "bob:materials"
+    ],
+    "inputTypes": [
+      "bob:VenueRequirement",
+      "bob:DocumentVersion"
+    ],
+    "outputTypes": [
+      "bob:ReservationProposal",
+      "bob:ConfirmedReservation"
+    ],
+    "tools": [
+      "task.status",
+      "resource.search",
+      "artifact.prepare",
+      "artifact.revise",
+      "authorization.check",
+      "authorization.request",
+      "peer.send",
+      "receipt.inspect",
+      "reservation.submit",
+      "task.checkpoint"
+    ],
+    "sideEffects": [
+      "write-local-draft",
+      "disclose-material",
+      "request-owner-decision",
+      "reserve-resource"
+    ],
+    "path": "workspaces/bob/skills/reserve-resource/SKILL.md"
+  },
+  {
+    "id": "organize-user-study",
+    "label": "Organize user-study evidence",
+    "description": "Connect research questions, protocols, sessions, observations and findings without treating interpretations as observations.",
+    "modules": [
+      "bob:study",
+      "bob:findings"
+    ],
+    "inputTypes": [
+      "bob:UserStudy",
+      "bob:Observation"
+    ],
+    "outputTypes": [
+      "bob:StudyReport"
+    ],
+    "tools": [
+      "knowledge.search",
+      "artifact.prepare",
+      "artifact.revise",
+      "knowledge.record"
+    ],
+    "sideEffects": [
+      "write-local-draft",
+      "write-private-knowledge"
+    ],
+    "path": "workspaces/bob/skills/organize-user-study/SKILL.md"
+  },
+  {
+    "id": "review-interaction",
+    "label": "Review interaction alternatives",
+    "description": "Compare prototypes and design alternatives against user needs, use contexts and supported findings.",
+    "modules": [
+      "bob:interaction",
+      "bob:findings"
+    ],
+    "inputTypes": [
+      "bob:InteractivePrototype",
+      "bob:DesignAlternative"
+    ],
+    "outputTypes": [
+      "bob:DesignRationale",
+      "bob:DesignNote"
+    ],
+    "tools": [
+      "knowledge.search",
+      "artifact.prepare",
+      "knowledge.record"
+    ],
+    "sideEffects": [
+      "write-local-draft",
+      "write-private-knowledge"
+    ],
+    "path": "workspaces/bob/skills/review-interaction/SKILL.md"
+  },
+  {
+    "id": "synthesize-findings",
+    "label": "Synthesize scoped research findings",
+    "description": "Trace observations supporting findings and summarize design implications with context and limitations.",
+    "modules": [
+      "bob:findings"
+    ],
+    "inputTypes": [
+      "bob:Finding",
+      "bob:Observation"
+    ],
+    "outputTypes": [
+      "bob:DesignImplication",
+      "bob:StudyReport"
+    ],
+    "tools": [
+      "knowledge.search",
+      "artifact.prepare",
+      "artifact.revise",
+      "knowledge.record"
+    ],
+    "sideEffects": [
+      "write-local-draft",
+      "write-private-knowledge"
+    ],
+    "path": "workspaces/bob/skills/synthesize-findings/SKILL.md"
+  },
+  {
+    "id": "cross-domain-brief",
+    "label": "Prepare cross-domain collaboration briefs",
+    "description": "Translate HCI research into partner-facing questions and design suggestions without equating unrelated domain terms.",
+    "modules": [
+      "bob:findings",
+      "bob:materials"
+    ],
+    "inputTypes": [
+      "bob:ResearchQuestion",
+      "bob:Finding"
+    ],
+    "outputTypes": [
+      "bob:DiscussionPlan",
+      "bob:DocumentVersion"
+    ],
+    "tools": [
+      "knowledge.search",
+      "ontology.describe",
+      "artifact.prepare",
+      "authorization.check",
+      "authorization.request",
+      "knowledge.record"
+    ],
+    "sideEffects": [
+      "write-local-draft",
+      "request-owner-decision",
+      "write-private-knowledge"
+    ],
+    "path": "workspaces/bob/skills/cross-domain-brief/SKILL.md"
+  }
+]

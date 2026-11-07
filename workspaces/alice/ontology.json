@@ -1,0 +1,1187 @@
+{
+  "id": "urn:agent-on-request:research:alice:application-ontology",
+  "owner": "Alice",
+  "version": "2.0.0",
+  "basis": {
+    "preset": "personal",
+    "sources": [
+      "https://schema.org/version/30.1/",
+      "https://www.w3.org/TR/skos-reference/",
+      "https://www.w3.org/TR/prov-o/",
+      "https://www.dublincore.org/specifications/dublin-core/dcmi-terms/"
+    ]
+  },
+  "baselineVersion": "1.0.0",
+  "modules": [
+    {
+      "id": "alice:personal",
+      "name": "People, preferences and provenance",
+      "dependencies": [],
+      "concepts": [
+        {
+          "id": "alice:Person",
+          "label": "Person",
+          "definition": "An individual, distinct from the software agent acting for them.",
+          "standardUri": "https://schema.org/Person",
+          "properties": [
+            {
+              "id": "alice:Person.displayName",
+              "datatype": "string",
+              "key": "displayName",
+              "definition": "displayName of Person."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:Person"
+        },
+        {
+          "id": "alice:Organization",
+          "label": "Organization",
+          "definition": "A university, laboratory, team or other organization.",
+          "standardUri": "https://schema.org/Organization",
+          "properties": [
+            {
+              "id": "alice:Organization.displayName",
+              "datatype": "string",
+              "key": "displayName",
+              "definition": "displayName of Organization."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:Organization"
+        },
+        {
+          "id": "alice:Place",
+          "label": "Place",
+          "definition": "A physical location, including a room or conference venue.",
+          "standardUri": "https://schema.org/Place",
+          "properties": [
+            {
+              "id": "alice:Place.capacity",
+              "datatype": "integer",
+              "key": "capacity",
+              "definition": "capacity of Place."
+            },
+            {
+              "id": "alice:Place.equipment",
+              "datatype": "string[]",
+              "key": "equipment",
+              "definition": "equipment of Place."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:Place"
+        },
+        {
+          "id": "alice:Preference",
+          "label": "Preference",
+          "definition": "An explicitly expressed preference. A preference is not an authorization.",
+          "properties": [
+            {
+              "id": "alice:Preference.value",
+              "datatype": "string",
+              "key": "value",
+              "definition": "value of Preference."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:Preference"
+        },
+        {
+          "id": "alice:SourceRecord",
+          "label": "Source record",
+          "definition": "A versioned record used as evidence for knowledge, distinct from the object it describes.",
+          "properties": [
+            {
+              "id": "alice:SourceRecord.kind",
+              "datatype": "string",
+              "key": "kind",
+              "definition": "kind of Source record."
+            },
+            {
+              "id": "alice:SourceRecord.synthetic",
+              "datatype": "boolean",
+              "key": "synthetic",
+              "definition": "synthetic of Source record."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:SourceRecord"
+        },
+        {
+          "id": "alice:HumanCompetency",
+          "label": "Human competency",
+          "definition": "A person's explicitly stated professional ability; not an executable agent skill.",
+          "properties": [
+            {
+              "id": "alice:HumanCompetency.description",
+              "datatype": "string",
+              "key": "description",
+              "definition": "description of Human competency."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:HumanCompetency"
+        }
+      ],
+      "relations": [
+        {
+          "id": "alice:memberOf",
+          "definition": "The person belongs to the organization.",
+          "domain": [
+            "alice:Person"
+          ],
+          "range": [
+            "alice:Organization"
+          ]
+        },
+        {
+          "id": "alice:hasPreference",
+          "definition": "The person explicitly expressed the preference.",
+          "domain": [
+            "alice:Person"
+          ],
+          "range": [
+            "alice:Preference"
+          ]
+        },
+        {
+          "id": "alice:hasCompetency",
+          "definition": "The person explicitly claims the competency.",
+          "domain": [
+            "alice:Person"
+          ],
+          "range": [
+            "alice:HumanCompetency"
+          ]
+        }
+      ],
+      "owner": "Alice"
+    },
+    {
+      "id": "alice:work",
+      "name": "Projects, goals, tasks and decisions",
+      "dependencies": [
+        "alice:personal"
+      ],
+      "concepts": [
+        {
+          "id": "alice:Project",
+          "label": "Project",
+          "definition": "An organized body of work. This local type is not equated to Schema.org Project, which is an Organization.",
+          "properties": [
+            {
+              "id": "alice:Project.state",
+              "datatype": "string",
+              "key": "state",
+              "definition": "state of Project."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:Project"
+        },
+        {
+          "id": "alice:Goal",
+          "label": "Goal",
+          "definition": "A desired outcome, distinct from the task undertaken to achieve it.",
+          "properties": [
+            {
+              "id": "alice:Goal.description",
+              "datatype": "string",
+              "key": "description",
+              "definition": "description of Goal."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:Goal"
+        },
+        {
+          "id": "alice:Task",
+          "label": "Task",
+          "definition": "A concrete action commitment, with a state and optional deadline.",
+          "properties": [
+            {
+              "id": "alice:Task.state",
+              "datatype": "string",
+              "key": "state",
+              "definition": "state of Task."
+            },
+            {
+              "id": "alice:Task.deadline",
+              "datatype": "string",
+              "key": "deadline",
+              "definition": "deadline of Task."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:Task"
+        },
+        {
+          "id": "alice:Decision",
+          "label": "Decision",
+          "definition": "A recorded choice and its rationale. An ordinary decision record never grants agent execution authority.",
+          "properties": [
+            {
+              "id": "alice:Decision.choice",
+              "datatype": "string",
+              "key": "choice",
+              "definition": "choice of Decision."
+            },
+            {
+              "id": "alice:Decision.rationale",
+              "datatype": "string",
+              "key": "rationale",
+              "definition": "rationale of Decision."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:Decision"
+        }
+      ],
+      "relations": [
+        {
+          "id": "alice:pursues",
+          "definition": "The project or task pursues a goal.",
+          "domain": [
+            "alice:Project",
+            "alice:Task"
+          ],
+          "range": [
+            "alice:Goal"
+          ]
+        },
+        {
+          "id": "alice:partOfProject",
+          "definition": "The task belongs to this project.",
+          "domain": [
+            "alice:Task"
+          ],
+          "range": [
+            "alice:Project"
+          ]
+        },
+        {
+          "id": "alice:ownedBy",
+          "definition": "The work item belongs to the person.",
+          "domain": [
+            "alice:Project",
+            "alice:Task",
+            "alice:Goal"
+          ],
+          "range": [
+            "alice:Person"
+          ]
+        }
+      ],
+      "owner": "Alice"
+    },
+    {
+      "id": "alice:time",
+      "name": "Personal time and commitments",
+      "dependencies": [
+        "alice:personal"
+      ],
+      "concepts": [
+        {
+          "id": "alice:TimeInterval",
+          "label": "Time interval",
+          "definition": "A bounded interval in the fictional conference week and Asia/Shanghai timezone.",
+          "properties": [
+            {
+              "id": "alice:TimeInterval.day",
+              "datatype": "string",
+              "constraints": {
+                "enum": [
+                  "Mon",
+                  "Tue",
+                  "Wed",
+                  "Thu",
+                  "Fri",
+                  "Sat",
+                  "Sun"
+                ]
+              },
+              "key": "day",
+              "definition": "day of Time interval."
+            },
+            {
+              "id": "alice:TimeInterval.time",
+              "datatype": "string",
+              "constraints": {
+                "pattern": "HH:MM–HH:MM",
+                "sameDay": true
+              },
+              "key": "time",
+              "definition": "time of Time interval."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:TimeInterval"
+        },
+        {
+          "id": "alice:CalendarEvent",
+          "label": "Calendar event",
+          "definition": "An occupied or explicitly offered interval. The demo's Free intervals are already offered for academic coordination, not inferred from missing events.",
+          "properties": [
+            {
+              "id": "alice:CalendarEvent.status",
+              "datatype": "string",
+              "constraints": {
+                "enum": [
+                  "Free",
+                  "Busy"
+                ]
+              },
+              "key": "status",
+              "definition": "status of Calendar event."
+            },
+            {
+              "id": "alice:CalendarEvent.title",
+              "datatype": "string",
+              "key": "title",
+              "definition": "title of Calendar event."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:CalendarEvent"
+        }
+      ],
+      "relations": [
+        {
+          "id": "alice:during",
+          "definition": "The calendar event occurs during the interval.",
+          "domain": [
+            "alice:CalendarEvent"
+          ],
+          "range": [
+            "alice:TimeInterval"
+          ]
+        },
+        {
+          "id": "alice:calendarOf",
+          "definition": "The calendar entry belongs to the person.",
+          "domain": [
+            "alice:CalendarEvent"
+          ],
+          "range": [
+            "alice:Person"
+          ]
+        }
+      ],
+      "owner": "Alice"
+    },
+    {
+      "id": "alice:materials",
+      "name": "Versioned scholarly materials",
+      "dependencies": [
+        "alice:personal"
+      ],
+      "concepts": [
+        {
+          "id": "alice:Document",
+          "label": "Document",
+          "definition": "An information work, distinct from its particular versions or physical copies.",
+          "standardUri": "https://schema.org/CreativeWork",
+          "properties": [
+            {
+              "id": "alice:Document.title",
+              "datatype": "string",
+              "key": "title",
+              "definition": "title of Document."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:Document"
+        },
+        {
+          "id": "alice:DocumentVersion",
+          "label": "Document version",
+          "definition": "A specific immutable version of an information work.",
+          "properties": [
+            {
+              "id": "alice:DocumentVersion.version",
+              "datatype": "string",
+              "key": "version",
+              "definition": "version of Document version."
+            },
+            {
+              "id": "alice:DocumentVersion.summary",
+              "datatype": "string",
+              "key": "summary",
+              "definition": "summary of Document version."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:DocumentVersion"
+        },
+        {
+          "id": "alice:SelectedExcerpt",
+          "label": "Selected excerpt",
+          "definition": "A selected section from a specific source version. Selection does not make private material public.",
+          "properties": [
+            {
+              "id": "alice:SelectedExcerpt.text",
+              "datatype": "string",
+              "key": "text",
+              "definition": "text of Selected excerpt."
+            },
+            {
+              "id": "alice:SelectedExcerpt.field",
+              "datatype": "string",
+              "key": "field",
+              "definition": "field of Selected excerpt."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:SelectedExcerpt"
+        },
+        {
+          "id": "alice:Paper",
+          "label": "Paper",
+          "parent": "alice:Document",
+          "definition": "A scholarly manuscript or paper; publication and permission to redistribute are separate facts.",
+          "properties": [
+            {
+              "id": "alice:Paper.publicationState",
+              "datatype": "string",
+              "key": "publicationState",
+              "definition": "publicationState of Paper."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:Paper"
+        },
+        {
+          "id": "alice:ResearchNote",
+          "label": "Research note",
+          "parent": "alice:Document",
+          "definition": "A personal research note with explicit sources and disclosure status.",
+          "properties": [
+            {
+              "id": "alice:ResearchNote.summary",
+              "datatype": "string",
+              "key": "summary",
+              "definition": "summary of Research note."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:ResearchNote"
+        }
+      ],
+      "relations": [
+        {
+          "id": "alice:versionOf",
+          "definition": "The concrete version is a version of the information work.",
+          "domain": [
+            "alice:DocumentVersion"
+          ],
+          "range": [
+            "alice:Document"
+          ]
+        },
+        {
+          "id": "alice:excerptOf",
+          "definition": "The excerpt is taken from the exact version.",
+          "domain": [
+            "alice:SelectedExcerpt"
+          ],
+          "range": [
+            "alice:DocumentVersion"
+          ]
+        },
+        {
+          "id": "alice:sourcedFrom",
+          "definition": "The assertion or work is supported by this source record.",
+          "domain": [
+            "*"
+          ],
+          "range": [
+            "alice:SourceRecord"
+          ]
+        }
+      ],
+      "owner": "Alice"
+    },
+    {
+      "id": "alice:academic",
+      "name": "Research goals, conferences and learning plans",
+      "dependencies": [
+        "alice:work",
+        "alice:time",
+        "alice:materials"
+      ],
+      "concepts": [
+        {
+          "id": "alice:ResearchProject",
+          "label": "Research project",
+          "parent": "alice:Project",
+          "definition": "A local work project organized around research questions.",
+          "properties": [
+            {
+              "id": "alice:ResearchProject.description",
+              "datatype": "string",
+              "key": "description",
+              "definition": "description of Research project."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:ResearchProject"
+        },
+        {
+          "id": "alice:ResearchQuestion",
+          "label": "Research question",
+          "parent": "alice:Goal",
+          "definition": "A question that guides research and requires appropriate evidence.",
+          "properties": [
+            {
+              "id": "alice:ResearchQuestion.question",
+              "datatype": "string",
+              "key": "question",
+              "definition": "question of Research question."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:ResearchQuestion"
+        },
+        {
+          "id": "alice:ResearchTopic",
+          "label": "Research topic",
+          "definition": "A subject in the owner's concept scheme; a topic label alone is not proof of equivalence.",
+          "standardUri": "http://www.w3.org/2004/02/skos/core#Concept",
+          "properties": [
+            {
+              "id": "alice:ResearchTopic.definition",
+              "datatype": "string",
+              "key": "definition",
+              "definition": "definition of Research topic."
+            },
+            {
+              "id": "alice:ResearchTopic.aliases",
+              "datatype": "string[]",
+              "key": "aliases",
+              "definition": "aliases of Research topic."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:ResearchTopic"
+        },
+        {
+          "id": "alice:Conference",
+          "label": "Conference",
+          "definition": "A whole conference containing program sessions and individual presentations.",
+          "properties": [
+            {
+              "id": "alice:Conference.conferenceId",
+              "datatype": "string",
+              "key": "conferenceId",
+              "definition": "conferenceId of Conference."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:Conference"
+        },
+        {
+          "id": "alice:ProgramSession",
+          "label": "Program session",
+          "definition": "A program grouping of presentations or other activities, not one individual talk.",
+          "properties": [
+            {
+              "id": "alice:ProgramSession.sessionId",
+              "datatype": "string",
+              "key": "sessionId",
+              "definition": "sessionId of Program session."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:ProgramSession"
+        },
+        {
+          "id": "alice:Presentation",
+          "label": "Presentation",
+          "definition": "One individually identified scholarly presentation within an event.",
+          "properties": [
+            {
+              "id": "alice:Presentation.reportId",
+              "datatype": "string",
+              "key": "reportId",
+              "definition": "reportId of Presentation."
+            },
+            {
+              "id": "alice:Presentation.attendanceMode",
+              "datatype": "string",
+              "key": "attendanceMode",
+              "definition": "attendanceMode of Presentation."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:Presentation"
+        },
+        {
+          "id": "alice:AttendancePlan",
+          "label": "Attendance plan",
+          "parent": "alice:Task",
+          "definition": "A proposed or confirmed personal plan to attend activities.",
+          "properties": [
+            {
+              "id": "alice:AttendancePlan.state",
+              "datatype": "string",
+              "key": "state",
+              "definition": "state of Attendance plan."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:AttendancePlan"
+        },
+        {
+          "id": "alice:ReadingPlan",
+          "label": "Reading plan",
+          "parent": "alice:Task",
+          "definition": "A reading commitment serving explicit research questions.",
+          "properties": [
+            {
+              "id": "alice:ReadingPlan.state",
+              "datatype": "string",
+              "key": "state",
+              "definition": "state of Reading plan."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:ReadingPlan"
+        }
+      ],
+      "relations": [
+        {
+          "id": "alice:addresses",
+          "definition": "The research project addresses this question.",
+          "domain": [
+            "alice:ResearchProject"
+          ],
+          "range": [
+            "alice:ResearchQuestion"
+          ]
+        },
+        {
+          "id": "alice:investigatesTopic",
+          "definition": "The research question concerns the topic.",
+          "domain": [
+            "alice:ResearchQuestion"
+          ],
+          "range": [
+            "alice:ResearchTopic"
+          ]
+        },
+        {
+          "id": "alice:containsSession",
+          "definition": "The conference contains the program grouping.",
+          "domain": [
+            "alice:Conference"
+          ],
+          "range": [
+            "alice:ProgramSession"
+          ]
+        },
+        {
+          "id": "alice:containsPresentation",
+          "definition": "The session contains this individual presentation.",
+          "domain": [
+            "alice:ProgramSession"
+          ],
+          "range": [
+            "alice:Presentation"
+          ]
+        },
+        {
+          "id": "alice:aboutTopic",
+          "definition": "The material or presentation discusses the topic.",
+          "domain": [
+            "alice:Document",
+            "alice:DocumentVersion",
+            "alice:Presentation"
+          ],
+          "range": [
+            "alice:ResearchTopic"
+          ]
+        },
+        {
+          "id": "alice:servesQuestion",
+          "definition": "The reading or attendance plan serves the research question.",
+          "domain": [
+            "alice:ReadingPlan",
+            "alice:AttendancePlan"
+          ],
+          "range": [
+            "alice:ResearchQuestion"
+          ]
+        }
+      ],
+      "owner": "Alice"
+    },
+    {
+      "id": "alice:collaboration",
+      "name": "Discussion preparation and resources",
+      "dependencies": [
+        "alice:academic"
+      ],
+      "concepts": [
+        {
+          "id": "alice:DiscussionPlan",
+          "label": "Discussion plan",
+          "parent": "alice:Task",
+          "definition": "A collaborative discussion plan whose drafts are distinct from externally confirmed arrangements.",
+          "properties": [
+            {
+              "id": "alice:DiscussionPlan.state",
+              "datatype": "string",
+              "key": "state",
+              "definition": "state of Discussion plan."
+            },
+            {
+              "id": "alice:DiscussionPlan.summary",
+              "datatype": "string",
+              "key": "summary",
+              "definition": "summary of Discussion plan."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:DiscussionPlan"
+        },
+        {
+          "id": "alice:AgendaItem",
+          "label": "Agenda item",
+          "definition": "An item proposed for a discussion, with its material sources.",
+          "properties": [
+            {
+              "id": "alice:AgendaItem.topic",
+              "datatype": "string",
+              "key": "topic",
+              "definition": "topic of Agenda item."
+            },
+            {
+              "id": "alice:AgendaItem.minutes",
+              "datatype": "integer",
+              "key": "minutes",
+              "definition": "minutes of Agenda item."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:AgendaItem"
+        },
+        {
+          "id": "alice:MaterialPackage",
+          "label": "Material package",
+          "definition": "A collection of references to materials actually available to its owner.",
+          "properties": [
+            {
+              "id": "alice:MaterialPackage.summary",
+              "datatype": "string",
+              "key": "summary",
+              "definition": "summary of Material package."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:MaterialPackage"
+        },
+        {
+          "id": "alice:VenueRequirement",
+          "label": "Venue requirement",
+          "definition": "The capacity, equipment and time constraints for a discussion.",
+          "properties": [
+            {
+              "id": "alice:VenueRequirement.capacity",
+              "datatype": "integer",
+              "key": "capacity",
+              "definition": "capacity of Venue requirement."
+            },
+            {
+              "id": "alice:VenueRequirement.equipment",
+              "datatype": "string[]",
+              "key": "equipment",
+              "definition": "equipment of Venue requirement."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:VenueRequirement"
+        },
+        {
+          "id": "alice:ReservationProposal",
+          "label": "Reservation proposal",
+          "definition": "An exact proposed reservation. Preparing or approving a proposal does not prove the booking exists.",
+          "properties": [
+            {
+              "id": "alice:ReservationProposal.state",
+              "datatype": "string",
+              "key": "state",
+              "definition": "state of Reservation proposal."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:ReservationProposal"
+        },
+        {
+          "id": "alice:ConfirmedReservation",
+          "label": "Confirmed reservation",
+          "definition": "A reservation supported by a booking-service receipt.",
+          "properties": [
+            {
+              "id": "alice:ConfirmedReservation.reservationId",
+              "datatype": "string",
+              "key": "reservationId",
+              "definition": "reservationId of Confirmed reservation."
+            },
+            {
+              "id": "alice:ConfirmedReservation.operationId",
+              "datatype": "string",
+              "key": "operationId",
+              "definition": "operationId of Confirmed reservation."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:ConfirmedReservation"
+        }
+      ],
+      "relations": [
+        {
+          "id": "alice:hasAgendaItem",
+          "definition": "The discussion plan includes the agenda item.",
+          "domain": [
+            "alice:DiscussionPlan"
+          ],
+          "range": [
+            "alice:AgendaItem"
+          ]
+        },
+        {
+          "id": "alice:usesMaterial",
+          "definition": "The agenda item uses the specified available document version.",
+          "domain": [
+            "alice:AgendaItem"
+          ],
+          "range": [
+            "alice:DocumentVersion",
+            "alice:SelectedExcerpt"
+          ]
+        },
+        {
+          "id": "alice:requiresVenue",
+          "definition": "The discussion plan has these venue requirements.",
+          "domain": [
+            "alice:DiscussionPlan"
+          ],
+          "range": [
+            "alice:VenueRequirement"
+          ]
+        },
+        {
+          "id": "alice:reservesPlace",
+          "definition": "The reservation proposal or confirmed reservation concerns this place.",
+          "domain": [
+            "alice:ReservationProposal",
+            "alice:ConfirmedReservation"
+          ],
+          "range": [
+            "alice:Place"
+          ]
+        }
+      ],
+      "owner": "Alice"
+    },
+    {
+      "id": "alice:research",
+      "name": "Semantic research questions and terminology",
+      "dependencies": [
+        "alice:academic"
+      ],
+      "concepts": [
+        {
+          "id": "alice:OntologyAlignmentTopic",
+          "label": "Ontology Alignment",
+          "parent": "alice:ResearchTopic",
+          "definition": "Finding and validating semantic correspondences between terms in different ontologies, using definitions, constraints and supporting evidence.",
+          "properties": [],
+          "uri": "urn:agent-on-request:research:alice:ontology:OntologyAlignmentTopic"
+        },
+        {
+          "id": "alice:HumanReviewTopic",
+          "label": "Human review of semantic mappings",
+          "parent": "alice:ResearchTopic",
+          "definition": "A human inspecting, accepting, modifying or rejecting system-proposed semantic correspondences.",
+          "properties": [],
+          "uri": "urn:agent-on-request:research:alice:ontology:HumanReviewTopic"
+        },
+        {
+          "id": "alice:MappingProvenanceTopic",
+          "label": "Mapping provenance",
+          "parent": "alice:ResearchTopic",
+          "definition": "The source definitions, evidence, transformations and decisions from which a mapping derives.",
+          "properties": [],
+          "uri": "urn:agent-on-request:research:alice:ontology:MappingProvenanceTopic"
+        },
+        {
+          "id": "alice:HumanReviewDecision",
+          "label": "Human mapping-review decision",
+          "parent": "alice:Decision",
+          "definition": "A human decision to accept, modify or reject a system-proposed mapping in an explicit task; it is not disclosure or action permission.",
+          "properties": [],
+          "uri": "urn:agent-on-request:research:alice:ontology:HumanReviewDecision"
+        },
+        {
+          "id": "alice:ResearchTalk",
+          "label": "Research talk",
+          "parent": "alice:Presentation",
+          "definition": "One individual talk presenting research results, with a stable report ID; not a session grouping.",
+          "properties": [],
+          "uri": "urn:agent-on-request:research:alice:ontology:ResearchTalk"
+        }
+      ],
+      "relations": [],
+      "owner": "Alice"
+    },
+    {
+      "id": "alice:semantics",
+      "name": "Semantic artifacts and mapping work",
+      "dependencies": [
+        "alice:research"
+      ],
+      "concepts": [
+        {
+          "id": "alice:OntologyArtifactVersion",
+          "label": "Ontology artifact version",
+          "parent": "alice:DocumentVersion",
+          "definition": "A version of an ontology that Alice studies as a research artifact. It does not define this agent's application schema.",
+          "properties": [
+            {
+              "id": "alice:OntologyArtifactVersion.artifactVersion",
+              "datatype": "string",
+              "key": "artifactVersion",
+              "definition": "artifactVersion of Ontology artifact version."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:OntologyArtifactVersion"
+        },
+        {
+          "id": "alice:VocabularyTerm",
+          "label": "Vocabulary term",
+          "definition": "A class, property or individual term in a researched ontology artifact.",
+          "properties": [
+            {
+              "id": "alice:VocabularyTerm.termKind",
+              "datatype": "string",
+              "key": "termKind",
+              "definition": "termKind of Vocabulary term."
+            },
+            {
+              "id": "alice:VocabularyTerm.definition",
+              "datatype": "string",
+              "key": "definition",
+              "definition": "definition of Vocabulary term."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:VocabularyTerm"
+        },
+        {
+          "id": "alice:MappingCandidate",
+          "label": "Mapping candidate",
+          "definition": "A proposed correspondence with source and target terms, relation, evidence and review state.",
+          "properties": [
+            {
+              "id": "alice:MappingCandidate.relation",
+              "datatype": "string",
+              "key": "relation",
+              "definition": "relation of Mapping candidate."
+            },
+            {
+              "id": "alice:MappingCandidate.state",
+              "datatype": "string",
+              "key": "state",
+              "definition": "state of Mapping candidate."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:MappingCandidate"
+        },
+        {
+          "id": "alice:MappingSet",
+          "label": "Mapping set",
+          "definition": "A versioned set of correspondences between two specified ontology artifact versions.",
+          "properties": [
+            {
+              "id": "alice:MappingSet.version",
+              "datatype": "string",
+              "key": "version",
+              "definition": "version of Mapping set."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:MappingSet"
+        }
+      ],
+      "relations": [
+        {
+          "id": "alice:definesTerm",
+          "definition": "The research ontology artifact defines the vocabulary term.",
+          "domain": [
+            "alice:OntologyArtifactVersion"
+          ],
+          "range": [
+            "alice:VocabularyTerm"
+          ]
+        },
+        {
+          "id": "alice:sourceOntology",
+          "definition": "The mapping set uses this exact source ontology version.",
+          "domain": [
+            "alice:MappingSet"
+          ],
+          "range": [
+            "alice:OntologyArtifactVersion"
+          ]
+        },
+        {
+          "id": "alice:targetOntology",
+          "definition": "The mapping set uses this exact target ontology version.",
+          "domain": [
+            "alice:MappingSet"
+          ],
+          "range": [
+            "alice:OntologyArtifactVersion"
+          ]
+        },
+        {
+          "id": "alice:containsMapping",
+          "definition": "The mapping set contains the candidate correspondence.",
+          "domain": [
+            "alice:MappingSet"
+          ],
+          "range": [
+            "alice:MappingCandidate"
+          ]
+        },
+        {
+          "id": "alice:reviewsMapping",
+          "definition": "The review decision concerns this candidate, without authorizing disclosure.",
+          "domain": [
+            "alice:HumanReviewDecision"
+          ],
+          "range": [
+            "alice:MappingCandidate"
+          ]
+        }
+      ],
+      "owner": "Alice"
+    },
+    {
+      "id": "alice:evidence",
+      "name": "Experiments, metrics and supported claims",
+      "dependencies": [
+        "alice:semantics"
+      ],
+      "concepts": [
+        {
+          "id": "alice:Dataset",
+          "label": "Dataset",
+          "parent": "alice:Document",
+          "definition": "A versioned data collection used as experiment input.",
+          "properties": [
+            {
+              "id": "alice:Dataset.version",
+              "datatype": "string",
+              "key": "version",
+              "definition": "version of Dataset."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:Dataset"
+        },
+        {
+          "id": "alice:ExperimentRun",
+          "label": "Experiment run",
+          "definition": "One actually recorded execution with fixed input versions and configuration.",
+          "properties": [
+            {
+              "id": "alice:ExperimentRun.configuration",
+              "datatype": "string",
+              "key": "configuration",
+              "definition": "configuration of Experiment run."
+            },
+            {
+              "id": "alice:ExperimentRun.state",
+              "datatype": "string",
+              "key": "state",
+              "definition": "state of Experiment run."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:ExperimentRun"
+        },
+        {
+          "id": "alice:MetricObservation",
+          "label": "Metric observation",
+          "definition": "A measured result of an experiment with an explicit metric and value; no unobserved measurement is inferred.",
+          "properties": [
+            {
+              "id": "alice:MetricObservation.metric",
+              "datatype": "string",
+              "key": "metric",
+              "definition": "metric of Metric observation."
+            },
+            {
+              "id": "alice:MetricObservation.value",
+              "datatype": "number",
+              "key": "value",
+              "definition": "value of Metric observation."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:MetricObservation"
+        },
+        {
+          "id": "alice:ResearchClaim",
+          "label": "Research claim",
+          "definition": "A scoped interpretation supported by recorded evidence, not by a generated summary alone.",
+          "properties": [
+            {
+              "id": "alice:ResearchClaim.claim",
+              "datatype": "string",
+              "key": "claim",
+              "definition": "claim of Research claim."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:ResearchClaim"
+        },
+        {
+          "id": "alice:BenchmarkReport",
+          "label": "Benchmark report",
+          "parent": "alice:Document",
+          "definition": "A report describing experiment configuration, evidence, results and limitations.",
+          "properties": [
+            {
+              "id": "alice:BenchmarkReport.summary",
+              "datatype": "string",
+              "key": "summary",
+              "definition": "summary of Benchmark report."
+            }
+          ],
+          "uri": "urn:agent-on-request:research:alice:ontology:BenchmarkReport"
+        }
+      ],
+      "relations": [
+        {
+          "id": "alice:usesDataset",
+          "definition": "The run uses the dataset version.",
+          "domain": [
+            "alice:ExperimentRun"
+          ],
+          "range": [
+            "alice:Dataset"
+          ]
+        },
+        {
+          "id": "alice:evaluatesMapping",
+          "definition": "The run evaluates this mapping-set version.",
+          "domain": [
+            "alice:ExperimentRun"
+          ],
+          "range": [
+            "alice:MappingSet"
+          ]
+        },
+        {
+          "id": "alice:producesMetric",
+          "definition": "The run produced this observed metric.",
+          "domain": [
+            "alice:ExperimentRun"
+          ],
+          "range": [
+            "alice:MetricObservation"
+          ]
+        },
+        {
+          "id": "alice:supportedBy",
+          "definition": "The research claim is supported by the recorded metric.",
+          "domain": [
+            "alice:ResearchClaim"
+          ],
+          "range": [
+            "alice:MetricObservation"
+          ]
+        },
+        {
+          "id": "alice:documentsRun",
+          "definition": "The report documents this experiment run.",
+          "domain": [
+            "alice:BenchmarkReport"
+          ],
+          "range": [
+            "alice:ExperimentRun"
+          ]
+        }
+      ],
+      "owner": "Alice"
+    }
+  ],
+  "hash": "bba7cafbf994fba6733a472dd96e343073d7040c917793a7e6070cfaf544cb3f"
+}

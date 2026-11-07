@@ -9,6 +9,7 @@ Authorization projections are explanations, never executable permissions.
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 import hashlib
 import json
 import re
@@ -18,6 +19,10 @@ from fastapi import HTTPException
 from kg.ontology_editing import OntologyEditor
 from kg.ontology_presets import install_preset
 from kg.schema import schema_for_store
+from kg.store import KGStore
+
+
+WORKSPACE_ID = re.compile(r"[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\Z")
 
 
 def encoded(value):
@@ -45,11 +50,36 @@ META_PROPERTIES = {
 
 
 class ResearchKnowledge:
-    def __init__(self, config, store, role):
+    def __init__(self, config, store, role, *, workspace_id=None):
         if role not in {"Alice", "Bob"}:
             raise ValueError("A research role is required")
         self.config, self.store, self.role = config, store, role
         self.lock = RLock()
+        self.workspace_id = workspace_id
+        self.workspaces = {}
+
+    def workspace(self, workspace_id):
+        """A separate native namespace and overlay for each audience and role.
+
+        Only the Bolt connection is reused. Schema, facts, package certification,
+        revision records and local maintenance state remain experience-scoped.
+        """
+        if not isinstance(workspace_id, str) or not WORKSPACE_ID.fullmatch(workspace_id):
+            raise HTTPException(422, "Use an exact audience workspace UUID")
+        if self.workspace_id:
+            if workspace_id != self.workspace_id:
+                raise HTTPException(409, "This adapter belongs to another workspace")
+            return self
+        with self.lock:
+            if workspace_id not in self.workspaces:
+                config = replace(self.config,
+                    urn_prefix=self.config.urn_prefix + "experience-" + workspace_id + ":",
+                    user_person_urn=None,
+                    home=self.config.home / "research-workspaces" / workspace_id)
+                config.home.mkdir(parents=True, exist_ok=True, mode=0o700)
+                scoped_store = KGStore(config, driver=self.store.driver)
+                self.workspaces[workspace_id] = ResearchKnowledge(config, scoped_store, self.role, workspace_id=workspace_id)
+            return self.workspaces[workspace_id]
 
     def package(self):
         rows = self.store.run_read("""MATCH (p:ResearchProfilePackage {namespace:$namespace,role:$role})
@@ -118,10 +148,16 @@ class ResearchKnowledge:
             batch = operations[offset:offset + 32]
             OntologyEditor(self.config, self.store).publish(expected_namespace=self.config.urn_prefix,
                 expected_version=self.store.ontology_overlay()["version"], operations=batch,
-                operation_id="research-schema-" + digest(batch)[:40], reason="Install additive researcher application ontology definitions")
+                operation_id=self.operation_id("schema", batch), reason="Install additive researcher application ontology definitions")
 
     def uri(self, identity, kind):
         return self.config.urn_prefix + kind + "-" + digest(identity)[:36]
+
+    def operation_id(self, kind, identity):
+        # KGStore's memory receipts use a globally unique snapshot_id. Logical
+        # fixture contents and ledger event numbers can be identical across
+        # audiences and roles, so every adapter operation must bind namespace.
+        return "research-" + kind + "-" + digest([self.config.urn_prefix, self.role, identity])[:44]
 
     def property_bindings(self, terms, identity):
         chain, seen = [], set()
@@ -167,6 +203,8 @@ class ResearchKnowledge:
         with self.lock:
             package = self.package()
             if package and package["state"] == "ready" and seed_only:
+                if self.workspace_id and digest(profile) != digest(json.loads(package["source_json"])):
+                    raise HTTPException(409, "This workspace was initialized from a different seed")
                 return self.profile()
             if not isinstance(profile, dict) or profile.get("role") != self.role or profile.get("ontology", {}).get("owner") != self.role:
                 raise HTTPException(422, "Provide this researcher's application profile")
@@ -178,7 +216,7 @@ class ResearchKnowledge:
             self.install_schema(profile)
             entities, relations = self.profile_records(profile)
             result = self.store.write_batch(entities, relations, origin="manual", include_implicit_relations=False,
-                operation_id="research-profile-" + digest(profile)[:44], reason="Install explicit synthetic research profile and provenance")
+                operation_id=self.operation_id("profile", profile), reason="Install explicit synthetic research profile and provenance")
             if result.get("disposition") == "deferred":
                 raise HTTPException(409, "Research profile conflicts with reviewed native data")
             self.save_package(profile, "ready")
@@ -186,9 +224,10 @@ class ResearchKnowledge:
 
     def read_records(self):
         rows = self.store.run_read("""MATCH (n:KGEntity) WHERE n.uri STARTS WITH $prefix AND n.x_res_owner=$role
+            AND NOT (n.uri STARTS WITH $experience_prefix)
             AND n.x_res_kind IN ['knowledge','calendar','material'] AND NOT n:KGQuarantined
             RETURN labels(n) AS labels,properties(n) AS properties ORDER BY n.x_res_key LIMIT 5000""",
-            {"prefix": self.config.urn_prefix, "role": self.role})
+            {"prefix": self.config.urn_prefix, "role": self.role, "experience_prefix": self.config.urn_prefix + "experience-"})
         uris = [row["properties"]["uri"] for row in rows]
         edges = self.store.run_read("""MATCH (a:KGEntity)-[r]->(b:KGEntity) WHERE a.uri IN $uris AND b.uri IN $uris AND r.x_res_owner=$role
             RETURN a.uri AS source,b.uri AS target,type(r) AS type,properties(r) AS properties ORDER BY r.x_res_key""",
@@ -273,12 +312,18 @@ class ResearchKnowledge:
                 output["knowledge"]["edges"].append({"id": props.get("x_res_key") or "native:" + digest([edge["source"], edge["target"], edge["type"]])[:24],
                     "source": native_to_id[edge["source"]], "target": native_to_id[edge["target"]], "relation": relation_ids[edge["type"]],
                     "sourceRecord": props.get("x_res_source", "native:research"), "version": str(props.get("x_res_version", 1))})
-        return {"role": self.role, "profile": output, "provenance": {"provider": "kg", "namespace": self.config.urn_prefix,
-            "revision": digest({"profile": output, "nativeVersion": schema["version"]})}}
+        provenance = {"provider": "kg", "namespace": self.config.urn_prefix,
+            "revision": digest({"profile": output, "nativeVersion": schema["version"]})}
+        if self.workspace_id:
+            provenance.update(workspaceId=self.workspace_id, seedHash=digest(original))
+            output["nativeWorkspace"] = {key: provenance[key] for key in ("workspaceId", "namespace", "seedHash")}
+        return {"role": self.role, "profile": output, "provenance": provenance}
 
     def project(self, event):
         if not isinstance(event, dict) or not isinstance(event.get("workspaceId"), str) or not isinstance(event.get("id"), (str, int)):
             raise HTTPException(422, "Projection requires workspace and ledger event identifiers")
+        if self.workspace_id and event["workspaceId"] != self.workspace_id:
+            raise HTTPException(409, "Projection belongs to another workspace")
         identity = f"projection:{event['workspaceId']}:{event['id']}"
         record = event.get("record") or {}
         record_identity = f"control:{event['workspaceId']}:{event.get('recordId', event['id'])}"
@@ -290,7 +335,7 @@ class ResearchKnowledge:
         ]
         relations = [{"from": entities[0]["uri"], "to": entities[1]["uri"], "type": "RELATED_TO", "label": "projects-authority-record"}]
         result = self.store.write_batch(entities, relations, origin="manual", include_implicit_relations=False,
-            operation_id="research-projection-" + digest(identity)[:44], reason="Project authoritative ledger evidence for discovery; not executable permission")
+            operation_id=self.operation_id("projection", identity), reason="Project authoritative ledger evidence for discovery; not executable permission")
         return {"role": self.role, "ok": True, "idempotent": bool(result.get("idempotent")), "authority": False}
 
     def record(self, workspace_id, nodes, edges):
@@ -298,6 +343,8 @@ class ResearchKnowledge:
         if (not isinstance(workspace_id, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,150}", workspace_id)
                 or not isinstance(nodes, list) or not isinstance(edges, list) or len(nodes) > 100 or len(edges) > 200):
             raise HTTPException(422, "Provide bounded workspace-scoped research records")
+        if self.workspace_id and workspace_id != self.workspace_id:
+            raise HTTPException(409, "Knowledge belongs to another workspace")
         with self.lock:
             package = self.package()
             if not package or package["state"] != "ready":
@@ -315,8 +362,8 @@ class ResearchKnowledge:
             uris = {}
             for entity in entities:
                 identity = entity["props"]["x_res_key"]
-                entity["uri"] = self.uri([workspace_id, identity], entity["type"])
-                entity["props"].update(x_res_kind="workspace-knowledge", x_res_workspace=workspace_id, x_res_visibility="private")
+                entity["uri"] = self.uri(identity if self.workspace_id else [workspace_id, identity], entity["type"])
+                entity["props"].update(x_res_kind="knowledge" if self.workspace_id else "workspace-knowledge", x_res_workspace=workspace_id, x_res_visibility="private")
                 uris[identity] = entity["uri"]
 
             def endpoint(identity):
@@ -343,7 +390,7 @@ class ResearchKnowledge:
                     "props": {"x_res_key": edge["id"], "x_res_owner": self.role, "x_res_workspace": workspace_id,
                         "x_res_source": str(edge.get("sourceRecord", "native:workspace:" + workspace_id)), "x_res_version": str(edge.get("version", "1"))}})
             result = self.store.write_batch(entities, relations, origin="manual", include_implicit_relations=False,
-                operation_id="research-memory-" + digest([workspace_id, nodes, edges])[:44], reason="Record private workspace-scoped research knowledge and evidence")
+                operation_id=self.operation_id("memory", [workspace_id, nodes, edges]), reason="Record private workspace-scoped research knowledge and evidence")
             if result.get("disposition") == "deferred":
                 raise HTTPException(409, "The research memory conflicts with reviewed native data")
             return {"role": self.role, "ok": True, "visibility": "private", "workspaceId": workspace_id, "idempotent": bool(result.get("idempotent"))}

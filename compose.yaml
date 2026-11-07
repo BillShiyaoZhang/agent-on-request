@@ -1,8 +1,7 @@
 name: agent-on-request-hermes-demo
 
 x-hermes: &hermes
-  image: agent-on-request/hermes-demo-gateway:0.22.7
-  build:
+  build: &hermes-build
     context: .
     dockerfile: docker/hermes/Dockerfile
     additional_contexts:
@@ -34,10 +33,16 @@ services:
 
   hermes-alice:
     <<: *hermes
+    image: agent-on-request/hermes-demo-gateway-alice:0.22.7
+    build:
+      <<: *hermes-build
+      args:
+        DEMO_WORKSPACE_ROLE: alice
     environment:
       DEMO_HERMES_ROLE: Alice
       HERMES_RESEARCH_ENABLED: ${HERMES_RESEARCH_ENABLED:-1}
       DEMO_RESEARCH_GATEWAY_URL: http://demo:4330
+      DEMO_WORKSPACE_ROOT: /workspace/seed
     depends_on:
       neo4j:
         condition: service_healthy
@@ -52,13 +57,20 @@ services:
     volumes:
       - alice_profile:/opt/data
       - alice_gateway_auth:/run/demo-gateway-auth
+      - ./workspaces/alice:/workspace/seed:ro
 
   hermes-bob:
     <<: *hermes
+    image: agent-on-request/hermes-demo-gateway-bob:0.22.7
+    build:
+      <<: *hermes-build
+      args:
+        DEMO_WORKSPACE_ROLE: bob
     environment:
       DEMO_HERMES_ROLE: Bob
       HERMES_RESEARCH_ENABLED: ${HERMES_RESEARCH_ENABLED:-1}
       DEMO_RESEARCH_GATEWAY_URL: http://demo:4330
+      DEMO_WORKSPACE_ROOT: /workspace/seed
       HERMES_DASHBOARD_PORT: 9121
     depends_on:
       neo4j:
@@ -74,6 +86,7 @@ services:
     volumes:
       - bob_profile:/opt/data
       - bob_gateway_auth:/run/demo-gateway-auth
+      - ./workspaces/bob:/workspace/seed:ro
 
   kg-alice:
     image: agent-on-request/kg-native-console:local
@@ -180,6 +193,8 @@ services:
       - demo_data:/app/.data
       - alice_gateway_auth:/run/demo-gateway-auth/alice:ro
       - bob_gateway_auth:/run/demo-gateway-auth/bob:ro
+      - ./workspaces/alice:/app/workspaces/alice:ro
+      - ./workspaces/bob:/app/workspaces/bob:ro
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:4327/api/meta').then(async r => { const v=await r.json(); if (!r.ok || !(v.collaboration?.nativeAvailable || v.live.available)) process.exitCode=1 }).catch(() => { process.exitCode=1 })"]
       interval: 5s

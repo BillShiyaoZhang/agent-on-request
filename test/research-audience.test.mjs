@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { describeActivity, describeAgentState } from '../public/research-conversation.js';
-import { researchConference } from '../src/research-profiles.mjs';
+import { describeActivity, describeAgentState, workspaceInventory } from '../public/research-conversation.js';
+import { researchConference, researchProfile, researchWorkspaceManifest } from '../src/research-profiles.mjs';
 import { ResearchEngine } from '../src/research-engine.mjs';
 
 const currentTask = overrides => ({ id: 'task-current', type: 'prepare_discussion', status: 'running',
@@ -15,6 +15,55 @@ const request = overrides => ({ id: 'request-current', status: 'pending', intent
   fields: ['summary'], ...overrides }, revision: 1 });
 const pendingEvent = event({ kind: 'approval', name: 'authorization_request', direction: 'outgoing',
   from: 'Alice', to: 'owner:Alice', status: 'pending', requestId: 'request-current', details: request() });
+
+test('ontology and capability exchanges summarize only actual received definitions and skills', () => {
+  const ontology = { owner: 'Alice', version: '2.0.0', modules: [{ name: '研究问题', concepts: [] }, { name: '语义模型', concepts: [] }] };
+  const sent = event({ details: { resourceId: 'working-ontology', payload: { ontology }, receipt: { status: 'received' } } });
+  const described = copy(describeActivity(sent));
+  assert.match(described, /2/);
+  assert.match(described, /2\.0\.0/);
+  assert.match(described, /研究问题/);
+  assert.match(described, /语义模型/);
+  assert.doesNotMatch(described, /"modules"|"concepts"|已(?:完成|接受)对齐|建立共同本体/);
+  const capabilities = event({ details: { resourceId: 'capabilities', payload: { skills: [{ id: 'alice:review', label: '语义审阅' }] }, receipt: { status: 'received' } } });
+  const summary = copy(describeActivity(capabilities));
+  assert.match(summary, /1/);
+  assert.match(summary, /语义审阅/);
+  assert.doesNotMatch(summary, /用户研究整理|"skills"|"id"/);
+  const hidden = copy(describeActivity({ ...sent, redacted: true }));
+  assert.doesNotMatch(hidden, /研究问题|语义模型|2\.0\.0/);
+});
+
+test('actual peer rejection does not invent a semantic failure or an oracle validity result', () => {
+  const rejected = event({ name: 'alignment_accept', details: { status: 'rejected', reviewedBy: 'Bob', mappings: [{ source: 'alice:A', target: 'bob:B', relation: 'close' }] } });
+  const summary = copy(describeActivity(rejected));
+  assert.match(summary, /拒绝|未被接受/);
+  assert.doesNotMatch(summary, /定义不一致|不满足当前定义|未通过.*检查|词面相似/);
+  const proposed = copy(describeActivity({ ...rejected, name: 'alignment_propose', details: { mappings: [{ source: 'alice:A', target: 'bob:B', relation: 'exact', valid: false }] } }));
+  assert.match(proposed, /仍需.*审阅/);
+  assert.doesNotMatch(proposed, /未通过|无效|不能接受/);
+});
+
+test('workspace inventory presents only the authenticated owner’s immutable seed and runtime records', () => {
+  const profile = researchProfile('Alice'), manifest = researchWorkspaceManifest('Alice');
+  const state = { owner: 'Alice', workspaceId: 'experience-one', profile,
+    workspace: { role: 'Alice', seed: profile.seed, manifest, seedPath: 'workspaces/alice', runtimePath: 'runs/experience-one/alice', nativeNamespace: 'urn:test:alice:experience-one:' },
+    messages: [{ from: 'Alice', to: 'Bob' }, { from: 'Bob', to: 'Alice' }], artifacts: [{ owner: 'Alice' }, { owner: 'Bob' }] };
+  const inventory = workspaceInventory(state);
+  assert.equal(inventory.role, 'Alice');
+  assert.equal(inventory.seedHash, profile.seed.hash);
+  assert.equal(inventory.seedVersion, manifest.version);
+  assert.equal(inventory.inboxCount, 1);
+  assert.equal(inventory.outboxCount, 1);
+  assert.equal(inventory.artifactCount, 1);
+  assert.ok(inventory.files.some(file => file.path === 'ontology.json'));
+  assert.ok(inventory.files.some(file => file.path.startsWith('skills/')));
+  assert.equal(workspaceInventory({ ...state, workspace: { ...state.workspace, role: 'Bob' } }), null);
+  assert.equal(workspaceInventory({ ...state, workspace: { ...state.workspace, manifest: researchWorkspaceManifest('Bob') } }), null);
+  assert.equal(workspaceInventory({ ...state, workspace: { ...state.workspace, seedPath: 'workspaces/bob' } }), null);
+  const injected = { ...state, workspace: { ...state.workspace, manifest: { ...manifest, files: { ...manifest.files, '../bob/private.json': { sha256: 'forged' } } } } };
+  assert.ok(!workspaceInventory(injected).files.some(file => file.path.includes('bob')));
+});
 
 test('audience availability messages state actual time choices without a JSON payload', () => {
   const received = event({ role: 'Bob', direction: 'incoming', details: {

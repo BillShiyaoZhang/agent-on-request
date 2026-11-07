@@ -3,6 +3,9 @@ import importlib.util
 import ast
 import io
 import json
+import hashlib
+import copy
+import math
 import os
 from pathlib import Path
 import sys
@@ -161,6 +164,145 @@ class ResearchToolsTests(unittest.TestCase):
             self.assertEqual(config["tools"]["tool_search"], {"enabled": "off", "defer": []})
         self.assertTrue(config["tools"]["other_setting"])
         self.assertEqual(plugin._pre_tool_call(tool_name="tool_call")["action"], "block")
+
+    def test_research_gateway_never_injects_global_profile_memory_into_a_new_experience(self):
+        source = ast.parse(Path(__file__).with_name("configure-profile.py").read_text(encoding="utf-8"))
+        initializer = next(node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == "configure_research_memory")
+        namespace = {}
+        exec(compile(ast.Module(body=[initializer], type_ignores=[]), "configure-profile.py", "exec"), namespace)
+        config = {"memory": {"provider": "kg", "memory_enabled": True, "user_profile_enabled": True}}
+        namespace["configure_research_memory"](config)
+        self.assertEqual(config["memory"], {"provider": "builtin", "memory_enabled": False, "user_profile_enabled": False})
+
+    def test_workspace_seed_is_exactly_the_gateway_role_and_not_a_peer_directory(self):
+        source = ast.parse(Path(__file__).with_name("configure-profile.py").read_text(encoding="utf-8"))
+        initializer = next(node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == "research_workspace_seed")
+        namespace = {"Path": Path, "os": os, "json": json, "hashlib": hashlib}
+        exec(compile(ast.Module(body=[initializer], type_ignores=[]), "configure-profile.py", "exec"), namespace)
+        with temporary_home() as home, patch.dict(os.environ, {"DEMO_WORKSPACE_ROOT": home}):
+            (Path(home) / "skills" / "fixture").mkdir(parents=True)
+            skill = Path(home) / "skills" / "fixture" / "SKILL.md"
+            skill.write_text("Own skill", encoding="utf-8")
+            manifest = Path(home) / "manifest.json"
+            manifest.write_text(json.dumps({"role": "Alice", "files": {"skills/fixture/SKILL.md": {"sha256": hashlib.sha256(skill.read_bytes()).hexdigest()}}}), encoding="utf-8")
+            self.assertEqual(namespace["research_workspace_seed"]("Alice"), Path(home))
+            with self.assertRaises(ValueError):
+                namespace["research_workspace_seed"]("Bob")
+            skill.write_text("Changed without versioning", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                namespace["research_workspace_seed"]("Alice")
+
+    def test_existing_hermes_category_description_does_not_break_workspace_reinitialization(self):
+        source = ast.parse(Path(__file__).with_name("configure-profile.py").read_text(encoding="utf-8"))
+        initializer = next(node for node in source.body if isinstance(node, ast.FunctionDef) and node.name == "research_skill_folders")
+        namespace = {}
+        exec(compile(ast.Module(body=[initializer], type_ignores=[]), "configure-profile.py", "exec"), namespace)
+        with temporary_home() as home:
+            root = Path(home)
+            (root / "DESCRIPTION.md").write_text("Hermes generated category description", encoding="utf-8")
+            (root / "research-brief").mkdir()
+            self.assertEqual([p.name for p in namespace["research_skill_folders"](root)], ["research-brief"])
+            (root / "unexpected.txt").write_text("Unexpected content", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                list(namespace["research_skill_folders"](root))
+
+    def test_collaboration_schema_requires_agent_authored_mappings_and_explicit_peer_review(self):
+        proposal = plugin.SCHEMAS["alignment_propose"][1]
+        self.assertNotIn("mappingIds", proposal["properties"])
+        self.assertEqual(proposal["required"], ["mappings"])
+        mapping = proposal["properties"]["mappings"]["items"]
+        self.assertTrue({"source", "target", "relation", "reason"}.issubset(mapping["required"]))
+        review = plugin.SCHEMAS["alignment_accept"][1]
+        self.assertEqual(review["properties"]["decision"]["enum"], ["accept", "reject"])
+        self.assertTrue({"proposalId", "decision", "reason"}.issubset(review["required"]))
+        self.assertTrue({"ontology", "capabilities"}.issubset(plugin.SCHEMAS["peer_request"][1]["properties"]["kind"]["enum"]))
+
+    def test_artifact_fields_explicitly_require_text_for_drafts_and_revisions(self):
+        for name in ("artifact_prepare", "artifact_revise"):
+            fields = plugin.SCHEMAS[name][1]["properties"]["fields"]
+            self.assertEqual(fields["type"], "object")
+            self.assertEqual(fields["additionalProperties"], {"type": "string"}, name)
+        self.assertIn("attendees", plugin.SCHEMAS["artifact_prepare"][1]["properties"]["fields"]["description"])
+
+    def test_knowledge_updates_expose_the_existing_engine_version_lock(self):
+        node = plugin.SCHEMAS["knowledge_record"][1]["properties"]["nodes"]["items"]
+        self.assertNotIn("expectedVersion", node["required"], "New records do not have a prior version")
+        version = node["properties"]["expectedVersion"]
+        alternatives = {item["type"]: item for item in version["anyOf"]}
+        self.assertEqual(set(alternatives), {"string", "integer"})
+        self.assertEqual(alternatives["string"]["minLength"], 1)
+        self.assertLessEqual(alternatives["string"]["maxLength"], 100)
+        self.assertEqual(alternatives["integer"]["minimum"], 1)
+        self.assertLessEqual(alternatives["integer"]["maximum"], 9007199254740991)
+        self.assertFalse(node["additionalProperties"], "Only the declared optimistic-lock argument is added")
+
+    def test_numeric_draft_fields_become_json_text_without_mutating_caller_arguments(self):
+        plugin._sessions["session"] = {"assignmentId": "a", "role": "Alice"}
+        for name in ("artifact_prepare", "artifact_revise"):
+            args = {"kind": "reservation", "fields": {"attendees": 2, "score": 0.82, "decimal": 2.0,
+                "day": "Thu", "time": "15:00–15:30"}, "expectedVersion": 1}
+            original = copy.deepcopy(args)
+            with patch.object(plugin, "_request", return_value={"id": "draft-1"}) as request:
+                result = json.loads(plugin._handler(name)(args, session_id="session"))
+            self.assertEqual(result["id"], "draft-1")
+            sent = request.call_args.args[1]["arguments"]
+            self.assertEqual(sent["fields"], {"attendees": "2", "score": "0.82", "decimal": "2.0", "day": "Thu", "time": "15:00–15:30"})
+            self.assertEqual(sent["expectedVersion"], 1)
+            self.assertEqual(args, original)
+            self.assertIsNot(sent, args)
+            self.assertIsNot(sent["fields"], args["fields"])
+
+    def test_draft_numeric_repair_never_changes_typed_knowledge_or_execution_arguments(self):
+        args = {"nodes": [{"id": "alice:example", "properties": {"minutes": 30, "value": 0.82}}],
+            "fields": {"attendees": 2}}
+        original = copy.deepcopy(args)
+        for name in ("knowledge_record", "authorization_check", "authorization_request", "peer_send", "reservation_submit"):
+            self.assertIs(plugin._draft_text_arguments(name, args), args)
+            self.assertEqual(args, original)
+
+    def test_invalid_draft_containers_booleans_and_nonfinite_values_remain_invalid(self):
+        fields = {"attendees": 2, "flag": True, "nested": {"count": 3}, "items": [4], "nan": float("nan"), "infinity": float("inf")}
+        fixed = plugin._draft_text_arguments("artifact_prepare", {"fields": fields})["fields"]
+        self.assertEqual(fixed["attendees"], "2")
+        self.assertIs(fixed["flag"], True)
+        self.assertEqual(fixed["nested"], {"count": 3})
+        self.assertEqual(fixed["items"], [4])
+        self.assertTrue(math.isnan(fixed["nan"]))
+        self.assertEqual(fixed["infinity"], float("inf"))
+        with self.assertRaises(ValueError):
+            json.dumps(fixed, allow_nan=False)
+
+    def test_new_reservation_reuses_supplied_title_without_mutating_caller(self):
+        args = {"kind": "reservation", "title": "Academic discussion", "fields": {
+            "day": "Thu", "time": "15:00–15:30", "attendees": "2", "agenda": "Review findings"}}
+        original = copy.deepcopy(args)
+        fixed = plugin._draft_text_arguments("artifact_prepare", args)
+        self.assertEqual(fixed["fields"], {**original["fields"], "title": original["title"]})
+        self.assertEqual(args, original)
+        self.assertIsNot(fixed, args)
+        self.assertIsNot(fixed["fields"], args["fields"])
+        self.assertIn("copied", plugin.SCHEMAS["artifact_prepare"][1]["properties"]["fields"]["description"])
+
+    def test_reservation_title_reuse_never_overwrites_or_repairs_other_inputs(self):
+        base = {"kind": "reservation", "title": "Outer title", "fields": {"attendees": "2"}}
+        for explicit in ["Field title", "", None, 2, {"title": "nested"}]:
+            args = {**base, "fields": {**base["fields"], "title": explicit}}
+            fixed = plugin._draft_text_arguments("artifact_prepare", args)
+            # The existing numeric text adapter still applies, but the outer
+            # title must never replace any explicitly supplied field value.
+            self.assertEqual(fixed["fields"]["title"], "2" if explicit == 2 else explicit)
+            self.assertEqual(args["fields"]["title"], explicit)
+        for name, kind, title in [("artifact_revise", "reservation", "Outer title"),
+                ("artifact_prepare", "agenda", "Outer title"),
+                ("artifact_prepare", "brief", "Outer title"),
+                ("artifact_prepare", "reservation", ""),
+                ("artifact_prepare", "reservation", "   "),
+                ("artifact_prepare", "reservation", "x" * 201),
+                ("artifact_prepare", "reservation", 2),
+                ("artifact_prepare", "reservation", None)]:
+            args = {**base, "kind": kind, "title": title}
+            self.assertIs(plugin._draft_text_arguments(name, args), args)
+            self.assertNotIn("title", args["fields"])
 
 
 if __name__ == "__main__":

@@ -1,8 +1,17 @@
 import { AppError, requireThat } from './errors.mjs';
 import { RESEARCH_ROLES, validateResearchProfile } from './research-profiles.mjs';
+import { hashPayload } from './runtime-helpers.mjs';
+
+const workspaceId = value => {
+  requireThat(typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value),
+    'RESEARCH_WORKSPACE', 'Use an exact audience workspace UUID.', 422);
+  return value;
+};
+const workspaceRoute = (id, resource) => `/api/research/workspaces/${workspaceId(id)}/${resource}`;
 
 /** Role-scoped native ontology/data bridge. Authorization projections are discoverable evidence only. */
 export function createResearchKGClient({ endpoints, fetchImpl = fetch, timeoutMs = 30_000 } = {}) {
+  const workspaceNamespaces = new Map();
   const targets = Object.fromEntries(RESEARCH_ROLES.map(role => {
     const input = endpoints?.[role] ?? endpoints?.[role.toLowerCase()];
     const url = URL.parse(input?.url);
@@ -31,11 +40,25 @@ export function createResearchKGClient({ endpoints, fetchImpl = fetch, timeoutMs
     requireThat(value?.role === role, 'RESEARCH_KG_ROLE', 'The native response belongs to another researcher.', 502);
     return value;
   }
-  function checkedProfile(role, result) {
+  function checkedProfile(role, result, expectedWorkspace, expectedSeed) {
     requireThat(result.profile?.role === role && result.provenance?.provider === 'kg' && typeof result.provenance?.namespace === 'string',
       'RESEARCH_KG_RESPONSE', 'A native role-scoped profile with source provenance is required.', 502);
     const validation = validateResearchProfile(result.profile);
     requireThat(validation.valid, 'RESEARCH_KG_PROFILE', 'The live native ontology and data are inconsistent.', 422, validation.errors);
+    if (expectedWorkspace !== undefined) {
+      requireThat(result.provenance.workspaceId === expectedWorkspace
+        && result.provenance.namespace.includes(`:experience-${expectedWorkspace}:`)
+        && /^[a-f0-9]{64}$/.test(result.provenance.seedHash ?? '')
+        && (expectedSeed === undefined || result.provenance.seedHash === expectedSeed),
+      'RESEARCH_KG_ISOLATION', 'The native profile is not bound to this audience and initial seed.', 502);
+      const key = `${expectedWorkspace}:${role}`;
+      const otherKey = `${expectedWorkspace}:${role === 'Alice' ? 'Bob' : 'Alice'}`;
+      requireThat((!workspaceNamespaces.has(key) || workspaceNamespaces.get(key) === result.provenance.namespace)
+        && workspaceNamespaces.get(otherKey) !== result.provenance.namespace,
+      'RESEARCH_KG_ISOLATION', 'Each audience requires stable, independent role namespaces.', 502);
+      workspaceNamespaces.set(key, result.provenance.namespace);
+      return { ...result.profile, nativeWorkspace: { workspaceId: expectedWorkspace, namespace: result.provenance.namespace, seedHash: result.provenance.seedHash } };
+    }
     return result.profile;
   }
   return {
@@ -48,16 +71,24 @@ export function createResearchKGClient({ endpoints, fetchImpl = fetch, timeoutMs
         'RESEARCH_KG_ISOLATION', 'Researchers must use independent native namespaces.', 502);
       return Object.fromEntries(results.map(({ role, profile }) => [role, profile]));
     },
-    async profile(role) { return checkedProfile(role, await request(role, '/api/research/profile')); },
+    async createWorkspace(role, { workspaceId: id, profile } = {}) {
+      workspaceId(id);
+      requireThat(profile?.role === role && validateResearchProfile(profile).valid, 'RESEARCH_KG_PROFILE', 'Provide this researcher’s complete initial seed.', 422);
+      const result = await request(role, workspaceRoute(id, 'profile'), { method: 'PUT', body: { profile } });
+      return checkedProfile(role, result, id, hashPayload(profile));
+    },
+    async profile(role, { workspaceId: id } = {}) {
+      return checkedProfile(role, await request(role, id === undefined ? '/api/research/profile' : workspaceRoute(id, 'profile')), id);
+    },
     async record(role, input) {
       requireThat(typeof input?.workspaceId === 'string' && Array.isArray(input.nodes) && Array.isArray(input.edges),
         'RESEARCH_KNOWLEDGE', 'Research memory requires a workspace and typed nodes and edges.', 422);
-      return request(role, '/api/research/knowledge', { method: 'POST', body: input });
+      return request(role, workspaceRoute(input.workspaceId, 'knowledge'), { method: 'POST', body: input });
     },
     async project(role, event) {
       requireThat(typeof event?.workspaceId === 'string' && (typeof event?.id === 'string' || Number.isSafeInteger(event?.id)),
         'RESEARCH_PROJECTION', 'A projection requires workspace and ledger event IDs.', 422);
-      return request(role, '/api/research/projections', { method: 'POST', body: { event }, requestTimeoutMs: Math.min(timeoutMs, 2500) });
+      return request(role, workspaceRoute(event.workspaceId, 'projections'), { method: 'POST', body: { event }, requestTimeoutMs: Math.min(timeoutMs, 2500) });
     }
   };
 }

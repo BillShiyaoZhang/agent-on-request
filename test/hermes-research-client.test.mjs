@@ -58,6 +58,25 @@ test('native run supports multi-step Hermes output without treating it as an exe
   assert.deepEqual(client.active(), []);
 });
 
+test('native run accepts a ten-minute bound and default without extending readiness or waiting', async t => {
+  const deadlines = [];
+  const timeout = AbortSignal.timeout.bind(AbortSignal);
+  t.mock.method(AbortSignal, 'timeout', ms => { deadlines.push(ms); return timeout(ms); });
+  assert.doesNotThrow(() => createHermesResearchClient({ endpoints, timeoutMs: 600_000 }));
+  assert.throws(() => createHermesResearchClient({ endpoints, timeoutMs: 600_001 }), { code: 'HERMES_CONFIGURATION' });
+  const { client, calls } = fixture((_route, options) => options.method === 'POST'
+    ? Response.json({ run_id: 'run_research' }, { status: 202 }) : Response.json(completed));
+  await assert.rejects(client.run({ ...input, timeoutMs: 600_001 }), { code: 'HERMES_INVALID_REQUEST' });
+  assert.equal(calls.length, 0, 'An over-limit deadline cannot dispatch any request');
+  await client.run({ ...input, timeoutMs: 600_000 });
+  await client.run(input);
+  assert.deepEqual(deadlines, [600_000, 600_000], 'Explicit and default bounds complete using immediate fake responses');
+  const readiness = fixture(route => Response.json(route.endsWith('/capabilities') ? capabilities
+    : { platform: 'hermes-agent', status: 'ok', readiness: { status: 'ok' } }));
+  await readiness.client.check({ role: 'Alice' });
+  assert.equal(deadlines.at(-1), 5_000, 'Readiness still has its separate five-second deadline');
+});
+
 test('run admission is awaited by the durable callback before status polling', async () => {
   let persist;
   const persisted = new Promise(resolve => { persist = resolve; });
@@ -183,4 +202,40 @@ test('rejects unsafe origins and non-independent Hermes identities', () => {
     assert.throws(() => createHermesResearchClient({ endpoints: { ...endpoints, alice: { ...endpoints.alice, url } } }), { code: 'HERMES_CONFIGURATION' });
   }
   assert.throws(() => createHermesResearchClient({ endpoints: { ...endpoints, bob: { ...endpoints.bob, apiKey: endpoints.alice.apiKey } } }), { code: 'HERMES_CONFIGURATION' });
+});
+
+test('different experiences always start fresh conversations and retain the exact replay payload', async () => {
+  const admissions = []; let next = 0;
+  const { client, calls } = fixture((route, options) => {
+    if (options.method === 'POST') {
+      const body = JSON.parse(options.body);
+      for (const field of ['session_id', 'previous_response_id', 'conversation_history']) assert.equal(Object.hasOwn(body, field), false);
+      assert.equal(Object.hasOwn(options.headers, 'X-Hermes-Session-Key'), false);
+      const id = `run_fresh_${++next}`;
+      admissions.push({ id, body: options.body });
+      return Response.json({ run_id: id }, { status: 202 });
+    }
+    const id = route.split('/').at(-1);
+    return Response.json({ ...completed, run_id: id, session_id: id });
+  });
+  const seen = [];
+  for (const workspaceId of ['12345678-1234-1234-1234-123456789abc', 'abcdefab-1234-1234-1234-123456789abc']) {
+    const result = await client.run({ ...input, workspaceId, requestId: `research:${workspaceId}`, onAdmitted: value => seen.push(value) });
+    assert.equal(result.sessionId, result.runId);
+  }
+  assert.notEqual(seen[0].sessionId, seen[1].sessionId);
+  assert.equal(calls.filter(call => call.options.method === 'POST').length, 2);
+  assert.deepEqual(admissions.map(item => JSON.parse(item.body).input), [input.input, input.input]);
+});
+
+test('a run that selects another conversation is stopped and cannot report success', async () => {
+  let stopped = false;
+  const { client, calls } = fixture((route, options) => {
+    if (route.endsWith('/stop')) { stopped = true; return new Response(null, { status: 202 }); }
+    if (options.method === 'POST') return Response.json({ run_id: 'run_current' }, { status: 202 });
+    return Response.json({ ...completed, run_id: 'run_current', status: stopped ? 'cancelled' : 'completed', session_id: 'run_previous_audience' });
+  });
+  await assert.rejects(client.run(input), { code: 'HERMES_RESEARCH_SESSION' });
+  assert(calls.some(call => call.url.endsWith('/run_current/stop')));
+  assert.deepEqual(client.active(), []);
 });
