@@ -1,4 +1,4 @@
-import { conversationTimeline, describeActivity, describeAgentState, workspaceInventory } from './research-conversation.js';
+import { authorizationHistory, conversationTimeline, describeActivity, describeAgentState, workspaceInventory } from './research-conversation.js';
 
 const root = document.getElementById('research-root');
 const notice = document.getElementById('research-notice');
@@ -22,7 +22,7 @@ const statusLabel = value => ({ running: T('协作进行中', 'Working'), needs_
   expired: T('已过期', 'Expired'), succeeded: T('执行成功', 'Succeeded'), confirmed: T('已确认', 'Confirmed'),
   received: T('已收到', 'Received'), prepared: T('已准备', 'Prepared'), dispatching: T('正在执行', 'Executing'),
   uncertain: T('结果待核实', 'Awaiting verification'), failed: T('执行失败', 'Failed'), waiting_peer: T('等待对方', 'Waiting for peer'),
-  complete: T('已提交进度', 'Progress saved'), working: T('工作中', 'Working') }[value] ?? value);
+  complete: T('已提交进度', 'Progress saved'), working: T('工作中', 'Working'), superseded: T('已更新', 'Superseded') }[value] ?? value);
 const taskTitle = type => ({ schedule: T('约一次学术讨论', 'Find a discussion time'), select_presentation: T('选择共同参加的报告', 'Choose a shared presentation'),
   prepare_discussion: T('共同筹备专题讨论', 'Prepare a joint discussion'), research_work: T('我的研究任务', 'My research task') }[type] ?? type);
 const actionTitle = action => action === 'reservation.submit' ? T('提交场地预约', 'Submit a venue reservation') : T('向对方分享资料', 'Share information with the peer');
@@ -208,20 +208,38 @@ function workStepView(step) {
     `<div class="research-work-body">${step.summary ? `<p class="research-work-summary"><span>${T('进度摘要', 'Progress summary')}</span>${esc(step.summary)}</p>` : ''}<div class="research-work-records">${stepRecords(step.entries)}</div></div>`)}</div>`;
 }
 function activityView(entry, direction = entry.direction ?? 'local') {
-  const narrative = describeActivity(entry, { lang: ui.lang, task: ui.state.tasks.find(task => task.id === entry.taskId), conference: ui.state.conference });
+  const authorization = authorizationHistory(entry, { entries: ui.state.activity, authorizations: ui.state.authorizations,
+    policyCandidates: ui.state.policyCandidates, owner: ui.owner });
+  const narrative = describeActivity(entry, { lang: ui.lang, task: ui.state.tasks.find(task => task.id === entry.taskId), conference: ui.state.conference, authorization });
   const route = entry.from && entry.to ? `${endpointTitle(entry.from)} → ${endpointTitle(entry.to)}` : endpointTitle(entry.to ?? entry.from);
   const audience = direction === 'outgoing' ? `${T('发给', 'To')} ${endpointTitle(entry.to ?? `owner:${entry.role}`)}`
     : direction === 'incoming' ? `${T('来自', 'From')} ${endpointTitle(entry.from ?? `owner:${entry.role}`)}` : T('进展更新', 'Progress update');
-  const awaiting = entry.kind === 'approval' && entry.status === 'pending';
+  const awaiting = authorization?.isRequest && authorization.status === 'pending';
   const decisionId = awaiting && entry.role === ui.owner ? entry.requestId ?? entry.details?.id : null;
-  return `<article class="research-chat-entry research-audience-message ${esc(direction)} kind-${esc(entry.kind)}" data-activity="${esc(entry.id)}" data-version="${contentVersion([ui.lang, entry, direction, narrative])}">
+  const resolved = authorization && authorization.status !== 'pending';
+  return `<article class="research-chat-entry research-audience-message ${esc(direction)} kind-${esc(entry.kind)} ${awaiting ? 'requires-owner-decision' : ''}" data-activity="${esc(entry.id)}" data-version="${contentVersion([ui.lang, entry, direction, narrative, authorization])}">
     <div class="research-chat-meta"><span class="research-recipient ${awaiting ? 'requires-approval' : ''}">${esc(audience)}</span><time datetime="${esc(entry.at)}">${esc(activityTime(entry.at))}</time></div>
     <strong class="research-chat-title">${esc(narrative.title)}</strong>
+    ${resolved ? `<span class="tag research-approval-status ${authorization.status === 'approved' ? 'good' : ''}">${esc(statusLabel(authorization.status))}</span>` : ''}
     ${narrative.body ? `<p class="research-chat-text">${esc(narrative.body)}</p>` : ''}
     ${entry.kind === 'response' ? `<small class="research-chat-private">${T('Agent 的说明；操作是否完成以回执核验为准。', 'Agent explanation; receipts establish whether an action completed.')}</small>` : ''}
     ${decisionId ? `<a class="research-inline-decision" href="#approval-${esc(decisionId)}">${T('查看内容并决定', 'Review and decide')} ↓</a>` : ''}
+    ${resolved && authorization.canReview ? approvalHistoryView(entry, authorization) : ''}
     ${entry.details || entry.name ? details(`activity-${entry.id}`, T('查看记录', 'View record'), `<p class="research-chat-route">${esc(route)}</p><pre>${pretty({ name: entry.name, status: entry.status, ...(!entry.redacted && entry.text ? { originalText: entry.text } : {}), ...(entry.redacted || entry.detailsOmitted || entry.details === undefined ? {} : { details: entry.details }) })}</pre>`) : ''}
   </article>`;
+}
+function approvalHistoryView(entry, history) {
+  const request = history.request, decision = history.decision, intent = request.intent;
+  const allowedFields = decision?.decision === 'deny' ? [] : decision?.fields ?? decision?.approvedIntent?.fields ?? [];
+  return details(`approval-history-${entry.id}`, T('查看当时的请求与决定', 'View the original request and decision'),
+    `<div class="research-approval-history"><h4>${T('当时的请求', 'Original request')}</h4>
+      <p>${esc(intent ? actionTitle(intent.action) : T('确认长期规则', 'Confirm a standing rule'))}${history.requestedAt ? ` · ${esc(timeText(history.requestedAt))}` : ''}</p>
+      ${intent ? `<p>${T('接收方', 'Recipient')}: ${esc(intent.recipient === 'conference-reservations' ? T('会议场地预约服务', 'Conference reservation service') : intent.recipient)} · ${T('用途', 'Purpose')}: ${esc(purposeTitle(intent.purpose))}</p>
+        <dl class="definition-list">${(intent.fields ?? []).map(field => `<dt>${esc(reviewFieldLabel(field))}</dt><dd class="research-review-value">${esc(reviewValue(intent.values?.[field]))}</dd>`).join('')}</dl>` : `<pre>${pretty(request.policy)}</pre>`}
+      <h4>${T('主人决定', 'Owner decision')}</h4><p><strong>${esc(statusLabel(history.status))}</strong>${decision?.at ? ` · ${esc(timeText(decision.at))}` : ''}</p>
+      ${history.status === 'denied' ? `<p>${T('这次请求未获许可。', 'No permission was granted for this request.')}</p>` : history.status === 'approved' ? `<p>${intent ? `${T('批准范围', 'Approved scope')}: ${esc(allowedFields.map(reviewFieldLabel).join(ui.lang === 'zh' ? '、' : ', '))}` : T('主人已确认这条长期规则。', 'The owner confirmed this standing rule.')}</p>` : ''}
+      ${details(`approval-history-proof-${entry.id}`, T('请求版本与原始记录', 'Request version and original records'), `<pre>${pretty({ requestId: history.requestId, revision: history.revision, request, decision })}</pre>`)}
+    </div>`);
 }
 function commandComposer(active) {
   if (ui.owner !== 'Alice') return `<div class="research-chat-composer-note">${T('共同任务由 Alice 的主人发起。你可以在这里观察双方的协作。', 'Alice’s owner initiates shared tasks. You can observe both agents here.')}</div>`;

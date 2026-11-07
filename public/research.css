@@ -131,7 +131,12 @@
 .research-chat-entry.incoming { align-self:flex-end; width:fit-content; max-width:88%; margin:0 0 0 24px; padding:12px 15px; border-radius:17px 17px 5px 17px; background:#30343c; color:#f4f5f7; }
 .research-chat-entry.outgoing { align-self:stretch; }
 .research-chat-entry.kind-result { border-top:1px solid var(--line); padding-top:16px; }
-.research-chat-entry.outgoing.kind-approval { border-left:3px solid var(--warn-ink); padding-left:12px; }
+.research-chat-entry.outgoing.kind-approval.requires-owner-decision { border-left:3px solid var(--warn-ink); padding-left:12px; }
+.research-approval-status { display:inline-block; margin:6px 0 0; }
+.research-approval-history { border-left:2px solid var(--line); margin:10px 0 0; padding:2px 12px 12px; }
+.research-approval-history h4 { margin:14px 0 6px; font-size:13px; }
+.research-approval-history p { margin:6px 0; font-size:12px; line-height:1.7; }
+.research-approval-history .definition-list { font-size:12px; }
 .research-chat-meta { display:flex; gap:12px; justify-content:space-between; font-size:10px; color:var(--muted); margin-bottom:5px; }
 .research-chat-title { font-size:13px; line-height:1.45; }
 .research-chat-route { font-size:10px; color:var(--muted); margin-top:5px; display:flex; align-items:center; gap:5px; flex-wrap:wrap; }

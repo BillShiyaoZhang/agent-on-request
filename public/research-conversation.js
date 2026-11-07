@@ -83,7 +83,42 @@ function resultDescription(result, lang) {
   }
 }
 
-export function describeActivity(entry = {}, { lang = 'zh', task, conference } = {}) {
+// Resolve the state of the exact request shown in an immutable conversation
+// event. A renewed request can reuse an ID, so decisions must match its revision.
+export function authorizationHistory(entry, { entries = [], authorizations = {}, policyCandidates = [], owner } = {}) {
+  if (entry?.kind !== 'approval') return null;
+  const requestId = entry.requestId ?? entry.details?.requestId ?? entry.details?.id;
+  if (!requestId) return null;
+  const idOf = item => item.requestId ?? item.details?.requestId ?? item.details?.id;
+  const isRequest = item => !text(item.from).startsWith('owner:') && !['owner_decision', 'owner_policy_decision'].includes(item.name);
+  const events = scoped(entries, { id: entry.taskId }).filter(item => item.kind === 'approval'
+    && item.role === entry.role && idOf(item) === requestId);
+  const original = isRequest(entry) ? entry : events.findLast(item => isRequest(item) && item.sequence <= entry.sequence);
+  const revision = original?.revision ?? original?.details?.revision;
+  const laterRequest = original && events.find(item => isRequest(item) && item.sequence > original.sequence);
+  const decisionEvent = isRequest(entry) ? events.find(item => !isRequest(item)
+    && item.sequence > entry.sequence && (!laterRequest || item.sequence < laterRequest.sequence)) : entry;
+  const own = !entry.redacted && (!owner || owner === entry.role);
+  const ownerRole = value => text(value).split(':').at(-1);
+  const ledger = own && (!authorizations.owner || ownerRole(authorizations.owner) === entry.role) ? authorizations : {};
+  const current = list(ledger.requests).find(item => item.id === requestId && item.intent?.taskId === entry.taskId);
+  const policy = own ? list(policyCandidates).find(item => item.id === requestId && item.taskId === entry.taskId) : null;
+  const decision = current && list(ledger.decisions).find(item => item.requestId === requestId
+    && (!item.owner || ownerRole(item.owner) === entry.role) && item.requestRevision === revision
+    && (!original?.details?.payloadHash || item.originalPayloadHash === original.details.payloadHash));
+  const currentMatches = current && (current.revision === revision || decision && current.decisionId === decision.id);
+  let status = decision ? decision.decision === 'deny' ? 'denied' : 'approved'
+    : decisionEvent?.status ?? policy?.status ?? (currentMatches ? current.status : null) ?? entry.status;
+  if (status === 'pending' && current && current.revision > revision) status = 'superseded';
+  const request = own ? original?.details ?? (currentMatches ? current : null) ?? policy ?? null : null;
+  const visibleDecision = own ? decision ?? (decisionEvent && !decisionEvent.redacted
+    ? { ...decisionEvent.details, at: decisionEvent.at, status: decisionEvent.status } : null)
+    ?? (policy?.decidedAt ? { decision: policy.status === 'denied' ? 'deny' : 'allow', at: policy.decidedAt } : null) : null;
+  return { requestId, revision, status, isRequest: isRequest(entry), request, decision: visibleDecision,
+    canReview: Boolean(own && request), requestedAt: original?.at ?? request?.createdAt };
+}
+
+export function describeActivity(entry = {}, { lang = 'zh', task, conference, authorization } = {}) {
   const T = language(lang), data = entry.redacted ? {} : entry.details ?? {}, from = text(entry.from), to = text(entry.to);
   if (entry.kind === 'command') return { title: T('主人交办任务', 'Owner instruction'),
     body: !entry.redacted && text(entry.text) || T('主人已向自己的 agent 发出指令，原文仅主人可见。', 'The owner sent an instruction to their agent. Its text is private to the owner.') };
@@ -155,14 +190,28 @@ export function describeActivity(entry = {}, { lang = 'zh', task, conference } =
     return { title: T('收到协作信息', 'Collaboration information'), body: T('这条信息已记入双方的协作记录，可展开查看原始内容。', 'This information is recorded in the collaboration history. Expand to inspect the original content.') };
   }
   if (entry.kind === 'approval') {
-    if (entry.status === 'pending') {
+    const status = authorization?.status ?? entry.status;
+    if (authorization?.isRequest && status !== 'pending') {
+      const states = { denied: ['已拒绝', 'denied'], approved: ['已批准', 'approved'], expired: ['已过期', 'expired'],
+        revoked: ['已撤销', 'revoked'], superseded: ['已更新', 'superseded'] };
+      const label = states[status] ?? ['已处理', 'resolved'];
+      const intent = authorization.request?.intent ?? data.intent;
+      const policy = entry.name === 'authorization_propose_policy';
+      return { title: T(`授权请求${label[0]}`, `Authorization request ${label[1]}`), body: entry.redacted
+        ? T(`${entry.role} 的主人已处理这次请求；具体内容仅在本方主人窗口可见。`, `${entry.role}’s owner resolved this request. Its details remain private to that owner.`)
+        : status === 'denied' ? policy ? T('主人已拒绝这条长期规则提议，规则没有生效。', 'The owner declined this standing-rule proposal. The rule did not take effect.')
+          : T(`Agent 请求${requestAction(intent, lang)}。主人已拒绝，这次请求未获许可。`, `The agent requested permission to ${requestAction(intent, lang)}. The owner declined this request; no permission was granted.`)
+          : status === 'approved' ? T('主人已批准这次请求。可展开查看当时的请求与批准范围；实际执行结果以回执为准。', 'The owner approved this request. Expand to inspect the original request and approved scope; receipts establish the execution result.')
+            : T('这版请求已结束，不再等待主人决定。可展开查看当时的请求与记录。', 'This request revision is closed and is no longer awaiting an owner decision. Expand to inspect its recorded details.') };
+    }
+    if (status === 'pending') {
       const policy = entry.name === 'authorization_propose_policy';
       return { title: T('需要主人授权', 'Owner authorization needed'), body: entry.redacted
         ? T(`${entry.role} 正在等待自己的主人决定；待审内容保留在本方窗口。`, `${entry.role} is waiting for their owner’s decision. Pending content stays in that owner’s window.`)
         : policy ? T('Agent 提议了一条长期规则，需要主人确认后才会生效。', 'The agent proposed a standing rule. It takes effect only after owner confirmation.')
           : T(`Agent 请求${requestAction(data.intent, lang)}。这一步正在等待主人决定，尚未执行。`, `The agent requests permission to ${requestAction(data.intent, lang)}. It is waiting for the owner’s decision and has not executed this step.`) };
     }
-    const denied = entry.status === 'denied' || data.decision === 'deny';
+    const denied = status === 'denied' || data.decision === 'deny';
     if (denied) return { title: T('主人拒绝了这次请求', 'Owner declined this request'), body: T('这次请求没有获得许可。Agent 会按决定继续或停止，不会把拒绝当作批准。', 'This request did not receive permission. The agent will continue or stop in line with the decision.') };
     if (entry.name === 'owner_policy_decision') return { title: T('主人确认了长期规则', 'Owner confirmed the standing rule'), body: T('规则已经记录；每次执行仍会检查用途、范围和有效状态。', 'The rule was recorded. Each execution still checks its purpose, scope and current validity.') };
     const fields = fieldsText(data.approvedIntent?.fields, lang);
