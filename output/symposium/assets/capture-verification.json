@@ -1,0 +1,45 @@
+{
+  "mode": "controlled",
+  "synthetic": true,
+  "tasks": [
+    {
+      "type": "schedule",
+      "status": "completed",
+      "outcome": "common_time_found"
+    },
+    {
+      "type": "select_presentation",
+      "status": "completed",
+      "outcome": "presentation_selected"
+    },
+    {
+      "type": "prepare_discussion",
+      "status": "completed",
+      "outcome": "discussion_prepared"
+    }
+  ],
+  "presentation": "R3",
+  "mappings": [
+    {
+      "source": "alice:HumanReviewDecision",
+      "target": "bob:UserReviewDecision",
+      "relation": "conditional"
+    },
+    {
+      "source": "alice:ResearchTalk",
+      "target": "bob:PresentationActivity",
+      "relation": "conditional"
+    }
+  ],
+  "privateMaterialDeliveries": [
+    {
+      "from": "Alice",
+      "to": "Bob",
+      "fields": [
+        "summary"
+      ],
+      "receipt": "received"
+    }
+  ],
+  "booking": "confirmed"
+}

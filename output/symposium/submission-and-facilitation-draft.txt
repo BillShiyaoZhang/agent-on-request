@@ -1,0 +1,191 @@
+AGENT ON REQUEST — SUBMISSION AND FACILITATION DRAFT
+English submission copy + 中文现场备讲
+Draft date: 11 November 2026
+Scope: the current three-scenario research collaboration at /research.html.
+Author and affiliation: Shiyao Zhang, Xi’an Jiaotong-Liverpool University [confirm submission form].
+
+1. TITLE AND ONE-SENTENCE DESCRIPTION
+
+Agent on Request: Negotiating Meaning and Permission Across Personal Assistants
+
+An interactive research prototype in which visitors inspect how two personal assistants coordinate across different concepts, share bounded information and seek their owners’ authorization for consequential actions.
+
+Suggested keywords: personal assistants; semantic interoperability; ontology alignment; human control; authorization; multi-agent collaboration.
+
+2. SHORT ABSTRACT (152 WORDS)
+
+Agent on Request explores how personal assistants can collaborate across differences in meaning and permission. Visitors follow two fictional researchers: Alice works on knowledge graphs and Bob on human–computer interaction. Each assistant starts with its own ontology, research knowledge, skills and authorization rules, and learns about its peer through actual exchanges. Across three connected tasks—arranging a discussion, choosing a presentation and preparing a meeting—visitors inspect how definitions and correspondence proposals shape coordination. The same label, “alignment,” illustrates why shared wording need not imply shared meaning. Visitors can approve, narrow or refuse requests to disclose private materials and separately decide whether to submit a simulated room booking. Received content, accepted interpretations and execution receipts provide evidence for reviewing outcomes. The prototype offers a reproducible Guided mode and a native agent mode. This work invites discussion of how semantic negotiation and inspectable authorization should support human control; it does not report a user study.
+
+3. PROJECT INTERPRETATION (APPROXIMATELY 300 WORDS)
+
+How can personal assistants coordinate a shared task when their owners use different concepts and impose different boundaries on disclosure and action? Agent on Request makes this question tangible through a fictional research collaboration between Alice, a semantic technologies researcher, and Bob, a human–computer interaction researcher.
+
+Each assistant begins with its own ontology, knowledge, calendar, materials, skills and authorization rules. The peer’s definitions and information arrive through actual communication. Three connected scenarios turn differences into practical decisions: exchange scoped availability to arrange a discussion; examine definitions and correspondence proposals to choose a presentation; then prepare materials and an agenda, requesting authorization for private disclosure and simulated venue booking.
+
+The semantic example centres on “alignment.” Alice’s research concerns correspondences between ontology terms; Bob’s concerns agreement between people’s mental models and an assistant’s capabilities. Shared wording is insufficient evidence of equivalence. More specific connections, such as human review of semantic mappings as a form of user control, can support collaboration while preserving the distinction.
+
+Visitors represent Alice’s owner, reviewing her private-material disclosure and final booking form separately. Bob has an independent owner window; his owner decides only if a request actually arises there. The current Guided path shares Bob’s public introduction without requiring a private-material approval from Bob. Accepted interpretations, actual receptions and execution receipts provide different evidence. Agreement about meaning does not itself grant permission to disclose or act.
+
+Guided mode executes a reproducible tool workflow with deterministic text-based correspondence heuristics. Native mode uses independent Hermes runtimes and domain tools; its sequence and wording can vary. All researchers, materials, calendars and booking services are fictional. This prototype demonstrates inspectable coordination mechanisms rather than unrestricted ontology matching, a formal privacy guarantee or measured improvements in user understanding. Symposium discussion will help refine what evidence owners need to review meaning, scope and execution.
+
+4. CORE MESSAGES FOR FIGURE CAPTIONS
+
+Figure A — Independent starting points
+Two assistants, two research perspectives. Each begins with its own knowledge, concepts, skills and rules.
+
+Figure B — Same word, different meaning
+“Alignment” can refer to ontology correspondences or to a person’s understanding of an assistant. Compare definitions before treating terms as equivalent.
+
+Figure C — Meaning, permission, outcome
+An accepted interpretation establishes how information is understood. Authorization permits a bounded disclosure or action. Receipts establish what was delivered or executed.
+
+Figure D — Three connected tasks
+Coordinate time → Choose a presentation → Prepare a discussion. Knowledge and rules continue within this visitor’s experience; the next visitor starts with a new identity workspace.
+
+Figure E — You decide the boundary
+Review the recipient, purpose and exact content. Approve, narrow or refuse. Review the complete simulated booking form separately.
+
+Illustration note: use real screenshots from the current /research.html workflow. Label explanatory diagrams as diagrams. Do not use the older single-round calendar poster as evidence for the new workflow. A depiction of the current seed’s shared presentation is an example, not a guaranteed Native outcome.
+
+5. 3–5 分钟中文主持脚本
+
+时长说明：3–5 分钟是展位策展与排练目标，不是测得的任务完成时间。Native 工具与服务等待可能延长体验；观众可随时停止，也可只体验一个场景。以画面实际状态为准，不强行按时间催促授权。
+
+开场前准备：活动方需先确定并展示本场运行记录的用途、可接触人员、保留／删除安排，以及是否另行征求研究反馈或开展参与者研究。新版会持久化运行记录；不可承诺“未勾选研究同意就不保存”。以下台词中的记录说明要与已确定的现场告知一致。人物、资料、日程和预约均为虚构；请观众仅使用演示数据。
+
+0:00–0:30｜进入角色
+画面：项目总览图／两位研究者。
+台词：“这里有两位研究者的个人助理。Alice 研究知识图谱，Bob 研究人机交互。它们各有自己的知识、概念和授权规则。你代表 Alice 的主人。Bob 也有独立的主人窗口，只有他本方实际出现请求时才需要他的主人决定。今天可以看它们如何协作，也可以决定哪些请求不应获准。演示会保存本场运行记录，具体处理安排请先看现场说明。”
+操作：点“开始一位新观众的体验”；可选打开“Bob 主人窗口”观察 Bob 的本方知识与授权。短场次优先 Guided。让观众知道当前是哪种模式；不把 Bob 审批当作必经步骤。
+
+0:30–1:10｜约讨论：先观察范围
+画面：协作任务 → 约讨论。
+台词：“先请它们找共同的三十分钟。注意这里交换的是任务所需的有限忙闲，不是把完整日历标题和备注交给对方。你可以展开已交付资料，核对实际发送了什么。”
+操作：启动第一个任务，随实际状态展开一次交付内容。当前种子的共同时间可作为例子展示，不要求观众记住具体日期。
+
+1:10–2:10｜选报告：抓住同词异义
+画面：选报告 → 定义／对应／结果证据。
+台词：“两个人都谈 alignment，但 Alice 指本体术语之间的对应，Bob 指人对助理的理解是否符合助理能力。它们不能因为出现同一个词，就认定研究兴趣相同。请看看它们实际交换的定义，以及接受了什么关系。更具体的交集可能是：让人审阅系统提出的语义映射。”
+操作：完成前一任务后启动第二个任务。指向一条实际记录的定义或对应；没有出现的关系不要补讲成已发生。
+可选提问：“你会接受这条关系吗？还需要什么证据？”
+
+2:10–3:35｜筹备讨论：让观众做一个真实决定
+画面：筹备讨论 → 私有材料请求。
+台词：“现在它们准备材料和议程。助理可以提出方案，但这份私有材料要由主人决定。请看接收方、用途和确切内容。你可以只保留摘要，也可以拒绝。这里没有要求你尽量多分享。”
+操作：当前 Guided 场景请观众审阅 Alice 的私有材料，批准、收窄或拒绝；Bob 发送公开介绍，不必等待或点击 Bob 的私有审批。Native 若在 Bob 本方实际产生具体请求，才由 Bob 的主人在独立入口处理。跟随结果查看对方实际收到的字段。若拒绝，展示公开材料继续或当前实际状态，不把拒绝称作失败。
+
+3:35–4:20｜独立批准预约
+画面：最终预约表单与执行回执。
+台词：“同意解释概念，或者同意分享摘要，都不等于同意预约。这里要重新看完整表单，再决定是否提交。这是模拟服务。我们根据实际回执判断是否预约，而不是只看助理说‘已完成’。”
+操作：让观众批准或拒绝最终表单。拒绝时展示议程／草稿，并明确“未提交预约”。
+
+4:20–5:00｜收束与讨论
+画面：一条接受的对应、一条实际交付、一次操作结果；有余裕再看授权记忆。
+台词：“这里有三个不同问题：它们怎样理解；主人允许什么；最终发生了什么。哪个证据最能帮助你判断？如果只留下一个需要你审阅的环节，你会选哪个？”
+收尾：不将随口反馈默认视作研究数据。若活动已安排正式反馈，依照另外确定的说明进行。为下一位新建身份，而非复用当前观众的工作区。
+
+3 分钟短版：开场 20 秒；用已准备的截图解释约讨论 20 秒；现场运行选报告约 60 秒；现场做一次材料披露决定约 60 秒；用当前结果或标注清楚的截图解释独立预约与回执 20 秒。截图部分明确是预先捕获的演示材料。这个时长同样是排练目标。
+
+6. 30-SECOND ENGLISH INTRODUCTION
+
+Meet two personal assistants: Alice’s supports semantic technologies research; Bob’s supports human–computer interaction. They start with different knowledge, concepts and rules. You will see them arrange a discussion, compare what “alignment” means, and prepare materials. You can approve, narrow or refuse a disclosure request, then decide separately whether to submit a simulated booking. Watch three things: what they mean, what you permit, and what the receipts show actually happened.
+
+Speaking note: the thirty-second label is a rehearsal target. Introduce the applicable recording notice separately before interaction.
+
+7. 90-SECOND ENGLISH WALKTHROUGH / VIDEO VOICEOVER
+
+This is Agent on Request, an interactive prototype about meaning and permission in personal-assistant collaboration. All researchers, materials, calendars and bookings in the demo are fictional.
+
+Alice studies knowledge graphs and semantic technologies. Bob studies human–computer interaction. Their assistants begin with separate workspaces: their own concepts, research evidence, skills and authorization rules. They learn about one another through actual exchanges.
+
+The first task is to arrange a discussion using scoped availability. The next is to choose a presentation. Here, the word “alignment” exposes a difference: Alice means correspondences between ontology terms, while Bob means the relationship between someone’s mental model and an assistant’s real capabilities. Definitions and correspondence proposals let us inspect a more specific connection without assuming equivalence.
+
+The third task prepares discussion materials and an agenda. In this Guided path, Alice’s owner reviews a private-material request and may approve, narrow or refuse it; Bob shares a public introduction. Bob’s independent owner decides only if a request actually arises on his side. The peer receives only permitted, delivered content. Alice’s owner separately reviews the complete venue-booking form.
+
+The interface lets us distinguish an accepted interpretation, a permission and an execution receipt. Guided mode offers a reproducible workflow; native agent runs may vary. This is a research prototype for discussing inspectable coordination, rather than evidence of improved understanding from a user study.
+
+Production notes: match each sentence to actual captured states. Mark prerecorded material and mode. If the chosen branch refuses disclosure or booking, narrate that outcome rather than editing it into success. Ninety seconds is a production target, not a measured completion time.
+
+8. DISCUSSION PROMPTS
+
+• What evidence would convince you that two assistants have understood a concept sufficiently for this task?
+• When should an assistant ask its owner, and when should an existing rule be sufficient?
+• How should an interface distinguish “we agreed on the meaning,” “sharing is permitted” and “the action happened”?
+• If a request is refused, what information should the assistant preserve so that collaboration can continue?
+
+Optional feedback-card prompt: “One point where I needed more evidence was: ______.”
+Preparation note: use such cards only after deciding how feedback is introduced, collected, used and handled. This draft does not establish research approval or a retention period.
+
+9. EXHIBITION SETUP AND ACCESSIBILITY
+
+Recommended setup:
+• One laptop running the current demo, a pointing device, power supply and a stable place to sit or stand.
+• Optionally, a second display or device for Bob’s independent owner window. One laptop with clearly separated windows also works. Bob’s window is useful for inspection and for any actual Bob-side request, not a mandatory private-approval step in Guided.
+• A visible project-explanation sheet and interaction-guide sheet. Use readable screen crops, numbered callouts and brief captions rather than dense JSON.
+• A local copy of the project explanation, guide, screenshots and captioned walkthrough for fallback.
+• Network access if using Native mode; confirm provider access and the intended deployment before the event. Guided local rehearsal does not call an external model.
+
+Accessibility and facilitation:
+• Keep text legible at the actual print size and screen distance; do not rely on colour alone to identify owners or states.
+• Offer English/Chinese UI switching and a spoken walkthrough. The underlying fictional source materials or live output may retain their original language.
+• Provide captions for the walkthrough. Let visitors point to a choice or ask the facilitator to operate it.
+• Offer a watch-only route; do not make disclosing more information the implied “correct” interaction.
+• If displaying a QR code, first confirm its actual destination and access. A localhost address is useful on the demo machine but is not a visitor-accessible public URL.
+
+10. OFFLINE FALLBACK, RECOVERY AND NEXT VISITOR
+
+Before opening:
+1) Rehearse all three scenarios in the intended mode. Confirm Alice’s owner controls, language, actual receipt inspection and one narrowed or refused request. If using Bob’s owner window, confirm its independent access; do not assume a Bob-side private approval will occur.
+2) Save labelled screenshots and a captioned walkthrough from that rehearsal. Avoid exposing credentials or incidental personal data in captures.
+3) Prepare a separate Guided local instance if Native service access is unavailable. Confirm the Guided start and complete flow before relying on it.
+
+During a service interruption:
+• Report the visible state: waiting, paused, partial or unknown. A request or model completion text is not proof of execution.
+• Use “Verify & resume” when available to reconcile the existing operation. For an uncertain booking result, inspect its existing operation and receipt; do not create a second booking merely to make the demo proceed.
+• If moving to Guided, label the change and begin a fresh experience; do not present it as continuation of the failed Native run.
+• If the app is unavailable, use labelled screenshots/video and a printed approve/narrow/refuse choice. Call it a walkthrough, not a live execution; no paper choice is submitted to the system.
+
+For the next visitor:
+1) Finish explaining the current result and any pending operation. If a Bob owner window is open, close the old one after checking that no unresolved operation is being silently repeated.
+2) In Alice’s window, use “Next visitor · new identity.” This creates a fresh experience; a browser refresh alone does not.
+3) Confirm a different identity workspace and fresh task/authorization state; if using a Bob owner window, open it for that new workspace.
+4) Check mode and language before the next introduction.
+
+Reset explanation: the new experience begins from verified seeds with new identities, knowledge-graph namespaces, run sessions, authorization ledgers and simulated booking state. It does not delete the previous experience’s records. Within one experience, knowledge and standing rules persist across tasks. Revocation stops future use; it does not erase already delivered information or receipts.
+
+11. RECORDING AND RESEARCH PREPARATION — INTERNAL DRAFT NOTE
+
+The current research-collaboration implementation persists experience records, including role workspaces, messages, drafts, task state and authorization history. Native deployment also involves its configured runtime, KG and model-service arrangements. Do not copy the older single-round page’s optional-research-recording promise into this material.
+
+Before the event, determine and communicate:
+• Whether the session is exhibition only, solicits product feedback, or recruits people into a research study.
+• What the implemented deployment records, where it is stored, who can access it, and the actual handling/retention/deletion process.
+• Whether interaction observations, feedback cards, photographs, audio or video will be collected in addition to system records.
+• Any information and consent process, institutional review, organizer requirements and contact details that actually apply.
+
+These are preparation items to be settled with the event and institution. This draft supplies no claim of IRB/ethics approval, no consent mechanism for the new workflow and no invented retention period. Until settled, keep the submission language to “a fictional interactive research prototype” and describe intended research evaluation as future work rather than completed evidence.
+
+12. ORGANIZER REQUIREMENTS TO CONFIRM
+
+• Symposium name, submission deadline and exact field names: “interactive presentation materials” / “project interpretations.”
+• Required language, abstract/interpretation word limits and whether references count.
+• Required formats, page count, page size/orientation, file-size cap, accessibility requirements and naming convention.
+• Whether a poster, image sequence, walkthrough video, live URL, source archive or supplementary documentation is required or merely optional.
+• Session length, visitor throughput, station/table/display allocation, power, network and whether two devices are permitted.
+• Author names/affiliations, research stage, supervisor/project credit and permitted institutional marks.
+• Whether images/video must be anonymized; permitted capture and feedback arrangements.
+• Public versus reviewer-only access, publication/license requirements and embargoes.
+• Final contact/project link, if included. Add a QR code only after verifying the destination.
+
+13. REPOSITORY SOURCES USED FOR THIS DRAFT
+
+README.md — current entry point and distinction from the retained single-round demo.
+docs/research-collaboration.md — independent workspaces, tool exchanges, authorization, three scenarios, persistence and recovery.
+public/research.html; public/research.js — current UI labels, owner windows, mode selection and new visitor action.
+src/research-engine.mjs — actual Guided preparation path: Alice private-material request, Bob public introduction and Alice booking review; Bob private approval is not a mandatory step.
+workspaces/alice/README.md; workspaces/bob/README.md — independent seeds and fresh-experience behavior.
+workspaces/alice/ontology.json; workspaces/bob/ontology.json — the two meanings of alignment and related concepts.
+demo/environment/conference.json — fictional public programme and simulated venues.
+demo/acceptance/mappings.json — interpretation sanity check only; not an agent answer source.
+
+Scope note: docs/ontology-dialogue.md, docs/research.md and output/pdf/academic-poster-a0.pdf describe substantial parts of the retained earlier demo. Do not transfer their exact single-round protocol, candidate mapping or consent-gate claims into the new materials without checking the current implementation.

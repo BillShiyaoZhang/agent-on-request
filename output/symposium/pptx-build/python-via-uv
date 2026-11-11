@@ -1,0 +1,3 @@
+#!/bin/sh
+export UV_CACHE_DIR=/private/tmp/agent-symposium-uv
+exec /Users/shiyaozhang/.local/bin/uv run --no-project --python /Users/shiyaozhang/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3 python "$@"
